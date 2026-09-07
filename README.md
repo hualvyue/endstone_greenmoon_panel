@@ -18,7 +18,7 @@ GreenMoon 面板（发行名 `greenmoon-panel`）是一个基于 Endstone 的我
 
 1. 将发行包放入服务端的 `plugins/` 目录。
 2. 确认环境满足 `Python >= 3.11` 且已安装 `endstone`。
-3. 启动服务器后，插件会将 `admin_web` 前端资源解压到插件数据目录 `plugins/greenmoon-panel/web`。
+3. 启动服务器后，插件会自动创建 `greenmoon_panel` 文件夹，把离线依赖放入 `greenmoon_panel/libs` 文件夹。
 4. 通过浏览器访问面板地址，在「机器人管理」「云黑名单」等板块完成配置。
 
 ## AI 辅助声明
