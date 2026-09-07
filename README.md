@@ -33,7 +33,7 @@ GreenMoon 面板（发行名 `greenmoon-panel`）是一个基于 Endstone 的我
 
 | 项目 | 用途 | 许可证 | 版权声明 |
 | --- | --- | --- | --- |
-| [LumenBridge（明流桥）](https://github.com/gxh6) | 多适配器/机器人卡片架构的移植与设计对齐 | [MIT](https://www.opensource.org/licenses/mit-license.php) | Copyright (c) 2026 LumenBridge contributors |
+| [LumenBridge（明流桥）](https://github.com/gxh6438/LumenBridge) | 多适配器/机器人卡片架构的移植与设计对齐 | [MIT](https://www.opensource.org/licenses/mit-license.php) | Copyright (c) 2026 LumenBridge contributors |
 | [Endstone](https://endstone.dev) | 插件开发框架（SDK 依赖） | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | The Endstone Authors |
 | [requests](https://requests.readthedocs.io/) | 云黑接口等网络请求依赖 | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | Kenneth Reitz |
 | [websockets](https://websockets.readthedocs.io/) | WebSocket 通信（参考项目中捆绑） | [BSD-3-Clause](https://opensource.org/licenses/BSD-3-Clause) | Aymeric Augustin |
