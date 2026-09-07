@@ -1,0 +1,2 @@
+# endstone_greenmoon_panel
+一款超越LumenBridge而且新手极度友好的endstone面板插件。
