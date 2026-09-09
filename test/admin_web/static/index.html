@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的 Minecraft 服务器</title>
+    <style>
+        /* 与 GreenMoon 面板共用同一套设计令牌（首页为独立页面，内联一份） */
+        :root {
+            color-scheme: dark;
+            --gm-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+            --gm-page-bg: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460, #533483);
+            --gm-glass: rgba(255, 255, 255, 0.10);
+            --gm-glass-hover: rgba(255, 255, 255, 0.18);
+            --gm-surface: rgba(20, 26, 46, 0.45);
+            --gm-border: rgba(255, 255, 255, 0.18);
+            --gm-border-strong: rgba(255, 255, 255, 0.28);
+            --gm-text: #ffffff;
+            --gm-text-dim: rgba(255, 255, 255, 0.78);
+            --gm-text-mute: rgba(255, 255, 255, 0.55);
+            --gm-heading: #bfe3ff;
+            --gm-success: #4ef09a;
+            --gm-ok-bg: rgba(46, 204, 113, 0.32);
+            --gm-ok-fg: #7dffb0;
+            --gm-shadow: 0 10px 34px rgba(0, 0, 0, 0.25);
+            --gm-shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.40);
+            --gm-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.18);
+            --gm-r-md: 14px;
+            --gm-r-lg: 18px;
+            --gm-r-xl: 26px;
+        }
+        :root[data-theme="light"] {
+            color-scheme: light;
+            --gm-page-bg: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+            --gm-glass: rgba(255, 255, 255, 0.55);
+            --gm-glass-hover: rgba(255, 255, 255, 0.72);
+            --gm-surface: rgba(255, 255, 255, 0.58);
+            --gm-border: rgba(15, 30, 60, 0.14);
+            --gm-border-strong: rgba(15, 30, 60, 0.22);
+            --gm-text: #16202e;
+            --gm-text-dim: rgba(22, 32, 46, 0.74);
+            --gm-text-mute: rgba(22, 32, 46, 0.52);
+            --gm-heading: #0a2540;
+            --gm-success: #0e9f6e;
+            --gm-ok-bg: rgba(18, 150, 105, 0.16);
+            --gm-ok-fg: #0b7a55;
+            --gm-shadow: 0 8px 24px rgba(20, 40, 80, 0.10);
+            --gm-shadow-lg: 0 16px 44px rgba(20, 40, 80, 0.18);
+            --gm-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.9);
+        }
+        @media (prefers-color-scheme: light) {
+            :root:not([data-theme]) {
+                color-scheme: light;
+                --gm-page-bg: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+                --gm-glass: rgba(255, 255, 255, 0.55);
+                --gm-glass-hover: rgba(255, 255, 255, 0.72);
+                --gm-surface: rgba(255, 255, 255, 0.58);
+                --gm-border: rgba(15, 30, 60, 0.14);
+                --gm-border-strong: rgba(15, 30, 60, 0.22);
+                --gm-text: #16202e;
+                --gm-text-dim: rgba(22, 32, 46, 0.74);
+                --gm-text-mute: rgba(22, 32, 46, 0.52);
+                --gm-heading: #0a2540;
+                --gm-success: #0e9f6e;
+                --gm-ok-bg: rgba(18, 150, 105, 0.16);
+                --gm-ok-fg: #0b7a55;
+                --gm-shadow: 0 8px 24px rgba(20, 40, 80, 0.10);
+                --gm-shadow-lg: 0 16px 44px rgba(20, 40, 80, 0.18);
+                --gm-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.9);
+            }
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @keyframes gmGradientMove {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        body {
+            font-family: var(--gm-font);
+            color: var(--gm-text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: var(--gm-page-bg);
+            background-size: 400% 400%;
+            background-attachment: fixed;
+            animation: gmGradientMove 24s ease infinite;
+            -webkit-font-smoothing: antialiased;
+        }
+        @media (prefers-reduced-motion: reduce) { body { animation: none; } }
+
+        .hero {
+            width: 100%;
+            max-width: 520px;
+            background: var(--gm-surface);
+            backdrop-filter: blur(22px) saturate(160%);
+            -webkit-backdrop-filter: blur(22px) saturate(160%);
+            border: 1px solid var(--gm-border-strong);
+            border-radius: var(--gm-r-xl);
+            padding: 40px 32px;
+            box-shadow: var(--gm-shadow-lg), var(--gm-highlight);
+            text-align: center;
+        }
+        .hero-emoji { font-size: 46px; line-height: 1; margin-bottom: 14px; }
+        .hero h1 { font-size: 1.6em; color: var(--gm-heading); letter-spacing: -0.4px; }
+        .hero .sub { color: var(--gm-text-mute); font-size: 14px; margin-top: 8px; }
+
+        .state {
+            display: inline-flex; align-items: center; gap: 8px;
+            margin-top: 18px; padding: 7px 16px;
+            border-radius: 999px; font-size: 13px; font-weight: 600;
+            background: var(--gm-ok-bg); color: var(--gm-ok-fg);
+            border: 1px solid currentColor;
+        }
+        .state .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gm-success); }
+
+        .links { display: grid; gap: 12px; margin-top: 26px; }
+        @media (min-width: 480px) { .links { grid-template-columns: 1fr 1fr; } }
+        .link {
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+            padding: 18px 14px;
+            background: var(--gm-glass);
+            border: 1px solid var(--gm-border);
+            border-radius: var(--gm-r-lg);
+            color: var(--gm-text);
+            text-decoration: none;
+            font-weight: 600;
+            transition: background .2s ease, transform .1s ease;
+        }
+        .link:hover { background: var(--gm-glass-hover); }
+        .link:active { transform: scale(.97); }
+        .link .icon { font-size: 24px; }
+        .link .desc { font-size: 12px; font-weight: 400; color: var(--gm-text-mute); }
+
+        .foot { margin-top: 22px; font-size: 12px; color: var(--gm-text-mute); }
+        .theme-toggle {
+            margin-top: 16px;
+            background: var(--gm-glass); border: 1px solid var(--gm-border);
+            color: var(--gm-text); border-radius: 999px;
+            padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+            font-family: inherit;
+        }
+        .theme-toggle:hover { background: var(--gm-glass-hover); }
+        @media (max-width: 480px) {
+            .hero { padding: 30px 20px; border-radius: var(--gm-r-lg); }
+            .hero h1 { font-size: 1.35em; }
+        }
+    </style>
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('gm-theme');
+                if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            } catch (e) {}
+        })();
+    </script>
+</head>
+<body>
+    <main class="hero">
+        <div class="hero-emoji">🎮</div>
+        <h1>欢迎来到我的 Minecraft 服务器</h1>
+        <p class="sub">基岩版 · 由 GreenMoon 驱动</p>
+
+        <div class="state"><span class="dot"></span>服务器运行中</div>
+
+        <nav class="links">
+            <a class="link" href="whitelist">
+                <span class="icon">📝</span>
+                <span>申请白名单</span>
+                <span class="desc">提交游戏名即可等待审核</span>
+            </a>
+            <a class="link" href="admin">
+                <span class="icon">⚙️</span>
+                <span>管理面板</span>
+                <span class="desc">需要管理员账号</span>
+            </a>
+        </nav>
+
+        <button class="theme-toggle" type="button" id="theme-toggle" aria-label="切换深浅主题">🌙 深色</button>
+        <p class="foot">使用 GreenMoon 面板 · 页面支持深浅双主题</p>
+    </main>
+
+    <script>
+        function gmCurrentTheme() {
+            var attr = document.documentElement.getAttribute('data-theme');
+            if (attr === 'light' || attr === 'dark') return attr;
+            return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+        }
+        function gmSyncThemeBtn() {
+            var b = document.getElementById('theme-toggle');
+            if (b) b.textContent = gmCurrentTheme() === 'light' ? '☀️ 浅色' : '🌙 深色';
+        }
+        function gmToggleTheme() {
+            var next = gmCurrentTheme() === 'light' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', next);
+            try { localStorage.setItem('gm-theme', next); } catch (e) {}
+            gmSyncThemeBtn();
+        }
+        document.getElementById('theme-toggle').addEventListener('click', gmToggleTheme);
+        gmSyncThemeBtn();
+    </script>
+</body>
+</html>

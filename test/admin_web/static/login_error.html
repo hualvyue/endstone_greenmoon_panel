@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录失败</title>
+<!--__GM_CSS__-->
+</head>
+<body>
+<div class="card">
+  <div class="badge"><span>401</span></div>
+  <div class="title">登录失败</div>
+  <p class="desc">账号或密码不正确，或会话已失效被踢出。<br>请核对凭据后重新登录，<b>连续输错可能触发限流</b>。</p>
+  <a class="btn" href="login" onclick="goLogin();return false;">重新登录</a>
+  <div class="meta"><a href="javascript:window.history.length>1 ? history.back() : location.assign(apiPath('/'))">← 返回</a></div>
+</div>
+<!--__GM_JS__-->
+</body>
+</html>

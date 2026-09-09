@@ -1,0 +1,4 @@
+库名 用途
+Flask Web 框架，提供路由、请求/响应处理
+PyJWT 生成和验证 JWT（JSON Web Token）用于用户认证
+Werkzeug 提供密码哈希（generate_password_hash / check_password_hash）

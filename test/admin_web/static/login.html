@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GreenMoon面板 - 登录</title>
+<!--__GM_CSS__-->
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#4ecca3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+    <span><span class="plain">GreenMoon</span><span class="acc">面板·登录</span></span>
+  </div>
+  <div class="sub">请输入服务器管理面板的账号与密码。若管理员未设置账号密码，留空即可直接进入。</div>
+  <div class="field"><label for="user">账号</label><input type="text" id="user" autocomplete="username" placeholder="请输入账号"></div>
+  <div class="field"><label for="pass">密码</label><input type="password" id="pass" autocomplete="current-password" placeholder="请输入密码"></div>
+  <button id="loginBtn" class="btn" onclick="doLogin()">登 录</button>
+  <div id="msg" class="msg"></div>
+  <div class="foot"><a href="javascript:window.history.length>1 ? history.back() : location.assign(apiPath('/'))">← 返回</a></div>
+</div>
+<!--__GM_JS__-->
+</body>
+</html>
