@@ -101,6 +101,36 @@
             if (txt) txt.textContent = t.checked ? (lab.getAttribute('data-on') || '启用') : (lab.getAttribute('data-off') || '禁用');
         });
 
+        // ---------- 轮询调度：只让「当前可见板块」的定时器运行 ----------
+        // 四个定时器原本无条件常驻，人不在那个板块也会一直发请求。
+        // 这里改为按板块挂载/卸载，切走即停，切回立即拉一次。
+        var gmTimers = {};          // 板块 id -> [timerId, ...]
+        var gmPolls = {};           // 板块 id -> [fn, fn, ...]
+        var gmActiveSection = 'sec-players';
+
+        function gmRegisterPoll(sectionId, fn) {
+            (gmPolls[sectionId] = gmPolls[sectionId] || []).push(fn);
+        }
+
+        function gmStartPolls(sectionId) {
+            gmStopPolls(sectionId);
+            var fns = gmPolls[sectionId];
+            if (!fns) return;
+            gmTimers[sectionId] = fns.map(function (fn) {
+                try { fn(); } catch (e) {}
+                return setInterval(function () {
+                    // 页面不可见（切到别的标签页）时跳过，省电省请求
+                    if (document.hidden) return;
+                    try { fn(); } catch (e) {}
+                }, fn.gmInterval || 5000);
+            });
+        }
+
+        function gmStopPolls(sectionId) {
+            (gmTimers[sectionId] || []).forEach(clearInterval);
+            delete gmTimers[sectionId];
+        }
+
         function showSection(id, link) {
             document.querySelectorAll('.section').forEach(function (s) { s.style.display = 'none'; });
             const sec = document.getElementById(id);
@@ -110,6 +140,9 @@
                 link.classList.add('active');
                 try { window.scrollTo(0, 0); } catch (e) {}
             }
+            gmStopPolls(gmActiveSection);
+            gmActiveSection = id;
+            gmStartPolls(id);
             try {
                 if (id === 'sec-account') loadAccount();
                 else if (id === 'sec-cross') loadCross();
@@ -123,6 +156,7 @@
                 else if (id === 'sec-scoreboard') loadScoreboards();
                 else if (id === 'sec-bots') loadBots();
                 else if (id === 'sec-mods') loadMods();
+                else if (id === 'sec-gmods') loadGmods();
                 else if (id === 'sec-files') loadFiles();
                 else if (id === 'sec-gametools') loadGameTools();
                 else if (id === 'sec-console') pollConsole();
@@ -1760,6 +1794,200 @@
             }
         }
 
+        // ==================== 子插件（.gmmod / .gmlib） ====================
+        var gmodCurrent = null;   // 当前在文件查看器里打开的子插件 uuid
+
+        function gmodStatus(id, msg, ok) {
+            const s = el(id);
+            if (!s) return;
+            s.textContent = msg || '';
+            s.className = 'status ' + (ok === true ? 'text-ok' : (ok === false ? 'text-bad' : 'text-warn'));
+        }
+
+        function gmodTypeLabel(t) {
+            if (t === 'index') return '<span class="badge">🌐 官网首页</span>';
+            if (t === 'admin') return '<span class="badge">🗄 管理后台</span>';
+            return '<span class="badge">🧩 代码型</span>';
+        }
+
+        async function loadGmods() {
+            gmodStatus('gmods-status', '加载中…', null);
+            try {
+                const r = await apiGet('/api/gmods/list');
+                if (!r || !r.ok) throw new Error((r && r.error) || '加载失败');
+                const mods = r.mods || [];
+                const libs = r.libs || [];
+                if (el('gmod-count')) el('gmod-count').textContent = String(mods.length);
+                if (el('gmod-lib-count')) el('gmod-lib-count').textContent = String(libs.length);
+
+                // 接管状态概览
+                const st = el('gmod-page-state');
+                if (st) {
+                    const on = mods.filter(function (m) { return m.enabled; });
+                    if (!on.length) {
+                        st.innerHTML = '当前 <b>没有</b> 子插件接管页面，官网与后台使用面板默认页面。';
+                    } else {
+                        st.innerHTML = '当前接管：' + on.map(function (m) {
+                            return (m.type === 'admin' ? '/admin' : '官网首页') + ' ← <b>' + esc(m.name || m.uuid) + '</b>';
+                        }).join('　|　');
+                    }
+                }
+
+                const box = el('gmod-box');
+                if (box) {
+                    if (!mods.length) {
+                        box.innerHTML = '<p class="empty">尚未安装任何子插件</p>';
+                    } else {
+                        box.innerHTML = mods.map(function (m) {
+                            const q = JSON.stringify(String(m.uuid || '')).replace(/"/g, '&quot;');
+                            const dep = (m.libs && m.libs.length) ? esc(m.libs.join('、')) : '无';
+                            const miss = (m.missing_libs && m.missing_libs.length)
+                                ? '<span class="text-bad">　缺少依赖：' + esc(m.missing_libs.join('、')) + '</span>' : '';
+                            const state = m.enabled
+                                ? '<span class="text-ok">● 已启用</span>'
+                                : '<span class="text-accent">○ 未启用</span>';
+                            const toggle = m.enabled
+                                ? '<button onclick="disableGmod(' + q + ')">⏹ 停用</button>'
+                                : '<button class="ok" onclick="enableGmod(' + q + ')">▶ 启用</button>';
+                            let preview = '';
+                            if (m.type === 'index') preview = '<a class="btn-link" href="/" target="_blank" rel="noopener">🌐 打开首页</a>';
+                            if (m.type === 'admin') preview = '<a class="btn-link" href="/admin" target="_blank" rel="noopener">🗄 打开后台</a>';
+                            return '<div class="list-item">'
+                                + '<span class="break"><b>' + esc(m.name || m.uuid) + '</b> '
+                                + '<span class="text-accent">v' + esc(m.version || '?') + '</span> '
+                                + gmodTypeLabel(m.type) + ' ' + state
+                                + '<div class="hint-sm break">' + esc(m.description || '（无描述）') + '</div>'
+                                + '<div class="hint-sm break">uuid: ' + esc(m.uuid) + '　依赖: ' + dep + miss + '</div>'
+                                + '</span>'
+                                + toggle
+                                + '<button onclick="viewGmod(' + q + ')" title="查看包内文件">📄</button>'
+                                + '<button onclick="uninstallGmod(' + q + ')" title="删除子插件文件">🗑</button>'
+                                + preview
+                                + '</div>';
+                        }).join('');
+                    }
+                }
+
+                const lb = el('gmod-lib-box');
+                if (lb) {
+                    lb.innerHTML = libs.length
+                        ? libs.map(function (n) { return '<div class="list-item break">📦 ' + esc(n) + '</div>'; }).join('')
+                        : '<p class="empty">暂无依赖包</p>';
+                }
+                if (el('gmod-paths')) {
+                    el('gmod-paths').textContent = '子插件目录：' + (r.mod_dir || '') + '　依赖目录：' + (r.libs_dir || '');
+                }
+                gmodStatus('gmods-status', '共 ' + mods.length + ' 个子插件、' + libs.length + ' 个依赖', true);
+            } catch (e) {
+                gmodStatus('gmods-status', '加载失败: ' + e, false);
+            }
+        }
+
+        async function uploadGmod() {
+            const fileInput = el('gmod-file');
+            const f = fileInput && fileInput.files ? fileInput.files[0] : null;
+            if (!f) { gmodStatus('gmod-upload-status', '请先选择 .gmmod / .gmlib 文件', false); return; }
+            if (!/\.(gmmod|gmlib)$/i.test(f.name)) { gmodStatus('gmod-upload-status', '只支持 .gmmod / .gmlib', false); return; }
+            const fd = new FormData();
+            fd.append('file', f);
+            gmodStatus('gmod-upload-status', '上传并导入中…', null);
+            try {
+                const res = await fetch(apiPath('/api/gmods/upload'), { method: 'POST', body: fd });
+                const r = await res.json();
+                gmodStatus('gmod-upload-status', (r.ok ? '✓ ' : '✗ ') + (r.message || r.error || '导入失败'), !!r.ok);
+                if (r.ok) { fileInput.value = ''; loadGmods(); }
+            } catch (e) {
+                gmodStatus('gmod-upload-status', '上传失败: ' + e, false);
+            }
+        }
+
+        async function enableGmod(uuid) {
+            try {
+                const r = await apiPost('/api/gmods/enable', { uuid: String(uuid) });
+                gmodStatus('gmods-status', (r.ok ? '✓ ' : '✗ ') + (r.message || r.error || ''), !!r.ok);
+                loadGmods();
+            } catch (e) {
+                gmodStatus('gmods-status', '启用失败: ' + e, false);
+            }
+        }
+
+        async function disableGmod(uuid) {
+            try {
+                const r = await apiPost('/api/gmods/disable', { uuid: String(uuid) });
+                gmodStatus('gmods-status', (r.ok ? '✓ ' : '✗ ') + (r.message || r.error || ''), !!r.ok);
+                loadGmods();
+            } catch (e) {
+                gmodStatus('gmods-status', '停用失败: ' + e, false);
+            }
+        }
+
+        async function uninstallGmod(uuid) {
+            if (!confirm('确认删除子插件 ' + uuid + ' ？\n目录与原始包都会被移除，此操作不可撤销。')) return;
+            try {
+                const r = await apiPost('/api/gmods/uninstall', { uuid: String(uuid) });
+                gmodStatus('gmods-status', (r.ok ? '✓ ' : '✗ ') + (r.message || r.error || ''), !!r.ok);
+                if (gmodCurrent === String(uuid)) closeGmodViewer();
+                loadGmods();
+            } catch (e) {
+                gmodStatus('gmods-status', '删除失败: ' + e, false);
+            }
+        }
+
+        // ---------- 包内文件查看 / 在线编辑 ----------
+        async function viewGmod(uuid, file) {
+            gmodCurrent = String(uuid);
+            const wrap = el('gmod-viewer-wrap');
+            if (wrap) wrap.classList.remove('hidden');
+            try {
+                const url = '/api/gmods/files?uuid=' + encodeURIComponent(gmodCurrent)
+                    + (file ? ('&file=' + encodeURIComponent(file)) : '');
+                const r = await apiGet(url);
+                if (!r || !r.ok) throw new Error((r && r.error) || '读取失败');
+                if (el('gmod-viewer-name')) el('gmod-viewer-name').textContent = r.root || '';
+                const list = el('gmod-file-list');
+                if (list) {
+                    list.innerHTML = (r.files || []).map(function (f) {
+                        const q = JSON.stringify(String(f)).replace(/"/g, '&quot;');
+                        const act = (f === r.file) ? ' text-ok' : '';
+                        return '<div class="list-item break' + act + '">📄 <a class="btn-link" onclick="viewGmod('
+                            + JSON.stringify(gmodCurrent) + ', ' + q + ')">' + esc(f) + '</a></div>';
+                    }).join('') || '<p class="empty">包内没有文件</p>';
+                }
+                if (el('gmod-file-head')) {
+                    el('gmod-file-head').textContent = r.file + (r.editable ? '' : '　（非文本文件，仅可查看文件树）');
+                }
+                const body = el('gmod-file-body');
+                if (body) {
+                    body.value = r.editable ? r.content : '';
+                    body.disabled = !r.editable;
+                }
+                gmodStatus('gmod-file-status', '', null);
+            } catch (e) {
+                gmodStatus('gmod-file-status', '读取失败: ' + e, false);
+            }
+        }
+
+        async function saveGmodFile() {
+            if (!gmodCurrent) return;
+            const body = el('gmod-file-body');
+            const head = el('gmod-file-head');
+            if (!body || !head) return;
+            const file = String(head.textContent || '').split('　')[0].trim();
+            if (!file) { gmodStatus('gmod-file-status', '未选择文件', false); return; }
+            try {
+                const r = await apiPost('/api/gmods/file/save', { uuid: gmodCurrent, file: file, content: body.value });
+                gmodStatus('gmod-file-status', (r.ok ? '✓ ' : '✗ ') + (r.message || r.error || ''), !!r.ok);
+            } catch (e) {
+                gmodStatus('gmod-file-status', '保存失败: ' + e, false);
+            }
+        }
+
+        function closeGmodViewer() {
+            gmodCurrent = null;
+            const wrap = el('gmod-viewer-wrap');
+            if (wrap) wrap.classList.add('hidden');
+        }
+
         // ==================== 模组管理器 ====================
         async function loadMods() {
             const st = el('mods-status');
@@ -2266,13 +2494,13 @@
             loadToolsConfig();
             loadGameTools();
             loadMods();
-            pollMessages();
-            pollConsole();
-            updateGauges();
-            setInterval(refreshPlayers, 5000);
-            setInterval(pollMessages, 2000);
-            setInterval(pollConsole, 2000);
-            setInterval(updateGauges, 3000);
+            // 轮询改为按可见板块启停：只在对应板块显示时才拉数据
+            var _p5 = refreshPlayers;  _p5.gmInterval = 5000; gmRegisterPoll('sec-players', _p5);
+            var _g3 = updateGauges;    _g3.gmInterval = 3000; gmRegisterPoll('sec-players', _g3);
+            var _m2 = pollMessages;    _m2.gmInterval = 2000; gmRegisterPoll('sec-logs', _m2);
+            var _c2 = pollConsole;     _c2.gmInterval = 2000; gmRegisterPoll('sec-logs', _c2);
+            var _c2b = pollConsole;    _c2b.gmInterval = 2000; gmRegisterPoll('sec-console', _c2b);
+            gmStartPolls(gmActiveSection);
         }
         window.addEventListener('DOMContentLoaded', init);
     </script>

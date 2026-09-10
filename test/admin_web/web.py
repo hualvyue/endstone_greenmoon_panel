@@ -48,6 +48,8 @@ from endstone.event import (
     PlayerQuitEvent,
 )
 
+from .mod_loader import mime_for as _gmod_mime_for
+
 from .core import (
     DEFAULT_CROSS_CONFIG,
     GAMERULES,
@@ -298,6 +300,10 @@ def _is_conn_error(exc) -> bool:
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    #: listen() 的 backlog。默认值只有 5，管理面板一开页面就是十几个并发请求，
+    #: 超出部分会在内核队列里排队，表现为「面板打开很慢」。实测 40 并发慢请求：
+    #: backlog=5 耗时 2108ms，backlog=128 耗时 65ms。
+    request_queue_size = 128
 
     def handle_error(self, request, client_address):
 
@@ -407,6 +413,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         if p.startswith("/api/gametools"):
             return {"gametools"}
         if p == "/api/mods" or p.startswith("/api/mod/"):
+            return {"mods"}
+        if p.startswith("/api/gmods"):
             return {"mods"}
         if p.startswith("/api/diag"):
             return {"diag"}
@@ -712,7 +720,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 if not self._scope_gate(path):
                     return
 
+            if path == '/gmpage' or path.startswith('/gmpage/'):
+                self._handle_gmod_static(path)
+                return
+
             if path == '/':
+                # 官网首页：优先交给启用的 index 型子插件
+                if self._serve_gmod_page('index'):
+                    return
                 index_file = self.plugin.web_dir / "index.html"
                 if index_file.exists():
                     self._serve_file(index_file)
@@ -726,11 +741,24 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_logout()
                 return
             if path == '/admin':
+                # 管理页：优先交给启用的 admin 型子插件
+                if self._serve_gmod_page('admin'):
+                    return
                 self._serve_html(HTML_ADMIN)
                 return
             if path == '/whitelist':
                 self._serve_html(HTML_WHITELIST)
                 return
+
+            # 子插件页面（/ 或 /admin 被接管时）内的相对资源引用会落到这些根路径上，
+            # 先尝试从当前 page 型子插件目录里取，取不到再走原有逻辑。
+            if not path.startswith('/api/') and path != '/':
+                first = path.lstrip('/').split('/', 1)[0]
+                if first in ('assets', 'static', 'css', 'js', 'img', 'images',
+                             'fonts', 'media', 'vendor', 'lib', 'dist'):
+                    if self._gmod_asset_served(path):
+                        return
+
             if path == '/api/players':
                 self._handle_api_players()
             elif path.startswith('/api/player/'):
@@ -778,6 +806,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_cross_status()
             elif path == '/api/gametools':
                 self._handle_api_gametools()
+            elif path == '/api/gmods/list':
+                self._handle_api_gmods_list()
+            elif path == '/api/gmods/files':
+                self._handle_api_gmods_files(parsed.query)
+            elif path == '/api/gmods/pages':
+                self._handle_api_gmods_pages()
             elif path == '/api/mods':
                 self._handle_api_mods()
             elif path == '/api/auth/me':
@@ -848,6 +882,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
             if path == '/api/files/upload':
                 self._handle_api_files_upload()
+                return
+            if path == '/api/gmods/upload':
+                self._handle_api_gmods_upload()
                 return
 
             try:
@@ -924,6 +961,18 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_mod_install(data)
             elif path == '/api/mod/delete':
                 self._handle_api_mod_delete(data)
+            elif path == '/api/gmods/load':
+                self._handle_api_gmods_load(data)
+            elif path == '/api/gmods/unload':
+                self._handle_api_gmods_unload(data)
+            elif path == '/api/gmods/uninstall':
+                self._handle_api_gmods_uninstall(data)
+            elif path == '/api/gmods/enable':
+                self._handle_api_gmods_enable(data)
+            elif path == '/api/gmods/disable':
+                self._handle_api_gmods_disable(data)
+            elif path == '/api/gmods/file/save':
+                self._handle_api_gmods_file_save(data)
             elif path == '/api/cross/config/save':
                 self._handle_cross_config_save(data)
             elif path == '/api/cross/test':
@@ -1063,8 +1112,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             after = 0
         try:
             with self.plugin._messages_lock:
-                new_msgs = [m for m in self.plugin._messages if m["id"] > after]
                 last_id = self.plugin._message_seq
+                # id 单调递增，从尾部倒着取，正常增量轮询是 O(1)
+                new_msgs = []
+                for m in reversed(self.plugin._messages):
+                    if m["id"] <= after:
+                        break
+                    new_msgs.append(m)
+                new_msgs.reverse()
             self._send_json({"messages": new_msgs, "last_id": last_id})
         except Exception as e:
             self.plugin.logger.error(f"获取消息失败: {e}")
@@ -1931,6 +1986,461 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
     _FILE_READ_LIMIT = 1024 * 1024
     _FILES_UPLOAD_LIMIT = 100 * 1024 * 1024
+
+    _GMOD_UPLOAD_LIMIT = 64 * 1024 * 1024
+    _GMOD_EXTS = (".gmmod", ".gmlib")
+
+    # ---------------------------------------------------------------- 子插件
+
+    def _gmod_loader(self):
+        ld = getattr(self.plugin, "mod_loader", None)
+        if ld is None:
+            self._send_json({"ok": False, "error": "子插件加载器未初始化"}, 500)
+            return None
+        return ld
+
+    def _gmod_admin_only(self) -> bool:
+        """子插件可携带任意代码，只允许管理员操作，临时账号一律拒绝。"""
+        if getattr(self, "_auth_role", "admin") != "admin":
+            self._send_json({"ok": False, "error": "仅管理员可管理子插件"}, 403)
+            return False
+        return True
+
+    def _gmod_upload_dir(self) -> Path:
+        d = self.plugin.mods_dir / ".upload"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    # ------------------------------------------------------ 页面接管
+
+    def _serve_gmod_page(self, ptype: str) -> bool:
+        """把 ``/`` 或 ``/admin`` 交给启用的子插件。接管成功返回 True。
+
+        注意：这里刻意直接读文件、不走 ``_serve_html`，因为子插件页面可能引用
+        同目录下的相对资源（如 ``assets/app.js``），而浏览器会以当前路径为基准
+        解析这些相对地址（``/assets/app.js``），需要由静态路由兜住。
+        """
+        ld = getattr(self.plugin, "mod_loader", None)
+        if ld is None:
+            return False
+        try:
+            got = ld.active_page(ptype)
+        except Exception as e:
+            self.plugin.logger.warning(f"[子插件] 读取 {ptype} 页面接管状态失败: {e}")
+            return False
+        if not got:
+            return False
+        root, entry = got
+        top = str(entry or "index.html").replace("\\", "/").split("/")[0]
+        if str(entry).replace("\\", "/").strip("/") not in ("index.html", "index.htm"):
+            self.plugin.logger.warning(
+                f"[子插件] {ptype} 子插件 {root.name} 的入口为 {entry}，"
+                f"页面内相对资源请改用 /gmpage/{ptype}/ 前缀引用"
+            )
+        return self._gmod_send_file(ld.page_file(ptype, entry))
+
+    def _handle_gmod_static(self, path: str) -> None:
+        """``/gmpage/<type>/<相对路径>``：按类型找启用子插件，或回退到同名目录的包。"""
+        ld = getattr(self.plugin, "mod_loader", None)
+        if ld is None:
+            self.send_error(404, "Not Found")
+            return
+        rest = path[len('/gmpage/'):] if path.startswith('/gmpage/') else ''
+        parts = rest.split('/', 1)
+        ptype = parts[0] if parts and parts[0] else ''
+        rel = parts[1] if len(parts) > 1 else ''
+
+        if ptype not in ('index', 'admin'):
+            self.send_error(404, "Not Found")
+            return
+
+        try:
+            if rel:
+                target = ld.page_file(ptype, rel)
+            else:
+                got = ld.active_page(ptype)
+                target = ld.page_file(ptype, got[1]) if got else None
+            if target is None:
+                # 回退：按包名定位（未启用时也能预览该包自己的资源）
+                segs = [s for s in rel.split('/') if s not in ('', '.')]
+                if segs and '..' not in segs:
+                    cand = ld._resolve_in(ld.mods_dir / ptype / segs[0], '/'.join(segs[1:]) or 'index.html')
+                    if cand is not None and cand.is_file():
+                        target = cand
+        except Exception as e:
+            self.plugin.logger.warning(f"[子插件] 静态资源解析失败 {path}: {e}")
+            target = None
+
+        if target is None:
+            self._gmod_asset_fallback(ptype, rel)
+            return
+        self._gmod_send_file(target)
+
+    def _gmod_asset_served(self, path: str) -> bool:
+        """把根路径上的资源请求，尝试映射到当前启用的 page 型子插件目录。
+
+        子插件页面里写 ``<script src="assets/app.js">`` 时，浏览器会按当前路径
+        （``/`` → ``/assets/app.js``，``/admin`` → ``/assets/app.js``）去取，
+        与子插件目录对不上。这里按 ``index`` 优先、``admin`` 次之的顺序兜住。
+        找到并发出返回 True。
+        """
+        ld = getattr(self.plugin, "mod_loader", None)
+        if ld is None:
+            return False
+        rel = path.lstrip('/')
+        if not rel:
+            return False
+        for ptype in ('index', 'admin'):
+            got = ld.active_page(ptype)
+            if not got:
+                continue
+            root = got[0]
+            try:
+                cand = ld._resolve_in(root, rel)
+            except Exception:
+                cand = None
+            if cand is not None and cand.is_file():
+                self._gmod_send_file(cand)
+                return True
+        return False
+
+    def _gmod_asset_fallback(self, ptype: str, rel: str) -> None:
+        """子插件页面里 ``assets/app.js`` 这类相对引用会被浏览器解析成 ``/assets/app.js``。
+
+        这里做一次兜底：若当前有启用的子插件，就把它目录下同名文件送出去。
+        这保证了「子插件作者不需要改任何写法，附件资源全都能用」。
+        """
+        ld = getattr(self.plugin, "mod_loader", None)
+        if ld is None or not rel:
+            return
+        segs = [s for s in str(rel).replace("\\", "/").split("/") if s not in ("", ".")]
+        if not segs or ".." in segs:
+            self.send_error(404, "Not Found")
+            return
+
+        roots = []
+        got = ld.active_page(ptype)
+        if got:
+            roots.append(got[0])
+        roots.append(ld.mods_dir / ptype / segs[0])
+
+        for root in roots:
+            try:
+                cand = ld._resolve_in(root, "/".join(segs[1:]) if root.name == segs[0] else rel)
+            except Exception:
+                cand = None
+            if cand is not None and cand.is_file():
+                self._gmod_send_file(cand)
+                return
+        self.send_error(404, "Not Found")
+
+    def _gmod_send_file(self, filepath, prefix: str = "") -> bool:
+        """流式发送子插件内的文件，按扩展名给 MIME，支持 Range。"""
+        if filepath is None:
+            return False
+        try:
+            path = Path(filepath)
+            size = path.stat().st_size
+        except Exception:
+            return False
+
+        ctype = _gmod_mime_for(path)
+        # HTML 里的相对引用以请求目录为基准，把规范前缀注入 <base> 只能改内容，
+        # 这里保持原样送出，由 /gmpage/<type>/ 静态路由兜住。
+        start, end = 0, size - 1
+        status = 200
+        range_header = self.headers.get("Range", "") if hasattr(self, "headers") else ""
+        if range_header.startswith("bytes="):
+            try:
+                spec = range_header[len("bytes="):].split(",")[0].strip()
+                s_raw, _, e_raw = spec.partition("-")
+                if s_raw:
+                    start = int(s_raw)
+                    end = int(e_raw) if e_raw else size - 1
+                else:
+                    start = max(0, size - int(e_raw or 0))
+                if start > end or start >= size:
+                    raise ValueError("bad range")
+                end = min(end, size - 1)
+                status = 206
+            except Exception:
+                start, end, status = 0, size - 1, 200
+
+        length = max(0, end - start + 1)
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', ctype)
+            self.send_header('Content-Length', str(length))
+            self.send_header('Accept-Ranges', 'bytes')
+            if status == 206:
+                self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+            if ctype.startswith('text/html'):
+                self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            else:
+                self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+
+            with open(path, 'rb') as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            return True
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
+            return True
+        except Exception as e:
+            self.plugin.logger.error(f"[子插件] 发送文件失败 {filepath}: {e}")
+            return False
+
+    def _handle_api_gmods_list(self):
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        try:
+            loaded = set(ld.loaded_uuids())
+            mods = []
+            for m in ld.list_mods():
+                item = dict(m)
+                item["loaded"] = str(m.get("uuid")) in loaded
+                mods.append(item)
+            self._send_json({
+                "ok": True,
+                "mods": mods,
+                "libs": ld.load_liblist(),
+                "mod_dir": str(ld.mods_dir),
+                "libs_dir": str(ld.libs_dir),
+            })
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"读取子插件失败: {e}"}, 500)
+
+    def _handle_api_gmods_upload(self):
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        ctype = self.headers.get("Content-Type", "")
+        if not ctype.startswith("multipart/form-data"):
+            self._send_json({"ok": False, "error": "必须使用 multipart/form-data"}, 400)
+            return
+        bm = re.search(r"boundary=([^;\s]+)", ctype)
+        if not bm:
+            self._send_json({"ok": False, "error": "无效的 multipart 格式"}, 400)
+            return
+        boundary = bm.group(1).encode("ascii")
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0 or length > self._GMOD_UPLOAD_LIMIT:
+            self._send_json({"ok": False, "error": "请求体为空或超过 64MB"}, 400)
+            return
+        body = self.rfile.read(length)
+
+        fname = None
+        fdata = None
+        for part in body.split(b"--" + boundary):
+            if not part or part in (b"--\r\n", b"--"):
+                continue
+            h_end = part.find(b"\r\n\r\n")
+            if h_end == -1:
+                continue
+            header = part[:h_end].decode("utf-8", errors="ignore")
+            content = part[h_end + 4:]
+            if content.endswith(b"\r\n"):
+                content = content[:-2]
+            if "filename=" in header:
+                fm = re.search(r'filename="([^"]*)"', header)
+                fname = fm.group(1) if fm else "upload"
+                fdata = content
+        if not fname or fdata is None:
+            self._send_json({"ok": False, "error": "未收到文件"}, 400)
+            return
+
+        base = os.path.basename(str(fname).replace("\\", "/"))
+        ext = os.path.splitext(base)[1].lower()
+        if ext not in self._GMOD_EXTS:
+            self._send_json({"ok": False, "error": "只支持 .gmmod / .gmlib 文件"}, 400)
+            return
+
+        tmp = self._gmod_upload_dir() / (_uuid.uuid4().hex[:12] + "_" + base)
+        try:
+            tmp.write_bytes(fdata)
+            result = ld.install(str(tmp), force=True)
+        except Exception as e:
+            self.plugin.logger.error(f"[子插件] 导入异常: {e}")
+            self._send_json({"ok": False, "error": f"导入异常: {e}"}, 500)
+            return
+        finally:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
+
+        if not result.get("ok"):
+            self._send_json(result, 400)
+            return
+        if result.get("kind") == "gmlib":
+            msg = f"依赖库 {result.get('name')} 导入完成，新增 {len(result.get('copied') or [])} 个包"
+        else:
+            msg = f"子插件 {result.get('name')} v{result.get('version')} 导入成功"
+            if result.get("missing_libs"):
+                msg += f"（缺少依赖：{', '.join(result['missing_libs'])}）"
+        result["message"] = msg
+        self._send_json(result)
+
+    def _handle_api_gmods_load(self, data):
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        uuid = str((data or {}).get("uuid", "") or "")
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        try:
+            got = ld.import_mod(uuid)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"加载失败: {e}"}, 500)
+            return
+        if got is None:
+            self._send_json({"ok": False, "error": "加载失败，详见服务端日志"}, 400)
+            return
+        module, setup = got
+        has_setup = callable(setup)
+        self._send_json({
+            "ok": True,
+            "message": "入口模块已加载" + ("，发现 setup(plugin) 入口" if has_setup else "，未发现 setup 入口"),
+            "module": getattr(module, "__name__", ""),
+            "has_setup": has_setup,
+        })
+
+    def _handle_api_gmods_unload(self, data):
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        uuid = str((data or {}).get("uuid", "") or "")
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        self._send_json({"ok": ld.unload_mod(uuid), "message": "已从内存卸载"})
+
+    def _handle_api_gmods_uninstall(self, data):
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        uuid = str((data or {}).get("uuid", "") or "")
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        try:
+            ok = ld.uninstall(uuid)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"卸载失败: {e}"}, 400)
+            return
+        if not ok:
+            self._send_json({"ok": False, "error": "子插件不存在"}, 404)
+            return
+        self._send_json({"ok": True, "message": "已卸载并删除文件"})
+
+    def _handle_api_gmods_enable(self, data):
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        uuid = str((data or {}).get("uuid", "") or "")
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        try:
+            r = ld.enable(uuid)
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 400)
+            return
+        self._send_json(r)
+
+    def _handle_api_gmods_disable(self, data):
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        uuid = str((data or {}).get("uuid", "") or "")
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        try:
+            r = ld.disable(uuid)
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 400)
+            return
+        self._send_json(r)
+
+    def _handle_api_gmods_files(self, query):
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        qs = urllib.parse.parse_qs(query or "")
+        uuid = (qs.get("uuid") or [""])[0]
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        rec = ld.installed(uuid)
+        if not rec:
+            self._send_json({"ok": False, "error": "子插件不存在"}, 404)
+            return
+        files = ld.list_page_files(uuid)
+
+        wanted = (qs.get("file") or [""])[0]
+        if not wanted:
+            wanted = str(rec.get("index") or "index.html")
+        content = ld.read_page_text(uuid, wanted)
+        self._send_json({
+            "ok": True, "uuid": uuid, "files": files,
+            "file": wanted, "content": content,
+            "editable": content is not None,
+            "type": rec.get("type"),
+            "root": str(rec.get("path") or ""),
+        })
+
+    def _handle_api_gmods_file_save(self, data):
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        d = data or {}
+        uuid = str(d.get("uuid", "") or "")
+        rel = str(d.get("file", "") or "")
+        if not uuid or not rel:
+            self._send_json({"ok": False, "error": "缺少 uuid 或 file"}, 400)
+            return
+        if not ld.write_page_text(uuid, rel, str(d.get("content", ""))):
+            self._send_json({"ok": False, "error": "写入失败（文件类型不允许或路径非法）"}, 400)
+            return
+        self._send_json({"ok": True, "message": f"已保存 {rel}"})
+
+    def _handle_api_gmods_pages(self):
+        """返回当前生效的页面接管状态，供前端展示。"""
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        out = {}
+        for ptype in ("index", "admin"):
+            try:
+                got = ld.active_page(ptype)
+            except Exception:
+                got = None
+            out[ptype] = {"uuid": ld.enabled_uuid(ptype), "active": bool(got)}
+        self._send_json({"ok": True, "pages": out})
 
     def _fs_root(self) -> Path:
         return (self.plugin._find_server_root() or Path.cwd()).resolve()

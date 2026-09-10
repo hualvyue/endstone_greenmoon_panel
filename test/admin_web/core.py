@@ -47,6 +47,7 @@ from .web_assets import (
 )
 
 from .connections import ConnectionManager, ConnectionValidationError, _FLAT_SYNC_KEYS
+from .mod_loader import ModLoader, ModLoadError
 
 try:
     from endstone.scoreboard import Criteria, DisplaySlot, ObjectiveSortOrder, RenderType
@@ -419,6 +420,20 @@ class GreenMoonPlugin(Plugin):
         except Exception as e:
             self.logger.warning(f"创建第三方库目录失败 {self.libs_dir}: {e}")
 
+        # 子插件：mod/ 目录存放 .gmmod 与 liblist.json，依赖 whl 统一落在 libs/
+        self.mods_dir = self.data_dir / "mod"
+        try:
+            self.mods_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            self.logger.warning(f"创建子插件目录失败 {self.mods_dir}: {e}")
+        self.mod_loader = ModLoader(self)
+        try:
+            boot = self.mod_loader.bootstrap()
+            if boot.get("mods"):
+                self.logger.info(f"已登记 {len(boot['mods'])} 个子插件")
+        except Exception as e:
+            self.logger.warning(f"子插件初始化失败: {e}")
+
         self.web_config = self._load_config()
         self.fun_transform = bool(self.web_config.get("fun_transform", True))
 
@@ -451,7 +466,9 @@ class GreenMoonPlugin(Plugin):
         self._perm_attachments: Dict[str, Any] = {}
 
         self._messages_lock = threading.Lock()
-        self._messages: List[Dict[str, Any]] = []
+        # deque(maxlen=200)：聊天刷屏时追加是 O(1)，
+        # 不会像列表那样在超长时整表切片复制。
+        self._messages: collections.deque = collections.deque(maxlen=200)
         self._message_seq = 0
 
         self._gamerule_values: Dict[str, Any] = {}
@@ -565,6 +582,12 @@ class GreenMoonPlugin(Plugin):
         if cross is not None:
             try:
                 cross.stop()
+            except Exception:
+                pass
+        mod_loader = getattr(self, 'mod_loader', None)
+        if mod_loader is not None:
+            try:
+                mod_loader.shutdown()
             except Exception:
                 pass
         if getattr(self, '_console_capture', None):
@@ -1994,8 +2017,6 @@ class GreenMoonPlugin(Plugin):
                     "player": player_name,
                     "message": message,
                 })
-                if len(self._messages) > 200:
-                    self._messages = self._messages[-200:]
         except Exception:
             pass
 
@@ -3722,8 +3743,15 @@ class GreenMoonPlugin(Plugin):
 
     def _get_console_logs(self, after: int):
         with self._console_lock:
-            new = [m for m in self._console_logs if m["id"] > after]
             last_id = self._console_seq
+            # deque 内 id 单调递增，从尾部倒着找即可；
+            # 正常增量轮询只取最后几条，是 O(1)，不必每次扫满 1000 条。
+            new: List[Dict[str, Any]] = []
+            for m in reversed(self._console_logs):
+                if m["id"] <= after:
+                    break
+                new.append(m)
+            new.reverse()
         return new, last_id
 
     def _log_admin_action(self, message: str):

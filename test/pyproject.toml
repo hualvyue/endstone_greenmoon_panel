@@ -1,6 +1,6 @@
 [project]
 name = "endstone-greenmoon-panel"
-version = "4.1.0"
+version = "5.1.1"
 description = "GreenMoon面板：一个用来高效管理服务器的面板"
 dependencies = ["endstone"]
 requires-python = ">=3.11"

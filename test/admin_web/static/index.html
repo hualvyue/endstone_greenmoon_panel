@@ -136,6 +136,7 @@
         .link .desc { font-size: 12px; font-weight: 400; color: var(--gm-text-mute); }
 
         .foot { margin-top: 22px; font-size: 12px; color: var(--gm-text-mute); }
+        .foot .gm-boot { color: var(--gm-text-dim); }
         .theme-toggle {
             margin-top: 16px;
             background: var(--gm-glass); border: 1px solid var(--gm-border);
@@ -201,6 +202,34 @@
         }
         document.getElementById('theme-toggle').addEventListener('click', gmToggleTheme);
         gmSyncThemeBtn();
+    </script>
+
+    <script>
+        /* 子插件资源回退（type=index）。
+           子插件页面里 <script src="assets/app.js"> 这类引用，浏览器会按当前路径
+           解析成 /assets/app.js 而 404。这里捕获资源加载失败，自动改用官方前缀
+           /gmpage/index/<原路径> 重试一次，子插件作者无需改任何写法。 */
+        (function () {
+            function patched(path) { return '/gmpage/index/' + String(path || '').replace(/^\/+/, ''); }
+            document.addEventListener('error', function (ev) {
+                var t = ev.target;
+                if (!t || !t.tagName) return;
+                var tag = t.tagName.toUpperCase();
+                if (tag !== 'SCRIPT' && tag !== 'LINK' && tag !== 'IMG') return;
+                var src = t.src || t.href || '';
+                if (!src || src.indexOf('/gmpage/') >= 0 || t.__gmRetried) return;
+                var u;
+                try { u = new URL(src, location.href); } catch (e) { return; }
+                if (u.origin !== location.origin) return;
+                var alt = patched(u.pathname);
+                t.__gmRetried = true;
+                if (tag === 'IMG') { t.src = alt; return; }
+                var n = document.createElement(tag === 'LINK' ? 'link' : 'script');
+                if (tag === 'LINK') { n.rel = t.rel; n.href = alt; if (t.type) n.type = t.type; }
+                else { n.src = alt; if (t.type) n.type = t.type; if (t.defer) n.defer = true; }
+                document.head.appendChild(n);
+            }, true);
+        })();
     </script>
 </body>
 </html>

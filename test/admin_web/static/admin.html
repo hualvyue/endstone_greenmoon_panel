@@ -36,6 +36,7 @@
     <a href="javascript:void(0)" onclick="showSection('sec-cloud', this)" data-scope="cloud">☁️ 云黑名单</a>
     <a href="javascript:void(0)" onclick="showSection('sec-gametools', this)" data-scope="gametools">🎁 签到与绑定</a>
     <a href="javascript:void(0)" onclick="showSection('sec-mods', this)" data-scope="mods">🧩 模组管理器</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-gmods', this)" data-scope="mods">🔌 子插件</a>
     <a href="javascript:void(0)" onclick="showSection('sec-files', this)" data-scope="files">🗂️ 文件管理</a>
     <a href="javascript:void(0)" onclick="showSection('sec-diag', this)" data-scope="diag">🩺 诊断</a>
     <a href="javascript:void(0)" onclick="showSection('sec-account', this)" data-scope="account">🔑 账户与安全</a>
@@ -509,6 +510,54 @@
             资源/行为包以 manifest.json 的 uuid 作为文件夹名（不会互相覆盖），并自动写入该世界的 world_resource_packs.json / world_behavior_packs.json。
             修改包后通常需重启才完全生效。
         </p>
+    </div>
+
+    <div class="section" id="sec-gmods">
+        <h2>🔌 子插件 <button onclick="loadGmods()">🔄 刷新</button> <span id="gmods-status" class="status"></span></h2>
+        <p class="hint-sm mb-sm" id="gmod-page-state"></p>
+        <div class="grid-2">
+            <div class="col">
+                <h3>导入包（.gmmod / .gmlib）</h3>
+                <input type="file" id="gmod-file" accept=".gmmod,.gmlib">
+                <div class="mt-sm">
+                    <button onclick="uploadGmod()">📤 上传并导入</button>
+                    <span id="gmod-upload-status" class="status ml-sm"></span>
+                </div>
+                <h3 class="mt">已入库依赖 <span id="gmod-lib-count">0</span></h3>
+                <div id="gmod-lib-box" class="scroll-box"><p class="hint">尚未加载</p></div>
+            </div>
+            <div class="col">
+                <h3>已安装子插件 <span id="gmod-count">0</span></h3>
+                <div id="gmod-box" class="scroll-box-lg"><p class="hint">尚未加载</p></div>
+            </div>
+        </div>
+        <div id="gmod-viewer-wrap" class="mt hidden">
+            <h3>包内文件 <span id="gmod-viewer-name" class="text-accent"></span>
+                <button class="ml-sm" onclick="closeGmodViewer()">✖ 关闭</button>
+            </h3>
+            <div class="grid-2">
+                <div class="col">
+                    <div id="gmod-file-list" class="scroll-box"></div>
+                </div>
+                <div class="col">
+                    <div id="gmod-file-head" class="hint-sm mb-xs"></div>
+                    <textarea id="gmod-file-body" class="block-input" rows="16" spellcheck="false"></textarea>
+                    <div class="mt-sm">
+                        <button class="ok" onclick="saveGmodFile()">💾 保存文件</button>
+                        <span id="gmod-file-status" class="status ml-sm"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <p class="hint-sm mt-sm">
+            <b>.gmmod</b> 是子插件包：<code>type=index</code> 解压到 <code>mod/index/&lt;uuid&gt;/</code>，启用后接管官网首页；
+            <code>type=admin</code> 解压到 <code>mod/admin/&lt;uuid&gt;/</code>，启用后接管 <code>/admin</code>；
+            不写 <code>type</code> 视为代码型，解压到 <code>mod/&lt;uuid&gt;/</code>。
+            包内 js / css / 图片 / 子页面会一并可用，子插件里的相对引用写法不用改。
+            <b>.gmlib</b> 是依赖库包，其中的 .whl 复制进 <code>libs/</code> 并注入 <code>sys.path</code>。
+            同一类型同时只能启用一个包；导入不会自动执行代码。加载器仅使用 Python 标准库。
+        </p>
+        <p class="hint-sm" id="gmod-paths"></p>
     </div>
 
     <div class="section" id="sec-files">
