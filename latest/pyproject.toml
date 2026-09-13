@@ -1,6 +1,6 @@
 [project]
 name = "endstone-greenmoon-panel"
-version = "5.1.1"
+version = "5.5.12"
 description = "GreenMoon面板：一个用来高效管理服务器的面板"
 dependencies = ["endstone"]
 requires-python = ">=3.11"
@@ -20,4 +20,4 @@ include = ["admin_web*"]
 exclude = ["tests*", "docs*"]
 
 [tool.setuptools.package-data]
-admin_web = ["static/*"]
+admin_web = ["static/**"]
