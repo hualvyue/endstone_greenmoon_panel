@@ -104,14 +104,46 @@ def run_async(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> threading.Th
 
     适合子插件里那些会阻塞的操作（同步 HTTP、大文件 IO），
     避免卡住调用方自己的线程。
+
+    ⚠ 后台线程里抛出的异常**不会**传播到调用方 —— 这是 ``run_async``
+    的固有语义（线程里没人接得住）。既然如此，至少要**留下痕迹**：
+    本函数会把异常连同函数名、参数摘要写进插件日志。
     """
-    require_plugin()
+    plugin = require_plugin()
 
     def _target() -> None:
         try:
             fn(*args, **kwargs)
-        except Exception:
-            pass
+        except Exception as e:
+            # ★ 这里曾经是裸 ``pass``。
+            #
+            # 后果：子插件用 run_async 跑一个会抛的后台任务（比如同步 HTTP
+            # 失败了、文件写不进去），调用方那边看起来一切正常（线程起来了、
+            # 立刻返回了），日志里也干干净净 —— 排查时完全无从下手，
+            # 只能靠加 print 重新复现。
+            #
+            # 现在统一落一条 error 日志，带函数限定名和异常类型；
+            # traceback 一并写入，方便直接定位到子插件那一行。
+            try:
+                name = getattr(fn, "__qualname__", None) or getattr(fn, "__name__", None) or repr(fn)
+                extra = ""
+                try:
+                    if args or kwargs:
+                        parts = [repr(a)[:60] for a in args[:3]]
+                        parts += [f"{k}={v!r}"[:60] for k, v in list(kwargs.items())[:3]]
+                        extra = " 参数(" + ", ".join(parts) + ")"
+                except Exception:
+                    extra = ""
+                plugin.logger.error(
+                    f"[gm] 异步任务 {name} 抛出异常: {type(e).__name__}: {e}{extra}"
+                )
+                try:
+                    import traceback as _tb
+                    plugin.logger.error("[gm] 异步任务堆栈:\n" + _tb.format_exc())
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
     t = threading.Thread(target=_target, name="gm-async", daemon=True)
     t.start()

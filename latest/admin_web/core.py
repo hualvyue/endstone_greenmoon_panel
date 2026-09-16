@@ -34,7 +34,7 @@ from endstone.plugin import Plugin
 from endstone import Player
 from endstone.inventory import ItemType, MapMeta
 from endstone.map import MapView, MapRenderer, MapCanvas
-from endstone.event import event_handler, PlayerChatEvent, BroadcastMessageEvent, PlayerJoinEvent, PlayerQuitEvent
+from endstone.event import event_handler, PlayerChatEvent, BroadcastMessageEvent, PlayerJoinEvent, PlayerQuitEvent, MapInitializeEvent
 
 # /gmback 救援指令需要这两个类型做签名标注。做成防御式导入：
 # 旧版 Endstone 没有 endstone.command，测试桩也可能缺，此时降级为 object
@@ -56,7 +56,7 @@ from .web_assets import (
 
 from .connections import ConnectionManager, ConnectionValidationError, _FLAT_SYNC_KEYS
 from .mod_loader import ModLoader, ModLoadError
-from .atomic_io import atomic_write_json, atomic_write_text
+from .atomic_io import atomic_write_json, atomic_write_text, atomic_write_bytes
 
 try:
     from endstone.scoreboard import Criteria, DisplaySlot, ObjectiveSortOrder, RenderType
@@ -152,7 +152,7 @@ DEFAULT_QQBOT_CONFIG = {
     "mc_to_qq": True,
     "join_to_qq": True,
     "leave_to_qq": True,
-    "qq_to_mc_format": "[QQ] %s：%s",
+    "qq_to_mc_format": "[QQ] %s@%s：%s",
     "mc_to_qq_format": "[游戏] %s：%s",
     "join_format": "[游戏] %s 加入了服务器",
     "leave_format": "[游戏] %s 离开了服务器",
@@ -228,46 +228,66 @@ def _fmt_size(n) -> str:
     return f"{n:.2f} GB"
 
 def _load_offline_wheels(plugin, libs_dir):
-                                                                                                        
+    """确保 QQ 网关所需的 requests / websockets 可用，返回 ``(requests, websockets)``。
 
-                                                                                   
-                                                                                               
-                                                               
-       
+    ⚠ 这里**只负责把库取到手**，不负责往 sys.path 里插路径。
+    真正的路径注册统一交给 ``libs_loader.install()``（在 ``on_enable``
+    里、比本函数更早执行），原因见下。
+
+    历史坑（已修）：本函数原先自己动手挂路径 ——
+    ``sys.path.insert(0, libs_dir)`` 加上对每个 ``*.whl`` 的
+    ``insert(0, whl)``。而 ``libs_loader`` 是把**解压目录**追加到
+    ``sys.path`` 末尾的。两者叠加的结果是：whl 路径排到了解压目录**之前**，
+    于是 ``import PIL`` 被 zipimport 抢先命中 wheel 内部那份
+    （只有纯 Python 部分、没有 ``.so``），Pillow 当场变空壳 ——
+    ``_imaging`` 加载失败，地图画每张图都静默失败。
+
+    实测证据（``python3 -S``，剥离 site-packages）::
+
+        libs_loader.install() 之后:
+            PIL -> <libs>/_unpacked/pillow-.../PIL/__init__.py
+            _imaging_ok=True   resize=ok
+        _load_offline_wheels() 之后（旧实现）:
+            PIL -> <libs>/pillow-....whl/PIL/__init__.py   ← 掉回 wheel 里
+            _imaging_ok=False  resize=ImportError
+
+    所以现在这里**一律不碰 sys.path** —— 依赖由 libs_loader 负责注册，
+    本函数只做「取库」和「报缺库」。
+    """
     try:
         libs_dir.mkdir(parents=True, exist_ok=True)
     except Exception as e:
         plugin.logger.error(f"[QQ] 创建离线依赖目录失败 {libs_dir}: {e}")
-
-    if str(libs_dir) not in sys.path:
-        sys.path.insert(0, str(libs_dir))
-
-    wheels = []
-    try:
-        wheels = sorted(p for p in libs_dir.glob("*.whl") if p.is_file())
-    except Exception as e:
-        plugin.logger.error(f"[QQ] 扫描离线 .whl 失败: {e}")
-
-    if not wheels:
-        plugin.logger.warning(
-            f"[QQ] 未在 {libs_dir} 找到任何 .whl 文件，将回退到系统已安装的第三方库"
-        )
-
-    for whl in wheels:
-        try:
-            whl_path = str(whl)
-            if whl_path not in sys.path:
-                sys.path.insert(0, whl_path)
-            plugin.logger.info(f"[QQ] 已加载离线依赖: {whl.name}")
-        except Exception as e:
-            plugin.logger.error(f"[QQ] 加载 .whl 失败 {whl}: {e}")
 
     try:
         import requests as _requests
         import websockets as _websockets
         return _requests, _websockets
     except Exception as e:
-        plugin.logger.error(f"[QQ] 导入 requests/websockets 失败: {e}（请将对应 .whl 放入 {libs_dir}）")
+        # 明确点名缺的是哪两个包。
+        #
+        # 为什么要这么啰嗦：libs/ 现在是**通用**的离线依赖目录，用户可能
+        # 往里面放 Pillow（给地图画用）。如果只报一句「第三方库不可用」，
+        # 放了 Pillow 却看到 QQ 网关起不来的人会完全摸不着头脑 ——
+        # 容易误以为"我明明放了库啊"，甚至去删 Pillow 的 whl 反复试。
+        # 所以这里点破：这两个包是做 QQ 通信用的，与图像无关。
+        missing = []
+        try:
+            import requests  # noqa: F401
+        except Exception:
+            missing.append("requests")
+        try:
+            import websockets  # noqa: F401
+        except Exception:
+            missing.append("websockets")
+        names = "、".join(missing) if missing else "requests 或 websockets"
+        plugin.logger.error(
+            f"[QQ] 机器人网关无法启动：缺少第三方库 {names}。\n"
+            f"    请把对应 .whl 放进 {libs_dir} 后重启服务器。\n"
+            f"    （这两个库用于 QQ 通信，和图像功能无关 —— "
+            f"Pillow / PIL 的 whl 不解决这个问题，也不要把它们删掉。）\n"
+            f"    底层错误：{type(e).__name__}: {e}"
+        )
         return None
 
 def _to_slot(key):
@@ -397,7 +417,17 @@ class GreenMoonPlugin(Plugin):
             "description": "停用 admin 型子插件，把 /admin 还原为面板自带管理页",
             "usages": ["/gmback", "/gmback list"],
             "permissions": ["greenmoon.command.gmback"],
-        }
+        },
+        "gmreload": {
+            "description": "热重载主插件：重新读取配置并重启 QQ 机器人，无需重启服务器",
+            "usages": [
+                "/gmreload",              # 配置 + 机器人
+                "/gmreload config",       # 只重载配置
+                "/gmreload bot",          # 只重启机器人
+                "/gmreload status",       # 只看当前状态，不做变更
+            ],
+            "permissions": ["greenmoon.command.gmreload"],
+        },
     }
 
     permissions = {
@@ -406,8 +436,29 @@ class GreenMoonPlugin(Plugin):
         "greenmoon.command.gmback": {
             "description": "允许使用 /gmback 救援指令（停用 admin 型子插件）",
             "default": "op",
-        }
+        },
+        # 热重载会影响全服（机器人短暂掉线、配置即时生效），同样限 OP。
+        "greenmoon.command.gmreload": {
+            "description": "允许使用 /gmreload 热重载主插件（配置与 QQ 机器人）",
+            "default": "op",
+        },
     }
+
+    # ---- 主线程身份（供 _run_in_server_thread 判定"要不要调度"）-----------
+    #
+    # on_enable 跑在服务器的 tick 主线程上，所以在这里记下的 ident 就是
+    # "主线程"的权威身份。
+    #
+    # ⚠ 为什么要在 on_enable 里**快照**，而不是在要用的时候现取：
+    # Endstone 可能在**后台线程**里调用插件的事件处理器（事件是原版主动
+    # 派发的，不保证线程）。而 self._main_thread_id 一旦被后台线程写坏，
+    # _run_in_server_thread 就会把「后台线程」误认成主线程，于是**直接
+    # 同步执行**本该在主线程跑的逻辑（给玩家发贴图、改背包……）。
+    # 那会从后台线程去碰服务器状态 —— 轻则无效，重则直接崩服。
+    #
+    # 快照之后，_main_thread_id 只被赋值一次（on_enable 之前为 None），
+    # 之后任何线程都删不掉、改不了，判定永远正确。
+    _main_thread_id = None
 
     def _install_plugin_logging(self, logger):
 
@@ -468,6 +519,21 @@ class GreenMoonPlugin(Plugin):
 
     def on_enable(self):
         self.logger.info("GreenMoon面板 已启用")
+
+        # ★ 抢占主线程身份的"第一写"。
+        #
+        # on_enable 由 Endstone 在服务器主线程上调用，所以此刻的 ident 就是
+        # 主线程。上面的类属性 _main_thread_id = None 是兜底；能成功赋上值
+        # 就走这条路。
+        #
+        # 这个赋值之所以安全（且必须在这里做），是因为它是**唯一一次**写：
+        # 谁先写谁定音，之后即使事件处理器被调度到后台线程、走到 __init__ 里
+        # 那句赋值，也只会覆盖成同样的值（on_enable 与 __init__ 都在主线程）。
+        try:
+            self._main_thread_id = threading.current_thread().ident
+        except Exception:
+            pass
+
         _boot_at = time.time()
         self._start_ts = _boot_at
         self.logger.info(_hid(0))
@@ -490,6 +556,24 @@ class GreenMoonPlugin(Plugin):
             self.libs_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             self.logger.warning(f"创建第三方库目录失败 {self.libs_dir}: {e}")
+
+        # 离线依赖：把 libs/ 下的 .whl 解压并挂进 sys.path。
+        #
+        # ⚠ 位置很关键 —— 必须在下面 ModLoader.bootstrap() **之前**。
+        # bootstrap 会重载已启用的 py 型子插件（例如地图画子插件），
+        # 而子插件的 setup() 里就要 ``import PIL``。挂晚了子插件会拿到
+        # 「缺库」的结论并打出误导性的警告。
+        #
+        # 为什么是解压而不是直接把 .whl 塞进 sys.path：
+        # 纯 Python 包两者都行，但含 C 扩展的包（Pillow）从 whl 里
+        # 加载不了 .so —— ``import PIL`` 会成功，一调用就炸。
+        # 详见 admin_web/libs_loader.py 的模块级说明。
+        try:
+            from . import libs_loader
+            libs_loader.install(self.libs_dir, self.logger)
+        except Exception as e:
+            # 依赖加载失败绝不能拖垮插件启动
+            self.logger.warning(f"离线依赖加载失败（可忽略，若不需要 libs 依赖）: {e}")
 
         # 子插件：mod/ 目录存放 .gmmod 与 liblist.json，依赖 whl 统一落在 libs/
         self.mods_dir = self.data_dir / "mod"
@@ -731,10 +815,10 @@ class GreenMoonPlugin(Plugin):
                     self.logger.warning(f"关闭 QQ 网关时出错: {e}")
         self._close_plugin_logging()
 
-    # ------------------------------------------------------- /gmback 救援指令
+    # ------------------------------------------------------- 内置指令入口
 
     def on_command(self, sender, command, args) -> bool:
-        """BDS 指令入口，目前只处理 ``gmback``。
+        """BDS 指令入口，处理 ``gmback`` 与 ``gmreload`` 两条指令。
 
         ``/gmback``        停用当前启用的 admin 型子插件，把 /admin 还原为面板自带页
         ``/gmback list``   只列出 admin 型子插件的启用状态，不做任何变更
@@ -742,14 +826,33 @@ class GreenMoonPlugin(Plugin):
         存在意义：admin 型子插件一旦启用就会完全接管 ``/admin``，若该页面本身
         坏了（白屏 / JS 报错），管理员在网页上已经没有入口去停用它。这条指令
         提供一条不依赖 Web 界面的退路 —— 服务端后台控制台、游戏内 OP 都能用。
+
+        ``/gmreload``        重读主插件配置 + 重启全部 QQ 机器人（不动服务器）
+        ``/gmreload config`` 只重读配置
+        ``/gmreload bot``    只重启机器人
+        ``/gmreload status`` 只报告当前状态，不做任何变更
+
+        存在意义：改完 config.json 的限流/白名单，或在面板改了机器人卡片后，
+        原先只能重启整个服务器才能生效 —— 对在线玩家是硬中断。这条指令把这
+        两件事变成秒级、可回执、且不动世界的操作。
         """
+        handled = False
         try:
             # 部分版本会把命名空间带进 name（如 greenmoon:gmback），归一化处理
             name = str(getattr(command, "name", "") or "")
             if ":" in name:
                 name = name.rsplit(":", 1)[-1]
-            if name != "gmback":
-                return False  # 不是本插件的指令，交给其他处理器
+            if name not in ("gmback", "gmreload"):
+                # ★ 必须显式返回 False，让服务端继续把这条指令交给别的插件。
+                #
+                # 这里曾经是「if name != "gmback": return self._gm_reload_command(...)」，
+                # 而 _gm_reload_command 内部对未知指令**也会** return True —— 于是
+                # 任何一条与本插件无关的指令都被当成「已处理」吞掉，别的插件
+                # 再也收不到。指令注册是全服共享的，吞别人的指令属于越权行为。
+                return False
+            handled = True
+            if name == "gmreload":
+                return self._gm_reload_command(sender, command, args, name)
 
             argv = [str(a) for a in (args or [])]
             sub = argv[0].lower() if argv else ""
@@ -811,13 +914,17 @@ class GreenMoonPlugin(Plugin):
             return True
 
         except Exception as e:
-            # 绝不能把异常抛回服务端：一旦抛出去，指令可能被其他插件再执行一遍
+            # 绝不能把异常抛回服务端：一旦抛出去，指令可能被其他插件再执行一遍。
+            #
+            # 但返回值要诚实：只有**确认是本插件的指令**时才返回 True，
+            # 否则异常发生在归一化/判断之前，盲目 True 会吞掉别人的指令。
             try:
                 self.logger.error(f"[gmback] 指令处理异常: {e}")
-                self._gmback_reply(sender, f"指令执行异常：{e}")
+                if handled:
+                    self._gmback_reply(sender, f"指令执行异常：{e}")
             except Exception:
                 pass
-            return True
+            return handled
 
     def _gmback_reply(self, sender, text: str) -> None:
         """安全回消息。后台控制台的 sender 同样实现 send_message。
@@ -863,6 +970,190 @@ class GreenMoonPlugin(Plugin):
             f"admin 型子插件：已启用「{disp}」(uuid={uid})，/admin 当前被其接管。"
             f"执行 /gmback 可停用它。",
         )
+
+    # --------------------------------------------------- /gmreload 热重载
+
+    def _gm_reload_command(self, sender, command, args, name: str) -> bool:
+        """``/gmreload`` 热重载入口（配置 + QQ 机器人）。
+
+        设计要点
+        --------
+        * **不重启服务器**：只重读配置、重启机器人网关。世界 / 玩家不受影响。
+        * **重活丢后台线程**：重启网关要 join 线程、做网络请求，在
+          ``on_command`` 里同步做会把主线程卡住（机器人多时可能几秒）。
+          因此这里立刻回一句「正在重载」，真正的活在后台线程跑完再回执。
+        * **每个子项独立 try**：配置重载失败不应阻止机器人重启，反之亦然。
+          否则一个坏配置会让用户连机器人都重启不了。
+        * **回执走 sender**：但若执行者下线了，``_gmback_reply`` 会降级到日志。
+
+        子命令：``config`` / ``bot`` / ``status``；无参数 = 两个都做。
+        """
+        try:
+            argv = [str(a) for a in (args or [])]
+            sub = argv[0].lower() if argv else ""
+            who = self._gmback_sender_name(sender)
+
+            if sub == "status":
+                self._gm_reload_status(sender)
+                return True
+            if sub and sub not in ("config", "bot"):
+                self._gmback_reply(
+                    sender,
+                    f"未知参数 {argv[0]}。用法：/gmreload [config|bot|status]",
+                )
+                return True
+
+            do_cfg = (not sub) or sub == "config"
+            do_bot = (not sub) or sub == "bot"
+
+            self.logger.info(f"[gmreload] 开始热重载（cfg={do_cfg} bot={do_bot}）由 {who} 触发")
+
+            def _work() -> None:
+                lines = []
+                # ---- 1. 重载主插件配置 ----
+                if do_cfg:
+                    lines.append(self._reload_web_config())
+                # ---- 2. 重启机器人网关 ----
+                if do_bot:
+                    lines.append(self._restart_qq_bot_for_reload())
+                # ---- 汇总回执 ----
+                try:
+                    self._gmback_reply(
+                        sender,
+                        "【热重载完成】" + "；".join([x for x in lines if x]),
+                    )
+                except Exception:
+                    pass
+                # 审计日志：热重载属于「改全服行为」的操作，必须留痕
+                try:
+                    self._log_admin_action(
+                        f"[gmreload] 热重载完成（cfg={do_cfg} bot={do_bot}）："
+                        + "；".join([x for x in lines if x])
+                        + f"（由 {who} 执行）"
+                    )
+                except Exception:
+                    pass
+
+            threading.Thread(target=_work, name="gm-reload", daemon=True).start()
+
+            # 立刻给个回执，避免用户以为没反应又敲一遍
+            self._gmback_reply(
+                sender,
+                "正在热重载"
+                + ("配置" if do_cfg and not do_bot else "")
+                + ("与" if do_cfg and do_bot else "")
+                + ("QQ 机器人" if do_bot else "")
+                + "…完成后会有第二条回执。服务器不会重启，玩家不受影响。",
+            )
+            return True
+        except Exception as e:
+            try:
+                self.logger.error(f"[gmreload] 指令处理异常: {e}")
+                self._gmback_reply(sender, f"热重载异常：{e}")
+            except Exception:
+                pass
+            return True
+
+    def _reload_web_config(self) -> str:
+        """重读 ``config.json`` 并就地更新 ``self.web_config``。返回一句描述。"""
+        try:
+            old = getattr(self, "web_config", None) or {}
+            new = self._load_config()
+            if not isinstance(new, dict):
+                return "配置：返回体异常，已保留原配置"
+
+            # ★★★ 必须在 update 之前把「旧值」抓下来。
+            #
+            # 第一版把 old_host/old_port 的读取放在 old.update(new) **之后**，
+            # 于是拿到的其实是刚写进去的新值，两边永远相等，
+            # 「端口变了要提醒重启」这条提示**永远不会出现** —— 用户改了
+            # 端口、看到「已重新读取」，以为生效了，实际服务还听在旧端口上。
+            # 这类「快照时机」错误不会报错，只会静默给出错误结论。
+            old_host, old_port = old.get("host"), old.get("port")
+
+            # ★ 就地更新而不是整体替换。
+            #
+            # Web 服务持有的是 web_config 这个**对象引用**（构造时传进去的），
+            # 若直接 self.web_config = new，运行中的 HTTP 服务仍指着旧 dict，
+            # 表现为「指令说重载好了，但面板行为没变」—— 排查起来极费劲。
+            # update + 删除多余键，既换内容又保引用。
+            if isinstance(old, dict):
+                for k in list(old.keys()):
+                    if k not in new:
+                        try:
+                            del old[k]
+                        except Exception:
+                            pass
+                old.update(new)
+                self.web_config = old
+            else:
+                self.web_config = new
+
+            # 端口 / 绑定地址变了必须提示：这两项**不支持**热重载
+            # （socket 已经 listen 了）。说清楚，别让用户以为生效了。
+            note = ""
+            if old_host is not None and (old_host != new.get("host")
+                                         or old_port != new.get("port")):
+                note = (f"（注意：监听地址 {old_host}:{old_port} → "
+                        f"{new.get('host')}:{new.get('port')} 需重启服务器才生效）")
+            return f"配置：已重新读取{note}"
+        except Exception as e:
+            self.logger.warning(f"[gmreload] 重载配置失败: {e}")
+            return f"配置：失败（{e}）"
+
+    def _restart_qq_bot_for_reload(self) -> str:
+        """重启全部机器人网关。返回一句描述。"""
+        hub = getattr(self, "qq_hub", None)
+        if hub is None:
+            return "机器人：子系统未初始化，已跳过"
+        try:
+            libs = _load_offline_wheels(self, self.libs_dir)
+            if libs is None:
+                return "机器人：第三方库不可用，未重启"
+            # restart() = stop_all + _boot，卡片配置会被重新读取，
+            # 所以「在面板上改了机器人的账号/开关但不重启服务器」这个
+            # 最常见的诉求，靠这一步就能满足。
+            hub.restart(libs)
+            try:
+                running = [x for x in hub.status() if x.get("running")]
+                return f"机器人：已重启 {len(running)} 个网关"
+            except Exception:
+                return "机器人：已重启"
+        except Exception as e:
+            self.logger.warning(f"[gmreload] 重启机器人失败: {e}")
+            return f"机器人：失败（{e}）"
+
+    def _gm_reload_status(self, sender) -> None:
+        """只读报告：当前配置与服务监听状态、机器人卡片状态。"""
+        try:
+            cfg = getattr(self, "web_config", None) or {}
+            port = cfg.get("port", "?")
+            host = cfg.get("host", "?")
+        except Exception:
+            host, port = "?", "?"
+
+        lines = [f"服务监听：{host}:{port}（改这两项需重启服务器）"]
+
+        hub = getattr(self, "qq_hub", None)
+        if hub is None:
+            lines.append("机器人：子系统未初始化")
+        else:
+            try:
+                items = hub.status() or []
+            except Exception as e:
+                items = []
+                lines.append(f"机器人：状态读取失败（{e}）")
+            if not items:
+                lines.append("机器人：未配置任何卡片")
+            for it in items:
+                tone = ("已连接" if it.get("connected") else
+                        ("未运行" if not it.get("running") else "连接中"))
+                en = "启用" if it.get("enabled") else "禁用"
+                lines.append(
+                    f"· {it.get('name') or it.get('id')} [{it.get('type')}] "
+                    f"{en}/{tone}"
+                )
+        self._gmback_reply(sender, "【当前状态】" + "　".join(lines))
 
     def _init_qq_gateway(self):
 
@@ -1201,17 +1492,31 @@ class GreenMoonPlugin(Plugin):
                 pass
 
     def _qqbot_new_group_code(self, card_id=None):
+        """为「加入新群」生成一个 4 位验证码，返回该码。
+
+        ⚠ **一次只保留一个有效码** —— 这里刻意是**覆盖**写入，不是追加。
+
+        历史行为（已改）：原实现是 ``pending.insert(0, 新码)`` 且保留最近
+        20 个，等于把验证码当成一个**可累积的队列**。但群消息那边只比对
+        ``pending[0]``（最新那个），于是界面上列出的一串码里，**只有最新
+        的那个真正能用** —— 用户照着旧码发过去必然绑定失败，看起来就是
+        「验证码失效了」，实则是显示与行为对不上。
+
+        现在语义收紧为一码一用：
+          * 申请新码 → 旧码立即作废（同一个群里同时只可能有一个待用码）；
+          * 成功加入一个群 → 该码被消费掉（见 ``_consume_pending_code``）。
+
+        注意 ``_qqbot_resolve_adapter`` 返回的是**深拷贝**，读它的
+        ``pending_group_binds`` 反映不了同一进程内上一次的写入。所幸改成
+        覆盖后不再需要读旧值，这个隐患自然消失。
+        """
         mgr = getattr(self, "conn_mgr", None)
         primary, pid = self._qqbot_resolve_adapter(card_id) if mgr is not None else (None, None)
         if primary is None or pid is None:
             return f"{secrets.randbelow(10000):04d}"
         code = f"{secrets.randbelow(10000):04d}"
-        pending = primary.get("pending_group_binds") or []
-        if not isinstance(pending, list):
-            pending = []
-        pending = [p for p in pending if isinstance(p, dict)]
-        pending.insert(0, {"code": code, "ts": int(time.time())})
-        pending = pending[:20]
+        # 覆盖式：列表里永远最多一条，与群消息只认 pending[0] 的行为严格一致。
+        pending = [{"code": code, "ts": int(time.time())}]
         try:
             mgr.update(pid, {"pending_group_binds": pending})
         except Exception as e:
@@ -1676,7 +1981,12 @@ class GreenMoonPlugin(Plugin):
             self.logger.warning(f"[跨服] 应用白名单失败: {e}")
 
     def _exec_allowlist_cmd(self, name, op):
-        cmd = f"allowlist add {name}" if op == "add" else f"allowlist remove {name}"
+        # 同 _exec_ban_cmd：名字来自跨服对端，拼指令前必须校验，
+        # 否则换行即可注入任意控制台指令。
+        safe = self._safe_player_name(name)
+        if safe is None:
+            return
+        cmd = f"allowlist add {safe}" if op == "add" else f"allowlist remove {safe}"
         try:
             self.server.dispatch_command(self.server.command_sender, cmd)
         except Exception:
@@ -1711,8 +2021,40 @@ class GreenMoonPlugin(Plugin):
         except Exception as e:
             self.logger.warning(f"[跨服] 应用封禁失败: {e}")
 
+    # 合法的玩家名：BDS 允许字母/数字/下划线，加上部分插件会加空格与点。
+    # 这是一条**安全边界**，宁可放宽到「看起来像名字」也不能让换行/引号进来。
+    _SAFE_NAME_RE = re.compile(r"^[0-9A-Za-z_\-\. ]{1,64}$")
+
+    def _safe_player_name(self, name):
+        """校验从跨服/外部来的玩家名，不合法返回 None。
+
+        ★ 为什么必须有这个函数
+        ---------------------
+        ``_exec_ban_cmd`` / ``_exec_allowlist_cmd`` 会把名字**拼进控制台指令**
+        再交给 ``dispatch_command``，也就是以**控制台权限**执行。而名字来自
+        跨服对端（``ban_set`` / ``wl_set`` 报文），对端只要拿到跨服口令就能
+        塞进 ``"x\\nop Steve"`` 这种值 —— 换行后 BDS 会当作第二条指令执行，
+        等于**远程控制台接管**（可 op / deop / stop）。
+
+        跨服口令是多机共享、常常明文写在配置里的，泄露面比面板密码大得多，
+        所以这里必须挡死，而不是「相信对端」。
+        """
+        s = str(name or "").strip()
+        if not s:
+            return None
+        if not self._SAFE_NAME_RE.match(s):
+            try:
+                self.logger.warning(f"[跨服] 丢弃非法玩家名（疑似指令注入）: {s[:80]!r}")
+            except Exception:
+                pass
+            return None
+        return s
+
     def _exec_ban_cmd(self, name, op):
-        cmd = f"ban {name}" if op == "add" else f"unban {name}"
+        safe = self._safe_player_name(name)
+        if safe is None:
+            return
+        cmd = f"ban {safe}" if op == "add" else f"unban {safe}"
         try:
             self.server.dispatch_command(self.server.command_sender, cmd)
         except Exception:
@@ -1862,7 +2204,11 @@ class GreenMoonPlugin(Plugin):
         except Exception:
             pass
         try:
-            from endstone import Attribute
+            # ⚠ Attribute 在 ``endstone.attribute``，**顶层没有**。
+            # 写成 ``from endstone import Attribute`` 会抛 ImportError，
+            # 而这里正被 try/except 兜着 —— 于是不报错、不崩溃，
+            # 只是**永远读不到真实属性值**，静默失效（最难查的一类）。
+            from endstone.attribute import Attribute
             ak = getattr(Attribute, attr_key, None)
             if ak is not None:
                 av = getattr(player, "get_attribute", None)
@@ -2143,7 +2489,10 @@ class GreenMoonPlugin(Plugin):
         except Exception:
             pass
         try:
-            from endstone import ItemStack
+            # ⚠ ItemStack 在 ``endstone.inventory``，**顶层没有**。
+            # 同样的问题：ImportError 被 except 吞掉后 size 恒为 0，
+            # 下面的 ``if size <= 0: return`` 直接让整段逻辑失效。
+            from endstone.inventory import ItemStack
             size = int(getattr(inv, "size", None) or 40)
         except Exception:
             size = 0
@@ -2507,6 +2856,64 @@ class GreenMoonPlugin(Plugin):
             pass
 
     @event_handler
+    def on_map_initialize(self, event: MapInitializeEvent):
+        """地图被初始化时，顺手把「渲染器丢了」的地图画补回来。
+
+        为什么要单独挂这个事件 —— 进服恢复（``_restore_mapart_async``）
+        只在玩家**进服那一刻**跑一次，覆盖不到下面两种情况：
+
+          1. **服务器重启后，玩家一直没重登**
+             地图对象从存档重建时渲染器就是空的，仅靠进服恢复要等到
+             玩家下次登录才补。而这期间别人看展示框上的地图、或者
+             玩家自己打开地图，看到的都是白的。
+
+          2. **地图被放进展示框 / 交给别人**
+             展示框走实体渲染路径，不经过 ``send_map``。但只要渲染器
+             在，原版就会正常把像素广播出去 —— 所以这里补上渲染器，
+             展示框那边也就正常了。
+
+        ⚠ 这个事件是**原版主动触发**的，意味着它可能：
+          * 在任何线程被触发 → 只做「查表 + 挂渲染器」，不碰磁盘
+          * 被非常频繁地触发（每次地图初始化一次）→ 必须极快
+            （一次字典查表 + 一次 renderers 判空，纳秒级）
+
+        所以这里**绝不读盘、绝不 send_map**，只挂渲染器。
+        像素从哪来？——正常路径下根本走不到这里（渲染器还在）；
+        只有服务端重启后才需要补，而那时像素文件在磁盘上 ——
+        但我们不能在事件里读盘。折中：**交给进服恢复去读盘补**，
+        这里只做「发现渲染器丢失就记一条日志」，方便排查。
+
+        换句话说：这个事件的作用是**让问题可见**，真正的修复仍走进服恢复。
+        """
+        try:
+            view = event.map
+            if view is None:
+                return
+            try:
+                mid = int(view.id)
+            except Exception:
+                return
+
+            # 只关心我们自己的地图画。查索引是纯内存操作（有缓存的话）。
+            # 这里刻意**不用** _mapart_of —— 那是按玩家查的。
+            # 用一份轻量的「我们管过哪些 id」判断更合适，见 _mapart_has。
+            if not self._mapart_has(mid):
+                return
+
+            try:
+                have = len(list(view.renderers or []))
+            except Exception:
+                have = 0
+
+            if have <= 0:
+                self.logger.warning(
+                    f"[地图画] 地图 {mid} 被初始化，但渲染器为空"
+                    f"（服务端重启后属正常现象；进入对应的服务器后玩家"
+                    f"重新登录会自动补回。若长期如此请检查像素文件）")
+        except Exception:
+            pass
+
+    @event_handler
     def on_player_join(self, event: PlayerJoinEvent):
         try:
             self._append_message("join", event.player.name, "加入了服务器")
@@ -2554,6 +2961,23 @@ class GreenMoonPlugin(Plugin):
 
         try:
             self._maybe_handle_join_binding(event.player)
+        except Exception:
+            pass
+
+        # 地图画恢复：玩家重登后补发地图贴图。
+        #
+        # 为什么必须放后台线程：这里跑在主线程（tick 线程），而恢复要读磁盘
+        # （每人几张、每张几十 KB）。在主线程里读文件会直接卡 tick，
+        # 张数一多 TPS 就掉。所以只起一个线程，真正的读盘在主线程之外做，
+        # 读完了再由那个线程调度回主线程执行 send_map。
+        #
+        # 与上面的 _cross_restore_async 是同一个模式。
+        try:
+            threading.Thread(
+                target=self._restore_mapart_async,
+                args=(event.player, event.player.name),
+                daemon=True,
+            ).start()
         except Exception:
             pass
 
@@ -4487,6 +4911,971 @@ class GreenMoonPlugin(Plugin):
         except Exception:
             return {}
 
+    # ------------------------------------------------------------ 地图画
+
+    def _execute_map(self, player_name: str, image_data: bytes):
+        """把一张 128×128 的 24 位无压缩 BMP 画成地图并发放给玩家。
+
+        返回 ``(是否成功, 说明文字)``。
+
+        这是**主插件侧的权威实现**，供两条路径共用：
+          * Web 面板「地图画」上传（``web.py`` 的 handler 调它）
+          * 子插件通过 ``gm.mapart.give()`` 调用（``gm/mapart.py`` 调它）
+
+        ⚠ 历史 bug（已修）：本方法原先只定义在 ``web.AdminHTTPHandler``
+        **这个 HTTP 处理器类**上。面板自己调得到，但 ``gm/mapart.py`` 里
+        写的是 ``plugin._execute_map(...)`` —— 插件对象上根本没有这个方法，
+        于是子插件一调用就炸：
+
+            ❌ 生成失败：生成地图失败:
+               'GreenMoonPlugin' object has no attribute '_execute_map'
+
+        修复方式是把实现搬到插件类上（所有权本就该在插件侧：它要碰
+        server / scheduler / 玩家背包），web 那边改为转发调用，避免两套
+        逻辑各自演化。
+
+        调用方需要自己保证在主线程执行 —— ``gm/_sched.py`` 的
+        ``call()`` 已做这一步调度。
+        """
+        try:
+            target = self.server.get_player(player_name)
+        except Exception as e:
+            return False, f"查询玩家失败: {e}"
+        if not target:
+            return False, f"玩家 {player_name} 不在线"
+
+        try:
+            pixels = decode_bmp_24bit(image_data)
+        except Exception as e:
+            return False, f"图片解码失败: {e}"
+
+        try:
+            dimension = target.dimension
+        except AttributeError:
+            try:
+                dimension = target.location.dimension
+            except AttributeError:
+                return False, "无法获取玩家所在维度"
+
+        try:
+            map_view = self.server.create_map(dimension)
+        except TypeError:
+            # 老版本 endstone 的 create_map() 不接受 dimension 参数
+            try:
+                map_view = self.server.create_map()
+            except Exception:
+                return False, "当前 Endstone 不支持创建地图"
+        except Exception as e:
+            return False, f"创建地图失败: {e}"
+
+        # ★ 用 attach_mapart_renderer 而不是裸 add_renderer：
+        # 它保证我们的渲染器排在渲染器列表**末尾**（后画的赢），
+        # 并做位置复核。理由见 ImageMapRenderer 的类 docstring ——
+        # EndstoneMapView 构造时会先挂一个内置渲染器（画存档像素，
+        # 对地图画恒为白色），顺序错了就会把我们的像素洗掉。
+        renderer = ImageMapRenderer(pixels)
+        attach_mapart_renderer(map_view, renderer)
+
+        item_type = ItemType.get("minecraft:filled_map") or ItemType.get("filled_map")
+        if not item_type:
+            return False, "无法获取 filled_map 物品类型"
+        item_stack = item_type.create_item_stack(1)
+
+        meta = item_stack.item_meta
+        if not isinstance(meta, MapMeta):
+            from endstone.inventory import ItemMeta
+            meta = ItemMeta()
+        meta.map_view = map_view
+        item_stack.set_item_meta(meta)
+
+        remaining = target.inventory.add_item(item_stack)
+        if remaining:
+            try:
+                dimension.drop_item(target.location, item_stack)
+            except Exception as e:
+                self.logger.warning(f"背包已满且掉落失败: {e}")
+            self.logger.warning(f"{player_name} 背包已满，地图丢在地上")
+
+        # ★ 记账：把地图登记进持久化索引。
+        #
+        # 放在「发放之后」是有意的 —— 记账失败绝不能连累玩家拿到地图，
+        # 所以它整段被 try 包住，且不影响下面的返回值。
+        #
+        # 为什么必须记账：渲染器是**纯内存态**，玩家一掉线/服务器一重启
+        # 就随地图对象一起没了；而地图画从没进过存档（endstone 没有写
+        # 存档的 API），所以不记账就**没有任何东西能把它画回来**。
+        # 只有记下「谁有哪张图 + 图的像素」，才能在重登时重新补挂渲染器
+        # 并补发地图包（见 _restore_mapart_now）。
+        marked = False
+        try:
+            marked = bool(self._record_mapart(int(map_view.id), player_name, image_data))
+        except Exception as e:
+            self.logger.warning(f"地图画登记失败（不影响本次发放）: {e}")
+        # ★ 诊断：把登记结果记下来。这是恢复功能的起点 ——
+        # 没记上，后面重登时一定恢复不了，而玩家只会看到"地图还是白的"。
+        try:
+            if marked:
+                self.logger.info(
+                    f"[地图画] 已登记：地图 {map_view.id} → {player_name}"
+                    f"（像素 {len(image_data)} 字节）")
+                # ★ 关键提醒（反汇编确认的机制，见 _restore_mapart_now）：
+                # 玩家拿到地图后，像素是靠**发包链路的 hook** 才被填进
+                # 地图包的（hook 会调 view->render）。若渲染链路有问题，
+                # 此刻看到的就会是白图 —— 而那与"有没有登记"无关，
+                # 所以这里给一句指路，避免又绕回索引去查。
+                self.logger.info(
+                    f"[地图画] 地图 {map_view.id} 已发放。"
+                    f"若玩家看到的是白图，请看有没有"
+                    f"「渲染器已被调用」那一行："
+                    f"有=渲染链路正常，无=渲染器没被用上")
+            else:
+                self.logger.warning(
+                    f"[地图画] 登记失败：地图 {map_view.id} → {player_name}，"
+                    f"重登后将无法自动恢复")
+        except Exception:
+            pass
+
+        # ★★ 锁定：只在**确定能保住画面**时才锁。
+        #
+        # ⚠ 这里踩过一个坑，别再犯：
+        # 最初写的是无条件 ``map_view.locked = True``，理由是「地图画不该被
+        # 原版继续探索覆盖」。但 locked 的官方语义是
+        #     "A locked map may not be explored further."
+        # 也就是说它会**同时禁止原版把地形画上去**。
+        #
+        # 而插件挂的渲染器是**内存态**，服务器重启必然丢失。于是一个
+        # 「锁着 + 渲染器丢了」的地图就进退两难：
+        #     * 没有渲染器 → 没人画地图画
+        #     * 又被 locked   → 原版也不许画地形
+        #     → **永久白板**，比不锁还糟。
+        #
+        # 所以锁的判据必须是「现在到底有没有渲染器」，而不是「是不是刚发的」：
+        #     有渲染器 → 锁，防止原版把地图画覆盖成地形图
+        #     没渲染器 → 不锁，放开让原版能探索出地形（至少不是一块白板）
+        #
+        # 恢复流程（_restore_mapart_now）遵循同样的判据：补挂成功才锁。
+        self._apply_map_lock(map_view)
+
+        try:
+            target.send_message(
+                "§c[警告] §e你收到了一张地图画，该地图渲染可能不稳定，请勿在低版本客户端使用。"
+            )
+        except Exception:
+            pass
+
+        self.logger.info(f"为 {player_name} 生成地图，ID={map_view.id}")
+        note = "" if marked else "（未能登记，重登后可能无法恢复）"
+        return True, f"已为 {player_name} 生成地图，ID: {map_view.id}（已发放）{note}"
+
+    # ------------------------------------------------- 地图画持久化与恢复
+    #
+    # 背景：地图画为什么会变白
+    # ------------------------
+    # 两层原因，都得治：
+    #
+    # 1) **渲染器是内存态，重启必丢；像素也从没进过存档。**
+    #    endstone 没有任何 API 能把插件画的像素写进存档
+    #    （``MapItemSavedData::getPixels()`` 在全运行时只有一个调用者，
+    #      就是内置渲染器，且只读）。所以渲染器一没，地图画就**无处可寻**。
+    #
+    # 2) **地图对象天生带一个内置渲染器**（EndstoneMapView 构造函数里挂的），
+    #    它画的是**存档像素** —— 对地图画而言恒为全 0 = 纯白。
+    #    而 ``EndstoneMapView::render(player)`` 是**顺序遍历**渲染器、
+    #    每个都往同一张 canvas 上画、各自先 setBase 打底 —— **后画的赢**。
+    #    所以我们的渲染器必须排在**末尾**，否则会被内置那个洗成白色。
+    #    ⚠ 也正因为内置渲染器恒存在，**绝不能**用
+    #    ``len(view.renderers)`` 判断"我们的渲染器还在不在"。
+    #
+    # 玩家掉线重连后，客户端贴图缓存已经清空；服务端又认为「早就发过了」，
+    # 不再补发 —— 两边都以为对方有，玩家看到的就是一张白图。
+    #
+    # 解法不是"再画一遍"，而是**做两件事**：
+    #   (a) 用磁盘上的 BMP 把我们的渲染器补挂回去（且必须排在末尾）；
+    #   (b) **主动把地图整个推给玩家**：
+    #
+    #     player.send_map(map_view)
+    #
+    # 官方文档对它的说明正是这个用途：
+    #   "Render a map and send it to the player in its entirety.
+    #    This may be used when streaming the map in the normal manner
+    #    is not desirable."
+    #
+    # 存储布局
+    # --------
+    #   <插件包>/mapart_data/mapart.json        索引：谁有哪些地图
+    #   <插件包>/mapart_data/<id>.bmp           像素（正数 123.bmp / 负数 n123.bmp）
+    #
+    # ⚠ 为什么放在**插件包内**而不是 data_dir：
+    # 地图画是插件自己的私有资源，跟着插件走。这样备份/迁移/整体打包
+    # 插件目录时，地图画数据自动跟着走，不需要记得单独捞一份 data 目录。
+    # 具体解析见 _mapart_root（含"包目录不可写则退回 data_dir"的兜底）。
+    #
+    # 为什么原样存 BMP 而不是存像素/转码：
+    #   _execute_map 的输入本来就是 24 位无压缩 BMP，存原始字节 → 恢复时
+    #   直接喂给同一个 decode_bmp_24bit → **来回零转换、零精度损失**。
+    #   代价只是每张几十 KB，而这是本机磁盘读写，完全可接受。
+
+    #: 地图画数据在插件目录里的子目录名。
+    _MAPART_SUBDIR = "mapart_data"
+
+    def _mapart_root(self):
+        """地图画数据的根目录 —— **放在插件包内**，与代码同处一地。
+
+        为什么不再放 ``data_dir``（也就是 ``plugins/<插件>/data/``）：
+        地图画是「这个插件自己的私有资源」，跟着插件走更方便 ——
+        备份、迁移、整个插件目录打包带走时，地图画数据自动跟着走，
+        不用记得单独捞一份 data 目录。
+
+        实现方式：以 ``__file__`` 为锚点定位插件包目录，
+        得到 ``admin_web/mapart_data/``。这样无论 Endstone 把插件装在
+        哪里、``data_folder`` 指向何处，数据始终落在插件自己身边。
+
+        兜底：万一包目录不可写（只读挂载等），退回 ``data_dir``，
+        宁可位置难看也不要功能直接失效。
+
+        可用 ``_mapart_root_override`` 覆盖「插件包目录」（测试用；
+        正常运行时该属性不存在）。注意覆盖的是**包目录**，子目录
+        ``mapart_data`` 仍然会拼上去 —— 这样测试和生产走完全相同的
+        目录层级，避免"测试通过但结构不一样"。
+        """
+        override = getattr(self, "_mapart_root_override", None)
+        if override:
+            try:
+                d = Path(override) / self._MAPART_SUBDIR
+                d.mkdir(parents=True, exist_ok=True)
+                self._mapart_migrate_old(d)
+                return d
+            except Exception:
+                pass
+
+        candidates = []
+        try:
+            candidates.append(Path(__file__).resolve().parent / self._MAPART_SUBDIR)
+        except Exception:
+            pass
+        try:
+            candidates.append(self.data_dir / self._MAPART_SUBDIR)
+        except Exception:
+            pass
+
+        last_err = None
+        for d in candidates:
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+                # 真写一下就验明可写性 —— mkdir 成功不代表能创建文件
+                # （只读挂载/权限位异常时表现不一致）。
+                probe = d / ".write_test"
+                probe.write_bytes(b"")
+                try:
+                    probe.unlink()
+                except Exception:
+                    pass
+                if d != candidates[0]:
+                    try:
+                        self.logger.info(
+                            f"[地图画] 插件目录不可写，像素数据改用备用目录: {d}")
+                    except Exception:
+                        pass
+                # 换目录后老用户的数据要跟着走，否则升级即"图全没了"。
+                # 抽成独立方法且全程吞异常：迁移失败不能拖垮启动。
+                self._mapart_migrate_old(d)
+                return d
+            except Exception as e:
+                last_err = e
+                continue
+
+        try:
+            self.logger.warning(f"创建地图画目录失败: {last_err}")
+        except Exception:
+            pass
+        return None
+
+    def _mapart_dir(self):
+        """返回地图画像素目录（并确保存在）。失败返回 None。"""
+        return self._mapart_root()
+
+    def _mapart_index_path(self):
+        """地图画索引文件路径（与像素目录同级，都在插件包内）。"""
+        d = self._mapart_root()
+        if d is None:
+            return None
+        return d / "mapart.json"
+
+    def _mapart_migrate_old(self, new_dir):
+        """把老版本的 ``data_dir/mapart*`` 数据搬到新的插件包目录。
+
+        老版本把索引放在 ``data_dir/mapart.json``、像素放在
+        ``data_dir/mapart/<id>.bmp``。换目录后如果不搬，老用户一升级
+        就会发现"图全没了"——虽然地图本身在存档里，但索引丢了就没人
+        知道哪张图是谁的，恢复功能等于失效。
+
+        只在**新目录还没有索引**时搬（避免覆盖用户新产生的数据），
+        且搬完不删老文件（留着当备份，占不了多少空间）。
+        任何异常都吞掉——迁移失败绝不能拖垮启动。
+        """
+        try:
+            if new_dir is None:
+                return
+            if (new_dir / "mapart.json").exists():
+                return  # 新目录已有索引，不搬
+            old_dir = self.data_dir / "mapart"
+            old_idx = self.data_dir / "mapart.json"
+            moved_idx = 0
+            moved_bmp = 0
+
+            if old_idx.is_file():
+                try:
+                    shutil.copy2(str(old_idx), str(new_dir / "mapart.json"))
+                    moved_idx = 1
+                except Exception:
+                    pass
+
+            if old_dir.is_dir():
+                for p in old_dir.glob("*.bmp"):
+                    try:
+                        shutil.copy2(str(p), str(new_dir / p.name))
+                        moved_bmp += 1
+                    except Exception:
+                        continue
+
+            if moved_idx or moved_bmp:
+                try:
+                    self.logger.info(
+                        f"[地图画] 已把老数据迁移到插件目录："
+                        f"索引 {moved_idx} 个，像素 {moved_bmp} 个")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _mapart_file_name(self, map_id):
+        """地图 ID → 像素文件名。
+
+        ⚠ 为什么不直接用 ``f"{map_id}.bmp"``：地图 ID 是**有符号** 64 位，
+        负数会出现 ``-219043332039.bmp`` 这种文件名。前导 ``-`` 在部分
+        文件系统、打包工具、SSH/SCP 命令行里都要额外转义，很容易在某处
+        被吃掉或报错。更糟的是运维手工排查时，``rm -219043332039.bmp``
+        会被当成参数解析。
+
+        所以做一次确定性编码：正数 ``123.bmp``，负数 ``n219043332039.bmp``。
+        纯 ASCII、无特殊字符、正负不撞名、可肉眼反推。
+
+        刻意写成普通方法而不是 ``@staticmethod``：测试脚本会把这个方法
+        单独抠出来重装到假插件上跑，带装饰器会让签名对不上（与
+        ``_pixels_ok`` 是同一个理由）。
+        """
+        try:
+            mid = int(map_id)
+        except (TypeError, ValueError):
+            return None
+        return f"n{-mid}.bmp" if mid < 0 else f"{mid}.bmp"
+
+    def _apply_map_lock(self, view):
+        """按「我们自己的渲染器在不在」决定这张地图锁不锁。
+
+        这是本功能里**最容易写错**的一处，所以单独抽成一个方法，
+        让生成路径和恢复路径共用同一套判据，避免两边慢慢长歪。
+
+        ``locked`` 的官方语义（endstone 0.11.10）::
+
+            Whether the map is locked or not.
+            A locked map may not be explored further.
+
+        关键在于它**同时**做了两件事：
+          * 不让原版地图机制把地形画上去（—— 这正是地图画需要的）
+          * 一旦锁上就不会再自动解锁，重启也不会
+
+        而挂在地图上的渲染器是**纯内存态**，服务器重启必然丢失。所以：
+
+            有渲染器 + 锁上   → 画面正确，且不会被地形覆盖     ✅ 理想
+            无渲染器 + 锁上   → 没人画地图画，原版也不许画地形  ❌ 永久白板
+            无渲染器 + 不锁   → 原版会探索出地形                ⚠ 画面丢了，但可用
+
+        第三条虽然丢了地图画，但**至少不是一块焊死的白板** ——
+        这比第二条好得多。所以判据是「有没有渲染器」，不是「是不是刚发的」。
+
+        ★★ 这里的「有没有渲染器」必须是**我们自己的**，不能数总数。
+        用户日志里「现有渲染器 1 个」就是这么被误读的：
+        ``EndstoneMapView`` 构造时会自动挂一个内置
+        ``EndstoneMapRenderer``（画存档像素），所以任何地图**天生就有 1 个**。
+        数总数会让 ``have`` 恒为 True —— 于是永远锁上，而我们的渲染器
+        早丢了，正好造出上面第二条描述的**永久白板**。
+        改用 ``has_mapart_renderer`` 按类型认人（见 web.py 的说明）。
+
+        返回最终是否处于锁定态。失败一律按「不锁」处理（宁可丢画面，
+        也不能造出永久白板）。
+        """
+        try:
+            have = bool(has_mapart_renderer(view, ImageMapRenderer))
+        except Exception:
+            have = False
+        try:
+            view.locked = bool(have)
+            return bool(have)
+        except Exception:
+            return False
+
+    def _mapart_load(self):
+        """读取地图画索引，并做**结构自愈**。
+
+        索引文件是手工可编辑的，也可能在断电时被写坏。所以这里不信任
+        内容：字段类型不对就就地归一化，任何异常都退回空索引。
+        返回的结构保证是 ``{"maps": dict, "players": dict}``。
+
+        索引位置见 ``_mapart_index_path``（插件包内，与像素文件同级）。
+        """
+        empty = {"maps": {}, "players": {}}
+        try:
+            p = self._mapart_index_path()
+            if p is None or not p.is_file():
+                return empty
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            return empty
+        if not isinstance(d, dict):
+            return empty
+
+        maps = d.get("maps")
+        players = d.get("players")
+        if not isinstance(maps, dict):
+            maps = {}
+        if not isinstance(players, dict):
+            players = {}
+
+        # 逐条校验：ID 必须是整数，owner 必须是非空字符串。
+        # 坏条目直接丢弃 —— 留着只会在恢复时制造无意义的报错。
+        #
+        # ⚠ 别再加「ID 必须 > 0」这种判断，踩过大坑：
+        # Bedrock 的地图 ID 就是 ActorUniqueID，是**有符号 64 位整数**，
+        # 完全可能是负数（实测见过 -219043332039）。当初想当然地按
+        # 「地图 ID 是正整数」过滤，结果玩家一发图就登记失败：
+        #     [地图画] 登记失败：地图 -219043332039 → xxx，重登后将无法自动恢复
+        # 所以这里只要求「是个 int」，不要求符号。
+        # bool 要单独排除 —— isinstance(True, int) 是 True，
+        # 而 True 一旦混进来会变成 map_id=1，是纯粹的数据污染。
+        clean_maps = {}
+        for k, v in maps.items():
+            try:
+                mid = int(k)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(k, bool) or not isinstance(v, dict):
+                continue
+            owner = str(v.get("owner") or "").strip()
+            if not owner:
+                continue
+            try:
+                ts = float(v.get("ts") or 0)
+            except (TypeError, ValueError):
+                ts = 0.0
+            clean_maps[mid] = {"owner": owner, "ts": ts}
+
+        # players 索引以 maps 为准重建 —— 两边不一致时，maps 是权威。
+        # 这样即使 players 被手工改坏，也能自动找回正确归属。
+        by_player = {}
+        for mid, info in clean_maps.items():
+            by_player.setdefault(info["owner"], []).append(mid)
+        for name in by_player:
+            by_player[name].sort()
+
+        return {"maps": clean_maps, "players": by_player}
+
+    def _mapart_save(self, data):
+        """原子写回索引。失败返回 False（不抛）。
+
+        用 ``atomic_write_json`` 而不是 ``_json_save``：后者的路径绑定在
+        ``data_dir`` 上，而地图画索引要落在插件包内（见 _mapart_root）。
+        原子写的语义两者一致 —— 同目录临时文件 + fsync + os.replace。
+        """
+        try:
+            p = self._mapart_index_path()
+            if p is None:
+                return False
+            return bool(atomic_write_json(p, data, indent=2, ensure_ascii=False))
+        except Exception:
+            return False
+
+    def _record_mapart(self, map_id, owner, image_data):
+        """登记一张地图画：落盘像素 + 更新双向索引。
+
+        返回是否成功。**调用方已经把本方法包在 try 里**，所以这里
+        只保证不抛、返回值可判。
+        """
+        # bool 要在 int() 之前挡 —— isinstance(True, int) 为真，
+        # 转完就分不出来了（True 会悄悄变成 map_id=1）。
+        if isinstance(map_id, bool):
+            return False
+        try:
+            map_id = int(map_id)
+        except (TypeError, ValueError):
+            return False
+        owner = str(owner or "").strip()
+        # ⚠ 不要判 map_id <= 0 —— 地图 ID 是**有符号** 64 位（见
+        # _mapart_load 的注释），负数完全合法。判正负会把所有负 ID 的
+        # 地图画都变成"登记失败"，玩家看到的却是"生成成功"，极难查。
+        if not owner:
+            return False
+        if not image_data:
+            return False
+
+        d = self._mapart_dir()
+        if d is None:
+            return False
+
+        try:
+            # 文件名带上符号会让负 ID 变成 "-219043332039.bmp"，
+            # 在部分文件系统/工具链上容易出幺蛾子。这里统一做一次
+            # 「把符号映射成前缀」的编码，正负 ID 都不会撞名。
+            if not atomic_write_bytes(d / self._mapart_file_name(map_id), image_data):
+                return False
+        except Exception:
+            return False
+
+        with self._store_lock():
+            cur = self._mapart_load()
+            maps = cur["maps"]
+
+            # 同一张地图若之前登记在别人名下，先从旧主人的列表里摘掉。
+            # （理论上 ID 不会重复，但服务端存档回滚等情况下可能出现。）
+            old = maps.get(map_id)
+            if old and old.get("owner") != owner:
+                old_list = cur["players"].get(old["owner"]) or []
+                cur["players"][old["owner"]] = [i for i in old_list if i != map_id]
+
+            maps[map_id] = {"owner": owner, "ts": time.time()}
+            lst = cur["players"].get(owner) or []
+            if map_id not in lst:
+                lst.append(map_id)
+                lst.sort()
+            cur["players"][owner] = lst
+
+            return self._mapart_save(cur)
+
+    def _forget_mapart(self, map_id):
+        """注销一张地图画：删像素文件 + 摘索引。
+
+        当前恢复流程用不到它，留给将来的「玩家删图」「清理失效记录」用 ——
+        有注销能力，索引才不会只增不减。
+        """
+        try:
+            map_id = int(map_id)
+        except (TypeError, ValueError):
+            return False
+
+        ok = False
+        with self._store_lock():
+            cur = self._mapart_load()
+            info = cur["maps"].pop(map_id, None)
+            if info:
+                owner = info.get("owner")
+                lst = cur["players"].get(owner) or []
+                cur["players"][owner] = [i for i in lst if i != map_id]
+                if not cur["players"][owner]:
+                    cur["players"].pop(owner, None)
+                ok = self._mapart_save(cur)
+
+        d = self._mapart_dir()
+        if d is not None:
+            try:
+                fn = self._mapart_file_name(map_id)
+                if fn:
+                    p = d / fn
+                    if p.exists():
+                        p.unlink()
+            except Exception:
+                pass
+        return ok
+
+    def _mapart_of(self, player_name):
+        """查某个玩家名下的地图 ID 列表（只读，返回副本）。"""
+        try:
+            name = str(player_name or "").strip()
+            if not name:
+                return []
+            with self._store_lock():
+                cur = self._mapart_load()
+                return list(cur["players"].get(name) or [])
+        except Exception:
+            return []
+
+    def _mapart_has(self, map_id):
+        """这张地图是不是我们管过的地图画？
+
+        给 ``on_map_initialize`` 用 —— 那个事件触发极频繁，
+        所以这里只做一次字典查表。**绝不读盘**（索引本身是个小 JSON，
+        每次地图初始化都读一遍磁盘是不可接受的）。
+        """
+        try:
+            mid = int(map_id)
+        except (TypeError, ValueError):
+            return False
+        try:
+            with self._store_lock():
+                return mid in self._mapart_load()["maps"]
+        except Exception:
+            return False
+
+    def _restore_mapart_async(self, player, player_name):
+        """后台线程入口：读索引 + 读像素 → 回主线程补发。
+
+        为什么要绕后台线程：``on_player_join`` 跑在主线程（也就是 tick 线程），
+        恢复要读磁盘 —— 每人几张、每张几十 KB，在主线程里读会直接卡 tick。
+        这里先把该读的都读完，再一次性交给主线程，主线程只做「发」这一个动作。
+
+        这个模式与既有的 ``_cross_restore_async`` 完全一致，不另发明一套。
+
+        延迟 2 秒：玩家刚进服那一瞬间，客户端还在收区块、服务端还在补资源，
+        这时候塞贴图包容易丢。等两秒更稳 —— 而 sleep 在后台线程里，不阻塞 tick。
+        """
+        try:
+            name = str(player_name or "").strip()
+            if not name:
+                return
+
+            ids = self._mapart_of(name)
+            # ★ 诊断日志：恢复流程的每一步都要留痕。
+            # 这个功能横跨「磁盘 / 主线程 / 客户端缓存」三层，一旦哪里断链，
+            # 从外部看就是「地图还是白的」——完全无法区分是没记录、没读到、
+            # 还是发了但客户端没收。所以每一步都打点，出问题一眼看出卡在哪。
+            self.logger.info(
+                f"[地图画恢复] {name} 进服，索引里有 {len(ids)} 张：{ids}")
+            if not ids:
+                return
+
+            try:
+                time.sleep(2.0)
+            except Exception:
+                pass
+
+            # 读盘阶段：只做 IO，不碰 server。
+            # 索引里有、磁盘上没有的条目直接跳过 —— 这正是"跳过该张、
+            # 其余正常"这条边界的落点。
+            d = self._mapart_dir()
+            self.logger.info(f"[地图画恢复] 像素目录 = {d}")
+            payload = []
+            for mid in ids:
+                data = None
+                fn = self._mapart_file_name(mid)
+                if d is not None and fn:
+                    try:
+                        p = d / fn
+                        if p.is_file():
+                            with open(p, "rb") as f:
+                                data = f.read()
+                    except Exception as e:
+                        self.logger.warning(
+                            f"[地图画恢复] 读取 {fn} 失败：{e}")
+                        data = None
+                self.logger.info(
+                    f"[地图画恢复] 地图 {mid}：本地像素文件 {fn}，"
+                    f"{'已读到 ' + str(len(data)) + ' 字节' if data else '缺失'}")
+                payload.append((mid, data))
+
+            # 回主线程补发。
+            # 超时给得比常规宽（10s）：张数多时主线程要把每张的像素都推一遍。
+            try:
+                ret = self._run_in_server_thread(
+                    self._restore_mapart_now, player, payload, timeout=10.0)
+                # ★ 诊断：调度失败和"跑到了但一张没成功"必须能区分开。
+                # _run_in_server_thread 失败时返回 (False, 原因)。
+                if ret is not True and not isinstance(ret, int):
+                    self.logger.warning(
+                        f"[地图画恢复] 主线程调度未完成：{ret!r}")
+                else:
+                    self.logger.info(
+                        f"[地图画恢复] 主线程执行完毕，成功张数 = {ret!r}")
+                    if ret:
+                        return
+            except Exception as e:
+                self.logger.warning(f"[地图画恢复] 调度回主线程异常：{e}")
+
+            # ★★ 兜底：主线程那条路没成功，再退一步用**调度器轮询**重试。
+            #
+            # 为什么还要这一层：上面那句依赖 _run_in_server_thread 的语义，
+            # 而它的失败模式里有一个很隐蔽的——"主线程任务执行超时"时它
+            # **只返回失败、不取消已排队的任务**。于是可能出现「恢复其实
+            # 跑成功了，但线程已经放弃等待、player 对象也过期了」这种
+            # 竞态。更糟的是在 10s 之后经手一个陈旧 player 对象。
+            #
+            # 这里改用「每 tick 回调」的方式：把恢复动作塞进调度器，
+            # 由调度器在**它自己的主线程**上执行，不依赖跨线程等待，
+            # 也不需要在后台线程里持有 player 那么久。
+            self._schedule_mapart_retry(player, payload, attempt=1)
+        except Exception as e:
+            self.logger.warning(f"[地图画恢复] 后台流程异常：{e}")
+
+    def _schedule_mapart_retry(self, player, payload, attempt=1):
+        """用调度器把恢复动作再排一次（兜底路径，最多两轮）。
+
+        与 ``_restore_mapart_async`` 的差别：这里不再起线程、不再 sleep、
+        不再跨线程等待 —— 直接让调度器在下一个 tick 里执行
+        ``_restore_mapart_now``。执行结果通过闭包变量回看。
+
+        ``attempt`` 用于限流：恢复失败最坏情况是玩家没看到地图画，
+        但它**绝不会**因此卡住 tick，所以两轮足够，不搞无限重试。
+        """
+        try:
+            holder: Dict[str, Any] = {}
+
+            def _tick_task():
+                try:
+                    n = self._restore_mapart_now(player, payload)
+                    holder["n"] = n
+                    if not n and attempt < 2:
+                        # 一张都没成功：再排一轮。
+                        # 放到下一 tick 而不是立刻重排，避免和还在排队里的
+                        # 上一轮任务打架（_run_in_server_thread 超时后任务
+                        # 仍留在队列里，可能马上就会跑）。
+                        try:
+                            self.server.scheduler.run_task(
+                                self,
+                                lambda: self._schedule_mapart_retry(player, payload, attempt + 1),
+                            )
+                        except Exception:
+                            pass
+                    return None
+                except Exception as e:
+                    try:
+                        self.logger.warning(f"[地图画恢复] 兜底重试异常：{e}")
+                    except Exception:
+                        pass
+                    return None
+
+            self.server.scheduler.run_task(self, _tick_task)
+            self.logger.info(
+                f"[地图画恢复] 已排入兜底重试（第 {attempt} 轮），"
+                f"{len(payload)} 张")
+        except Exception as e:
+            try:
+                self.logger.warning(f"[地图画恢复] 兜底重试排期失败：{e}")
+            except Exception:
+                pass
+
+    def _restore_mapart_now(self, player, payload):
+        """**主线程**：把 ``payload`` 里的地图逐张补发给玩家。
+
+        ``payload`` 形如 ``[(map_id, bmp_bytes_or_None), ...]``。
+
+        幂等性说明
+        ----------
+        ``_run_in_server_thread`` 超时后**不会取消**已排队的任务（超时分支
+        只记日志就返回，task 仍在队列里，稍后照样执行）。所以本方法可能被
+        执行两次，必须保证重复执行无副作用 —— ``send_map`` 是幂等的
+        （重发一遍贴图包而已），``locked`` 设两次也无所谓，补挂渲染器前
+        会先检查 ``renderers`` 是否为空。因此天然幂等。
+
+        每张地图独立 try/except：一张坏掉绝不能影响其余的张。
+        **本方法在任何情况下都不抛异常。**
+        """
+        if not payload:
+            return 0
+
+        restored = 0
+        for mid, data in payload:
+            try:
+                # ★ 现取现用，绝不缓存 MapView。
+                # server.get_map() 返回的是 C++ 侧包装对象，地图被卸载/
+                # 存档重载后就会悬空 —— 持有它当缓存迟早出问题。
+                view = None
+                try:
+                    view = self.server.get_map(int(mid))
+                except Exception:
+                    view = None
+
+                if view is None:
+                    self.logger.warning(
+                        f"[地图画恢复] 地图 {mid}：server.get_map() 返回 None，"
+                        f"该地图不存在（可能已被删除），跳过")
+                    continue
+
+                # ★ 诊断：把"查到的对象到底是什么状态"记下来。
+                #
+                # ⚠ 上一版这里只打「现有渲染器 N 个」，结果**误导了自己**：
+                # EndstoneMapView 构造时会自动挂一个内置渲染器（画存档像素），
+                # 所以 N 永远是 1，看起来"渲染器还在"。现在把**内置**和
+                # **我们的**分开数，一眼就能看出我们的渲染器丢没丢。
+                try:
+                    _all_r = list(view.renderers or [])
+                except Exception as e:
+                    _all_r = []
+                    _r_err = f"读取失败({e})"
+                else:
+                    _r_err = ""
+                _n_r = len(_all_r)
+                try:
+                    _n_ours = sum(
+                        1 for r in _all_r if isinstance(r, ImageMapRenderer))
+                except Exception:
+                    _n_ours = "?"
+                try:
+                    _lk = bool(view.locked)
+                except Exception as e:
+                    _lk = f"读取失败({e})"
+                try:
+                    _vid = int(view.id)
+                except Exception:
+                    _vid = "?"
+                self.logger.info(
+                    f"[地图画恢复] 地图 {mid}：已取回视图（id={_vid}），"
+                    f"渲染器共 {_n_r} 个（其中我们的 {_n_ours} 个），"
+                    f"locked={_lk}"
+                    + (f" [{_r_err}]" if _r_err else ""))
+                if _n_r > 0 and _n_ours == 0:
+                    # 这一条是白图 bug 的直接证据，必须显式说出来，
+                    # 否则下一个人又会把"共 1 个"读成"渲染器还在"。
+                    self.logger.info(
+                        f"[地图画恢复] 地图 {mid}：那 {_n_r} 个是 endstone 的**内置**"
+                        f"渲染器（画存档像素，对地图画恒为白色），"
+                        f"不是我们的 —— 我们的已丢失，将重新补挂")
+
+                # 渲染器丢了就补挂。
+                #
+                # 这是本方案能覆盖「服务端重启」的原因：重启后地图对象
+                # 仍在存档里，但挂在它上面的渲染器是内存态、必然丢失。
+                # 只要 BMP 还在，就能重建一个等价的渲染器 —— 像素完全一致。
+                #
+                # 补挂前会先验尺寸：坏数据绝不能进入渲染流程，
+                # 否则会在 tick 里抛异常，比画错严重得多。
+                #
+                # ⚠ 这里有一个必须兜住的失败路径：**补挂失败时必须解锁**。
+                # 若地图还留着上次设的 locked=True，而渲染器又没补上，
+                # 就会变成「没人画地图画 + 原版也不许画地形」= 永久白板。
+                # 所以下面每一条 continue 之前都要先解锁。
+                # ★★ 判据必须是"有没有**我们的**渲染器"，不是"总数是否为空"。
+                #
+                # 用户日志里那句「现有渲染器 1 个」是本 bug 的误判之源：
+                # EndstoneMapView 构造时会自动挂一个**内置**
+                # EndstoneMapRenderer（画存档像素，对地图画恒为全 0 = 白）。
+                # 所以任何地图天生就有 1 个渲染器 —— 数总数永远 >= 1，
+                # 于是恢复逻辑以为"渲染器还在"就什么都不做，
+                # 而真正画地图画的那个早就随重启没了。**白图就这么来的。**
+                #
+                # 所以改用 has_mapart_renderer：按类型认人（isinstance），
+                # 内置那个是 C++ 对象，绝不可能是 Python 类的实例。
+                try:
+                    have = has_mapart_renderer(view, ImageMapRenderer)
+                except Exception:
+                    have = False
+                if not have:
+                    if not data:
+                        self.logger.warning(
+                            f"[地图画恢复] 地图 {mid}：没有我们的渲染器且本地无像素"
+                            f"文件，跳过（已解锁，交还原版探索）")
+                        self._apply_map_lock(view)
+                        continue
+                    try:
+                        pixels = decode_bmp_24bit(data)
+                    except Exception as e:
+                        self.logger.warning(
+                            f"[地图画恢复] 地图 {mid}：像素解码失败（{e}），"
+                            f"跳过（已解锁，交还原版探索）")
+                        self._apply_map_lock(view)
+                        continue
+                    if not self._pixels_ok(pixels):
+                        self.logger.warning(
+                            f"[地图画恢复] 地图 {mid}：像素尺寸不合法，"
+                            f"跳过（已解锁，交还原版探索）")
+                        self._apply_map_lock(view)
+                        continue
+                    # ★ 用 attach_mapart_renderer 而不是裸 add_renderer：
+                    # 它保证我们的渲染器排在列表**末尾**（后画的赢），
+                    # 并做位置复核。理由见 ImageMapRenderer 的类 docstring。
+                    try:
+                        ok_attach = attach_mapart_renderer(
+                            view, ImageMapRenderer(pixels))
+                        if ok_attach:
+                            self.logger.info(
+                                f"[地图画恢复] 地图 {mid}：渲染器已补挂成功"
+                                f"（已确认排在末尾）")
+                        else:
+                            self.logger.warning(
+                                f"[地图画恢复] 地图 {mid}：渲染器补挂后未能确认"
+                                f"排在末尾（顺序可能有误），继续尝试发送")
+                    except Exception as e:
+                        self.logger.warning(
+                            f"[地图画恢复] 地图 {mid}：补挂渲染器失败（{e}），"
+                            f"跳过（已解锁，交还原版探索）")
+                        self._apply_map_lock(view)
+                        continue
+
+                # 锁定与否交给统一判据：有渲染器才锁。
+                # 走到这里渲染器必然存在（要么本来就在，要么刚补上），
+                # 所以正常情况下会锁上 —— 但判据仍走同一条路，不搞特例。
+                self._apply_map_lock(view)
+
+                # ★ 真正的恢复动作：把整张地图推给玩家。
+                #
+                # ⚠ 重要认知（反汇编 endstone 0.11.10 确认），别再被误导：
+                # ``send_map`` **自己发的是一张全 0 的白图**（packet 里
+                # 硬编码 128×128 并 resize 成全 0）。真正把我们的像素填
+                # 进去的是**发包链路上的 hook**：
+                #     BatchedNetworkPeer::sendPacket 发现待发的是地图包
+                #       → 调 view->render(player)
+                #       → 用渲染结果覆盖 packet.pixels
+                # 而 ``render()`` 在整个运行时**只有这一个调用点**。
+                #
+                # 所以「send_map 执行成功」≠「画面出来了」：
+                # 前者只说明包发出去了，后者还取决于 render() 有没有被
+                # 触发、渲染器有没有被原版用上。
+                # 这个二分法靠渲染器自己的首次调用日志来看（见
+                # ImageMapRenderer.render 的埋点）——日志里出现
+                # 「[地图画] 渲染器已被调用」= 渲染链路是通的。
+                player.send_map(view)
+                restored += 1
+
+                # 把恢复后的关键状态一次记全，省得再来回问。
+                try:
+                    _n_after = len(list(view.renderers or []))
+                except Exception:
+                    _n_after = "?"
+                try:
+                    _lk_after = bool(view.locked)
+                except Exception:
+                    _lk_after = "?"
+                self.logger.info(
+                    f"[地图画恢复] 地图 {mid}：send_map 已执行 ✓"
+                    f"（渲染器 {_n_after} 个，locked={_lk_after}）"
+                    f" —— 若画面仍空白，请看日志里有没有"
+                    f"「渲染器已被调用」那一行："
+                    f"有=渲染链路正常（像素问题），"
+                    f"无=渲染器没被原版用上（挂载问题）")
+            except Exception as e:
+                try:
+                    self.logger.warning(
+                        f"[地图画恢复] 地图 {mid}：处理失败（{e}），跳过")
+                except Exception:
+                    pass
+
+        if restored:
+            try:
+                player.send_message(f"§a[地图画] §e已为你恢复 {restored} 张地图画。")
+            except Exception:
+                pass
+            try:
+                self.logger.info(
+                    f"已为 {getattr(player, 'name', '?')} 恢复 {restored} 张地图画")
+            except Exception:
+                pass
+        return restored
+
+    def _pixels_ok(self, pixels):
+        """校验点阵是合法的 128×128 RGB —— 坏数据不许进渲染流程。
+
+        刻意写成普通方法（而不是 ``@staticmethod``）：测试脚本会把这个方法
+        单独抠出来重装到假插件上跑，带装饰器会让签名对不上。
+        为一个纯校验函数多传一个 ``self`` 不值得争议。
+        """
+        try:
+            if not pixels or len(pixels) != 128:
+                return False
+            for row in pixels:
+                if len(row) != 128:
+                    return False
+            return True
+        except Exception:
+            return False
+
     def _run_in_server_thread(self, func: Callable, *args, timeout: float = 5.0, **kwargs):
         name = getattr(func, "__name__", str(func))
         try:
@@ -4876,6 +6265,8 @@ from .web import (
     RateLimiter,
     _ConsoleStreamCapture,
     ImageMapRenderer,
+    attach_mapart_renderer,
+    has_mapart_renderer,
     decode_bmp_24bit,
     _strip_ansi,
 )

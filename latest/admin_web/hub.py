@@ -130,7 +130,14 @@ class AdapterHub(object):
                 flat = self.manager.to_flat_config(card)
                 from .qqbot import QQBotGateway
                 gw = QQBotGateway(self.plugin, flat, libs[0], libs[1])
-                gw._card_id = str(card.get("id"))
+                # 卡片身份统一挂载。
+                # 这两个属性是**运行期动态加上去**的，不在 QQBotGateway.__init__
+                # 里定义，所以任何读取方都必须用 getattr 兜底 —— 曾经
+                # _dispatch_image 直接写 self._card_name，而这里又只设了
+                # _card_id，导致每次收到图片都抛 AttributeError。
+                # 现在两个都设，并且读取侧也做了防御（双保险）。
+                gw._card_id = str(card.get("id") or "")
+                gw._card_name = str(card.get("name") or "")
                 gw.start()
                 self.logger.info(f"[机器人] 官方网关已启动：{card.get('name')}")
                 return gw
@@ -195,6 +202,45 @@ class AdapterHub(object):
         self._boot(libs)
 
     # -------------------------------------------------------------- queries
+    @staticmethod
+    def _gw_connected(gw) -> bool:
+        """统一探询网关的「已连接」状态，不碰任何私有属性。
+
+        ★ 为什么需要这个适配层
+        --------------------
+        两套网关暴露连接状态的形式**长得不一样**：
+
+        * ``QQBotGateway``（官方）—— 普通方法 ``is_connected()``
+        * ``OneBotAdapter``（OneBot）—— ``@property is_connected``
+
+        而 ``Hub.status()`` 里原先直接写 ``gw._connected.is_set()``，
+        读的是**私有属性**。这在 OneBot 侧纯属巧合能跑通
+        （``_spawn`` 里手工塞了个 ``namedtuple([server, websockets])``
+        以外的 ``threading.Event``），一旦哪天不塞了就会**静默**变成
+        「永远显示未连接」——不报错、不抛异常，面板上机器人明明在线
+        却挂着灰点，没有任何线索可查。
+
+        现在按优先级依次尝试：
+        ``is_connected()`` 方法 → ``is_connected`` 属性 →
+        ``_connected.is_set()`` 私有兜底 → False。
+        前三种任意一种成功即返回，全部失败才落到 False。
+        """
+        try:
+            probe = getattr(gw, "is_connected", None)
+            if probe is not None:
+                # 先当**方法**调；property 已经在 getattr 时求值成 bool 了
+                val = probe() if callable(probe) else probe
+                return bool(val)
+        except Exception:
+            pass
+        try:
+            ev = getattr(gw, "_connected", None)
+            if ev is not None and hasattr(ev, "is_set"):
+                return bool(ev.is_set())
+        except Exception:
+            pass
+        return False
+
     def status(self) -> list[dict[str, Any]]:
         result = []
         for card in self.manager.adapters_view():
@@ -202,10 +248,7 @@ class AdapterHub(object):
             gw = self._gateways.get(gid)
             connected = False
             if gw is not None:
-                try:
-                    connected = bool(gw._connected.is_set())
-                except Exception:
-                    connected = False
+                connected = self._gw_connected(gw)
             result.append({
                 "id": gid,
                 "type": card.get("type"),

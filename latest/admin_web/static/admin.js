@@ -228,12 +228,26 @@
             gmStopPolls(sectionId);
             var fns = gmPolls[sectionId];
             if (!fns) return;
+            // ★ 轮询函数多数是 async，try/catch 只能捕获**同步**抛出。
+            // 被 reject 的 Promise 会变成 unhandledrejection —— 既没有
+            // 用户提示、也很难在控制台定位（尤其 /api 返回 500 时）。
+            // 这里统一接住并记一条 error 日志。
+            function _safe(fn) {
+                try {
+                    var r = fn();
+                    if (r && typeof r.then === 'function') {
+                        r.catch(function (e) { console.error('[轮询] ' + (fn.name || 'anonymous'), e); });
+                    }
+                } catch (e) {
+                    console.error('[轮询] ' + (fn.name || 'anonymous'), e);
+                }
+            }
             gmTimers[sectionId] = fns.map(function (fn) {
-                try { fn(); } catch (e) {}
+                _safe(fn);
                 return setInterval(function () {
                     // 页面不可见（切到别的标签页）时跳过，省电省请求
                     if (document.hidden) return;
-                    try { fn(); } catch (e) {}
+                    _safe(fn);
                 }, fn.gmInterval || 5000);
             });
         }
@@ -274,19 +288,22 @@
                 else if (id === 'sec-files') loadFiles();
                 else if (id === 'sec-gametools') loadGameTools();
                 else if (id === 'sec-console') pollConsole();
-                else if (id === 'sec-logs') refreshLogsCenter();
             } catch (e) { /* 忽略板块加载错误 */ }
         }
 
         function switchLogTab(which) {
             const chatTab = el('tab-chat'), conTab = el('tab-console');
             const chatPane = el('chat-pane'), conPane = el('console-pane');
+            if (!chatTab || !conTab || !chatPane || !conPane) return;
             if (which === 'chat') {
                 chatTab.classList.add('active'); conTab.classList.remove('active');
                 chatPane.style.display = ''; conPane.style.display = 'none';
+                // 切过去立刻拉一次，否则要等下一个 2s 轮询才出内容
+                pollMessages('message-panel', 'msg-autoscroll');
             } else {
                 conTab.classList.add('active'); chatTab.classList.remove('active');
                 conPane.style.display = ''; chatPane.style.display = 'none';
+                pollConsole('console-panel', 'console-autoscroll');
             }
         }
 
@@ -535,7 +552,7 @@
             let acc = '';
             (filesCwd ? filesCwd.split('/') : []).forEach(function (seg) {
                 acc = acc ? acc + '/' + seg : seg;
-                crumbs += ' / <a href="javascript:void(0)" onclick="filesJump(\'' + fsEscJs(acc) + '\')">' + esc(seg) + '</a>';
+                crumbs += ' / <a href="javascript:void(0)" onclick="filesJump(' + jsArg(acc) + ')">' + esc(seg) + '</a>';
             });
             bc.innerHTML = crumbs;
             const tb = el('files-list');
@@ -734,13 +751,19 @@
                 const data = await apiGet('/api/players');
                 currentPlayers = data.players || [];
                 const tbody = el('player-list');
+                if (!tbody) return;   // 板块结构未就绪时不抛错
                 tbody.innerHTML = '';
                 currentPlayers.forEach(p => {
                     const tr = document.createElement('tr');
-                    const c1 = document.createElement('td'); c1.innerHTML = '<span class="online">●</span> ' + String(p.name);
+                    // ⚠ 玩家名是可控输入（玩家可自由取名，含 < > & 等字符）。
+                    // 这里曾经是 innerHTML 直接拼 String(p.name)：
+                    // 一个叫 <img src=x onerror=...> 的玩家上线即可在管理员
+                    // 面板里执行脚本。必须走 esc()。同文件其它地方（如玩家
+                    // 详情）本来就用了 esc，唯独这里漏了。
+                    const c1 = document.createElement('td'); c1.innerHTML = '<span class="online">●</span> ' + esc(p.name);
                     const c2 = document.createElement('td'); c2.textContent = Math.round(p.x) + ', ' + Math.round(p.y) + ', ' + Math.round(p.z);
                     const c3 = document.createElement('td'); c3.textContent = p.dimension;
-                    const c4 = document.createElement('td'); c4.textContent = p.health + '/' + p.max_health;
+                    const c4 = document.createElement('td'); c4.textContent = p.health + '/' + (p.max_health != null ? p.max_health : '?');
                     const c5 = document.createElement('td'); c5.textContent = p.is_op ? 'OP' : '';
                     const c6 = document.createElement('td');
                     const btn = document.createElement('button');
@@ -753,7 +776,8 @@
                     tbody.appendChild(tr);
                 });
                 updateAllSelects();
-                if (el('detail-player-select').value) loadPlayerDetail();
+                const dsel = el('detail-player-select');
+                if (dsel && dsel.value) loadPlayerDetail();
             } catch (e) { console.error('refreshPlayers', e); }
         }
 
@@ -774,19 +798,23 @@
         }
 
         async function loadPlayerDetail() {
-            const name = el('detail-player-select').value;
+            const sel = el('detail-player-select');
             const area = el('detail-area');
+            if (!area) return;
+            const name = sel ? sel.value : '';
             if (!name) { area.innerHTML = ''; return; }
             try {
                 const res = await fetch(apiPath('/api/player/' + encodeURIComponent(name)));
                 if (res.status === 404) { area.innerHTML = '<p>玩家不在线</p>'; return; }
                 const p = await res.json();
-                const tags = (p.tags || []).map(t => '<span class="tag-badge">' + t + '</span>').join(' ') || '（无）';
-                const scores = Object.entries(p.scores || {}).map(function (e) { return '<span class="score-item"><b>' + e[0] + '</b>: ' + e[1] + '</span>'; }).join('') || '（无）';
+                // tags / scores 的键与值都来自游戏内数据（玩家可写记分板），
+                // 必须逐个 esc，否则记分板名可以塞 <img onerror=...>。
+                const tags = (p.tags || []).map(t => '<span class="tag-badge">' + esc(t) + '</span>').join(' ') || '（无）';
+                const scores = Object.entries(p.scores || {}).map(function (e) { return '<span class="score-item"><b>' + esc(e[0]) + '</b>: ' + esc(e[1]) + '</span>'; }).join('') || '（无）';
                 area.innerHTML = '<div class="player-detail">' +
                     '<p><b>玩家:</b> ' + esc(p.name) + '</p>' +
                     '<p><b>XUID:</b> <span class="uuid-text">' + esc(p.xuid || '（无）') + '</span></p>' +
-                    '<p><b>生命值:</b> ' + p.health + '/' + p.max_health + '</p>' +
+                    '<p><b>生命值:</b> ' + esc(p.health) + '/' + esc(p.max_health) + '</p>' +
                     '<p><b>OP:</b> ' + (p.is_op ? '是' : '否') + '</p>' +
                     '<p><b>权限级别:</b> ' + (p.permission_level === 2 ? 'CONSOLE' : (p.permission_level === 1 ? 'OP' : 'DEFAULT')) + '</p>' +
                     '<p><b>标签:</b> ' + tags + '</p>' +
@@ -1007,7 +1035,69 @@
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
+        // 一段文本 → 问号浮层 data-help 属性值。
+        //
+        // ★★★ 为什么必须转两层，且换行要用占位符保护
+        // -------------------------------------------
+        // gmOpenHelp 的取值链是：
+        //     var text = btn.getAttribute('data-help');   // ① 浏览器把属性值**解码一次**
+        //     pop.innerHTML = text;                       // ② 再当 HTML 解析注入
+        // 内容被解析两次，所以只转一层是不够的：
+        //     esc 把 "<script>" 变成 "&lt;script&gt;"
+        //     ① 解码后还原成 "<script>"  ← 真标签又回来了
+        //     ② innerHTML 就执行了        ← XSS
+        // 因此第一层 esc 之外，**还必须有一层针对属性的转义**，
+        // 把 & 再转成 &amp; ，让第 ① 步只能解出 "&lt;script&gt;" 这个字面量。
+        //
+        // 但第二层转义（escAttr 会连 < > 一起转）又有个副作用：
+        // 它会吃掉我们自己插入的 <br>，浮层里就会显示字面量 "<br>" 而不是换行。
+        //
+        // 解法：换行先用一个**不会被转义**的占位符表示，
+        //       走完两层转义后再把占位符还原成 <br>。
+        //       占位符用 \u0000 包裹，正常文本里不可能出现，也就无法被伪造。
+        //
+        // 最终顺序：归一换行 → 换占位符 → esc → escAttr → 占位符还原 <br>
+        var GM_BR_TOKEN = '\u0000GM_BR\u0000';
+
+        function helpAttr(text) {
+            var s = String(text == null ? '' : text);
+            s = s.replace(/\r\n?/g, '\n');            // 归一闪行，避免 Windows 换行多出空行
+            s = s.replace(/\n/g, GM_BR_TOKEN);        // 换行 → 占位符（避开后续转义）
+            s = esc(s);                               // 第一层：内容 → HTML 文本
+            s = escAttr(s);                           // 第二层：属性（连 & < > " 一起转）
+            return s.replace(new RegExp(GM_BR_TOKEN, 'g'), '<br>');   // 占位符 → 真换行
+        }
+
         function qqSafe(s) { return String(s == null ? '' : s).replace(/[^0-9a-zA-Z_-]/g, '_'); }
+
+        // 把一个值安全地嵌进内联 onclick 的**字符串字面量**里（含外侧引号）。
+        //
+        // ★★★ 为什么不能只做 HTML 转义
+        // ---------------------------------
+        // 常见错误写法是 onclick="f('" + escAttr(name) + "')"。
+        // 这里有两层解析：先 HTML 属性解码，再当 JS 解析。escAttr 只挡了
+        // 第一层。玩家名/机器人名里只要出现反斜杠就会出事：
+        //
+        //     name = a\'  +  )" onmouseover="alert(1)
+        //     → 输出 onclick="f('a\')" onmouseover="alert(1)')"
+        //          ↑ 反斜杠把引号转义掉了，JS 串提前闭合，
+        //            后面的内容变成新的 HTML 属性 → 存储型 XSS
+        //
+        // 也不能用「把 ' 替换成 \'」这种土办法：反斜杠本身没转义，
+        // 攻击者加一个 \ 就能反过来控制转义方向。
+        //
+        // 正确做法：用 JSON.stringify 生成一个**合法的 JS 字符串字面量**
+        // （它会把 \ " 换行等全部正确转义），再把 < > & 转成 HTML 实体
+        // 防止提前闭合 HTML 属性。返回的串已含两侧双引号，直接拼即可。
+        function jsArg(v) {
+            var lit = JSON.stringify(String(v == null ? '' : v));
+            // JSON.stringify 产出的引号是 " ，而 HTML 属性用双引号包裹的话
+            // 必须转成 &quot; （属性解码后会还原成 " ，JS 仍能正确解析）。
+            return lit.replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;');
+        }
 
         function fmtExpiry(v) {
             if (!v) return '永久';
@@ -1099,8 +1189,8 @@
             if (r.success) loadBans();
         }
 
-        // 同一个日志面板会同时出现在多个板块（如「服务器信息」的 console-panel
-        // 与「日志中心」的 lg-console-panel）。游标与首载标记必须按面板隔离，
+        // 日志面板可能同时出现在多个板块（「服务器信息」的聊天/控制台面板、
+        // 「操作控制台」的 console-panel）。游标与首载标记必须按面板隔离，
         // 否则先轮询的面板把 lastId 推到最新后，后轮询的面板查 after=lastId
         // 只会拿到空数组，而首载标记已被置 false，于是既无日志也无空状态提示
         // —— 表现为整个面板空白。
@@ -1177,37 +1267,39 @@
             // 用户会以为「清空」把历史也删了
             _setCursor(pid, 'msg', 0);
             _panelFirst['msg:' + pid] = true;
-            pollMessages(pid, pid === 'lg-message-panel' ? 'lg-msg-autoscroll'
-                                                         : 'msg-autoscroll');
+            pollMessages(pid, _scrollIdFor(pid, 'msg'));
         }
 
-        // ==================== 日志中心（独立板块） ====================
-        function switchLogCenterTab(which) {
-            const chatTab = el('lg-tab-chat'), conTab = el('lg-tab-console');
-            const chatPane = el('lg-chat-pane'), conPane = el('lg-console-pane');
-            if (!chatTab || !conTab || !chatPane || !conPane) return;
-            if (which === 'chat') {
-                chatTab.classList.add('active'); conTab.classList.remove('active');
-                chatPane.classList.remove('hidden'); conPane.classList.add('hidden');
-                pollMessages('lg-message-panel', 'lg-msg-autoscroll');
-            } else {
-                conTab.classList.add('active'); chatTab.classList.remove('active');
-                conPane.classList.remove('hidden'); chatPane.classList.add('hidden');
-                pollConsole('lg-console-panel', 'lg-console-autoscroll');
-            }
+        // 面板 id → 对应的「自动滚动」复选框 id。
+        // 容器 id 是 `xxx-panel`，复选框 id 是 `xxx-autoscroll`，
+        // 唯一例外是 message→msg。
+        function _scrollIdFor(panelId, kind) {
+            if (panelId === 'message-panel') return 'msg-autoscroll';
+            return String(panelId).replace(/-panel$/, '') + '-autoscroll';
         }
 
+        // ==================== 聊天与日志 ====================
+        // 原来这里有一整个独立的「日志中心」板块（lg-* 一套 DOM + 
+        // switchLogCenterTab / refreshLogsCenter），内容和服务器信息里的
+        // 「聊天与日志」面板完全重复。现已合并：只保留 sec-players 里的
+        // 那一套面板，下面这个函数为「🔄 刷新」按钮服务。
         function refreshLogsCenter() {
-            const chatPane = el('lg-chat-pane');
-            const onConsole = chatPane && chatPane.classList.contains('hidden');
-            if (onConsole) pollConsole('lg-console-panel', 'lg-console-autoscroll');
-            else pollMessages('lg-message-panel', 'lg-msg-autoscroll');
+            const chatPane = el('chat-pane');
+            // 控制台面板可见时刷新控制台，否则刷新聊天
+            const onConsole = !!(chatPane && chatPane.style.display === 'none');
+            if (onConsole) pollConsole('console-panel', 'console-autoscroll');
+            else pollMessages('message-panel', 'msg-autoscroll');
             const st = el('logs-status');
             if (st) { st.textContent = '已刷新'; st.className = 'status text-ok'; }
         }
 
         function loadPermInfo() {
-            const name = el('perm-player').value;
+            // perm-player 在「🔐 权限管理」板块里，而该板块默认 .hidden。
+            // 若用户在 DOMContentLoaded 之前点到了侧边栏（页面卡顿时可能），
+            // 或某次渲染异常导致该 select 缺失，直接 .value 会抛
+            // "Cannot read properties of null" 并中断整个板块渲染。
+            const sel = el('perm-player');
+            const name = sel ? sel.value : '';
             const area = el('perm-info');
             if (!area) return;
             if (!name) { area.innerHTML = ''; return; }
@@ -1219,22 +1311,28 @@
         }
 
         async function setPermission() {
-            const name = el('perm-player').value;
-            const node = el('perm-node').value.trim();
+            const selP = el('perm-player');
+            const name = selP ? selP.value : '';
+            const nodeEl = el('perm-node');
+            if (!selP || !nodeEl) { showStatus('权限面板未就绪，请重新打开本板块', false); return; }
+            const node = nodeEl.value.trim();
             if (!name || !node) { showStatus('请选择玩家并填写权限节点', false); return; }
             const value = el('perm-value').value === 'true';
             const r = await apiPost('/api/permission', { player_name: name, permission: node, action: 'set', value: value });
             showStatus(r.message || r.error, !!r.success);
-            if (r.success) { el('perm-node').value = ''; await refreshPlayers(); loadPermInfo(); }
+            if (r.success) { nodeEl.value = ''; await refreshPlayers(); loadPermInfo(); }
         }
 
         async function unsetPermission() {
-            const name = el('perm-player').value;
-            const node = el('perm-node').value.trim();
+            const selP = el('perm-player');
+            const name = selP ? selP.value : '';
+            const nodeEl = el('perm-node');
+            if (!selP || !nodeEl) { showStatus('权限面板未就绪，请重新打开本板块', false); return; }
+            const node = nodeEl.value.trim();
             if (!name || !node) { showStatus('请选择玩家并填写权限节点', false); return; }
             const r = await apiPost('/api/permission', { player_name: name, permission: node, action: 'unset' });
             showStatus(r.message || r.error, !!r.success);
-            if (r.success) { el('perm-node').value = ''; await refreshPlayers(); loadPermInfo(); }
+            if (r.success) { nodeEl.value = ''; await refreshPlayers(); loadPermInfo(); }
         }
 
         async function loadScoreboardsFull() {
@@ -1556,7 +1654,7 @@
 
         // ==================== 控制台日志 ====================
         // 游标与首载标记走 _panelCursor / _panelFirst（见 pollMessages 处说明），
-        // 保证「服务器信息」与「日志中心」两个控制台面板互不干扰。
+        // 保证「服务器信息」与「操作控制台」两个控制台面板互不干扰。
         function appendConsoleLogs(logs, panelId, scrollId) {
             const pid = panelId || 'console-panel';
             const panel = el(pid);
@@ -1601,8 +1699,7 @@
             // 清空显示后要重新拉全量：把游标归零并让该面板回到「可整块替换」状态
             _setCursor(pid, 'con', 0);
             _panelFirst['con:' + pid] = true;
-            pollConsole(pid, panelId === 'lg-console-panel' ? 'lg-console-autoscroll'
-                                                           : 'console-autoscroll');
+            pollConsole(pid, _scrollIdFor(pid, 'con'));
         }
 
         function sendConsoleCommand() {
@@ -1636,7 +1733,9 @@
         var GM_SCOPE_META = {
             players:    { n: '服务器信息', d: '玩家与运行状态', g: '常用' },
             console:    { n: '操作控制台', d: '执行指令、给物、踢人', g: '常用' },
-            logs:       { n: '日志中心', d: '聊天与控制台日志', g: '常用' },
+            // logs 已并入「服务器信息」板块（见 admin.html），这里仅作为
+            // 日志类 API 的授权 scope 保留，名称标注清楚以免误解。
+            logs:       { n: '日志查看', d: '聊天与控制台日志（随服务器信息展示）', g: '常用' },
             bans:       { n: '封禁管理', d: '封禁 / 解封玩家', g: '玩家管理' },
             whitelist:  { n: '白名单审核', d: '审批进服申请', g: '玩家管理' },
             detail:     { n: '玩家详情', d: '单个玩家完整数据', g: '玩家管理' },
@@ -1710,12 +1809,21 @@
             box.innerHTML = html;
             _syncScopeCards();
 
-            // 勾选状态变化时同步卡片高亮与计数
-            box.addEventListener('change', function (ev) {
-                if (ev.target && ev.target.hasAttribute && ev.target.hasAttribute('data-scp')) {
-                    _syncScopeCards();
-                }
-            });
+            // 勾选状态变化时同步卡片高亮与计数。
+            //
+            // ⚠ 本函数每次 loadAccount() 成功都会被调用，而 #tmp-scopes
+            // 这个容器节点**从头到尾不会被替换**（只换 innerHTML）。
+            // 如果无条件 addEventListener，每进一次「账户与安全」就多挂
+            // 一个监听器 —— 点一次勾选会触发 N 次 _syncScopeCards，
+            // 切板块几次后明显变卡。用一个标记保证只绑一次。
+            if (!box._gmScopeBound) {
+                box._gmScopeBound = true;
+                box.addEventListener('change', function (ev) {
+                    if (ev.target && ev.target.hasAttribute && ev.target.hasAttribute('data-scp')) {
+                        _syncScopeCards();
+                    }
+                });
+            }
         }
 
         function _syncScopeCards() {
@@ -1885,8 +1993,8 @@
                 const badge = a.expired
                     ? '<span class="text-bad">已过期</span>'
                     : '<span class="text-ok">有效</span>';
-                const btn = a.expired ? '<span class="empty">—</span>' : '<button onclick="revokeTemp(\'' + escAttr(String(a.id)) + '\')">撤销</button>';
-                return '<tr><td>' + esc(a.username) + '</td><td>' + scopesTxt + '</td><td>' + expTxt + '</td><td>' + badge + '</td><td>' + btn + '</td></tr>';
+                const btn = a.expired ? '<span class="empty">—</span>' : '<button onclick="revokeTemp(' + jsArg(a.id) + ')">撤销</button>';
+                return '<tr><td>' + esc(a.username) + '</td><td>' + scopesTxt + '</td><td>' + esc(expTxt) + '</td><td>' + badge + '</td><td>' + btn + '</td></tr>';
             }).join('');
         }
 
@@ -1908,6 +2016,90 @@
 
 
         // ==================== 跨服互联 ====================
+
+        // 本服地址（self_url）从浏览器当前网址推断。
+        //
+        // 为什么可以自动取
+        // ----------------
+        // 这个值必须是「主服能回连到本副服的地址」。主服拿到它之后会主动
+        // 回连：转发跨服聊天、转发系统通知、推送白名单、推送封禁（见
+        // cross.py 的 push_chat_now / _relay_sys 与 web.py 的两个 broadcast）。
+        //
+        // 而用户正是通过某个网址打开这个面板的 —— 主服要回连的地址，
+        // 就是用户此刻用的这个地址。所以 location.origin 是最可信的来源，
+        // 也让用户完全不必理解这个字段（原先要手填，且 label 还写反了）。
+        //
+        // 返回 '' 表示推断失败（file:// 打开、沙箱环境等）。
+        // ★ 调用方在返回 '' 时**绝对不能**把空串提交上去，见 saveCross 的说明。
+        function crossSelfUrl() {
+            try {
+                var o = window.location && window.location.origin;
+                // file:// 下 origin 是**字符串** "null"，必须挡掉 ——
+                // 否则会把字面量 "null" 上报给主服，peers 里就存进一个假地址，
+                // 主服还会拿它去回连（必然失败）。
+                if (!o || o === 'null' || o.indexOf('http') !== 0) return '';
+                return o.replace(/\/+$/, '');
+            } catch (e) {
+                return '';
+            }
+        }
+
+        // 按当前角色显隐跨服字段：选主服就不出现副服的设置，反之亦然。
+        //
+        // 用 .hidden（admin.css 里 display:none）而不是内联 style：
+        // 与全站写法一致，也避开 style.display='' 恢复默认值时的浏览器差异。
+        //
+        // ★ 只切 display，绝不动 input.value。
+        //   切到 master 再切回 slave，之前填的主服地址、密码必须还在 ——
+        //   否则用户只是换个角色试一下，配置就丢了。
+        function syncCrossVisibility() {
+            var roleEl = el('cross-role');
+            if (!roleEl) return;                    // 区块还没渲染
+            var role = roleEl.value || 'none';
+
+            var isSlave = (role === 'slave');
+            var active = (role === 'master' || isSlave);   // 只要参与了互服
+
+            var rules = [
+                // 角色下拉永远可见，否则用户没有入口选回去，等于把自己锁死
+                ['cross-row-role', true],
+                // 显示名先填好，选角色时立刻可用
+                // （主服做 peers 判重要用它，见 web.py 的 register 分支）
+                ['cross-row-name', true],
+                // 密码主副都需要：各自校验对方的入站请求
+                ['cross-row-pass', active],
+                // 主服地址只有副服要主动连，主服是 Hub 被动接收
+                ['cross-row-master', isSlave],
+                // 同步间隔只有副服的轮询循环用
+                ['cross-row-sync', isSlave],
+                // 按钮行永远可见，否则改完角色没法保存
+                ['cross-row-actions', true]
+            ];
+            for (var i = 0; i < rules.length; i++) {
+                var node = el(rules[i][0]);
+                if (!node) continue;
+                if (rules[i][1]) node.classList.remove('hidden');
+                else node.classList.add('hidden');
+            }
+
+            // 「测试连接」只对副服有意义：后端 _handle_cross_test 在主服
+            // 直接返回「当前为主服，无需测试连接」，留着纯属误导。
+            var testBtn = el('cross-test-btn');
+            if (testBtn) {
+                if (isSlave) testBtn.classList.remove('hidden');
+                else testBtn.classList.add('hidden');
+            }
+
+            // 自动上报地址的前提：用户是从「主服能访问到的地址」打开的本页面。
+            // 从 localhost 打开就会上报 localhost，主服回连会连到自己或失败 ——
+            // 这是方案固有边界，代码消不掉，只能显式提醒。
+            var warn = el('cross-self-warn');
+            if (warn) {
+                if (isSlave) warn.classList.remove('hidden');
+                else warn.classList.add('hidden');
+            }
+        }
+
         async function loadCross() {
             try {
                 const r = await apiGet('/api/cross/config');
@@ -1918,7 +2110,9 @@
                 el('cross-server-name').value = c.server_name || '本服';
                 el('cross-password').value = c.password || '';
                 el('cross-master-url').value = c.master_url || '';
-                el('cross-self-url').value = c.self_url || '';
+                // 本服地址不再回填后端旧值 —— 它现在是「自动推断」的，
+                // 显示旧值只会误导。直接把当前浏览器地址写进隐藏字段。
+                el('cross-self-url').value = crossSelfUrl();
                 el('cross-sync').value = c.sync_seconds || 8;
                 const it = c.interop || {};
                 el('cross-it-chat').checked = it.chat !== false;
@@ -1939,36 +2133,71 @@
                 const box = el('cross-status-box');
                 if (box) box.innerHTML = '<p class="text-bad">读取状态失败：' + esc(String(e)) + '</p>';
             }
+            // 角色是从后端读回来的，读完必须同步一次显隐 ——
+            // 否则刷新页面后会看到与当前角色不符的字段。
+            syncCrossVisibility();
         }
 
         function renderCrossStatus(d) {
             const box = el('cross-status-box');
             if (!box) return;
+
+            const role = d.role || 'none';
+
+            // 未参与互服：卡片会全是「未参与 / 0 / —」，没有任何信息量，
+            // 看着像坏了。直接一句话说明当前状态。
+            if (role === 'none') {
+                box.innerHTML = '<p class="hint">未参与跨服互联。'
+                    + '在上方选择「主服务器」或「副服务器」并保存后，这里会显示运行状态。</p>';
+                return;
+            }
+
+            const isMaster = (role === 'master');
             const peers = d.peers || {};
-            let peersHtml = '（无已注册从服）';
-            const keys = Object.keys(peers);
-            if (keys.length) {
+            const peerKeys = Object.keys(peers);
+
+            // 主服：peers 是**本机登记的从服**（主服自己维护的注册表）→「已注册从服」
+            // 副服：peers 是主服回包里带下来的**其他**副服（不含自己）→
+            //       沿用「已注册从服」会让副服主以为自己在管理这些机器，必须区分措辞
+            const peersTitle = isMaster ? '已注册从服：' : '主服上报的其他副服：';
+            let peersHtml;
+            if (peerKeys.length) {
                 peersHtml = '<ul class="peers-list">';
-                keys.forEach(function (k) {
+                peerKeys.forEach(function (k) {
                     peersHtml += '<li>' + esc(k) + ' → ' + esc(peers[k]) + '</li>';
                 });
                 peersHtml += '</ul>';
+            } else {
+                peersHtml = isMaster ? '（暂无副服连入）' : '（主服未上报其他副服）';
             }
             const card = function (label, val, color) {
                 var tone = 'is-ok';
                 if (color === '#e94560') tone = 'is-bad';
                 else if (color === '#888') tone = 'is-idle';
-                return '<div class="stat ' + tone + '"><div class="k">' + esc(label) + '</div><div class="v">' + val + '</div></div>';
+                // ★ val 必须转义：d.server_name 是用户自己填的、
+                //   d.last_error 来自异常字符串（可能含 < >），原样拼接是同一条注入路径。
+                return '<div class="stat ' + tone + '"><div class="k">' + esc(label)
+                    + '</div><div class="v">' + esc(val) + '</div></div>';
             };
             let cards = [
-                card('本服角色', d.role === 'master' ? '主服务器' : (d.role === 'slave' ? '副服务器' : '未参与'), d.role === 'none' ? '#888' : '#4ecca3'),
-                card('本服名称', d.server_name || '未设置'),
-                card('已互通玩家数', String(d.players || 0)),
-                card('最近心跳', d.last_ping ? (new Date(d.last_ping * 1000).toLocaleTimeString()) : '—', d.last_ping ? '#4ecca3' : '#e94560')
+                card('本服角色', isMaster ? '主服务器' : '副服务器', '#4ecca3'),
+                card('本服名称', d.server_name || '未设置')
             ];
+
+            // 「已互通玩家数」只有主服有意义：这个数只在主服的转发路径里累加，
+            // 副服恒为 0 —— 给副服显示会让人误以为互通没生效。
+            // 副服改成显示「正在连哪个主服」，那才是副服真正要盯的信息。
+            if (isMaster) {
+                cards.push(card('已互通玩家数', String(d.players || 0)));
+            } else {
+                cards.push(card('主服地址', d.master_url || '未设置',
+                    d.master_url ? '#4ecca3' : '#e94560'));
+            }
+
+            cards.push(card('最近心跳', d.last_ping ? (new Date(d.last_ping * 1000).toLocaleTimeString()) : '—', d.last_ping ? '#4ecca3' : '#e94560'));
             if (d.last_error) cards.push(card('最近错误', d.last_error, '#e94560'));
             box.innerHTML = '<div class="row">' + cards.join('') + '</div>' +
-                '<div class="hint mt-sm">已注册从服：</div><div class="hint">' + peersHtml + '</div>';
+                '<div class="hint mt-sm">' + esc(peersTitle) + '</div><div class="hint">' + peersHtml + '</div>';
         }
 
         async function saveCross() {
@@ -1981,7 +2210,6 @@
                     server_name: el('cross-server-name').value,
                     password: el('cross-password').value,
                     master_url: el('cross-master-url').value,
-                    self_url: el('cross-self-url').value,
                     sync_seconds: parseFloat(el('cross-sync').value) || 8,
                     interop: {
                         chat: el('cross-it-chat').checked,
@@ -1990,6 +2218,15 @@
                         ban: el('cross-it-ban').checked
                     }
                 };
+                // 本服地址（self_url）：用自动推断的浏览器地址 —— 主服靠它回连本副服。
+                //
+                // ★ 推断失败时（返回 ''）**绝不能提交空串**：
+                //   后端见到空串会把该字段清空，主服随即把这个副服从 peers 里删掉，
+                //   于是跨服聊天 / 系统通知 / 白名单 / 封禁推送全部**静默失效**
+                //   （不报错、只是不工作，最难排查）。
+                //   所以这里选择「整个键都不传」，让后端用 .get(key, 旧值) 保留原值。
+                var selfUrl = crossSelfUrl();
+                if (selfUrl) payload.self_url = selfUrl;
                 const r = await apiPost('/api/cross/config/save', payload);
                 if (r && r.ok) {
                     if (st) { st.textContent = '已保存并重新加载跨服模块'; st.className = 'status text-ok'; }
@@ -2065,6 +2302,7 @@
             (groups || []).forEach(function (g) {
                 has = true;
                 html += '<div class="row list-divider">' +
+                    '<span class="badge badge-ok">已绑定</span>' +
                     '<input type="text" value="' + escAttr(g.name || g.openid) + '" class="block-input" placeholder="群显示名" data-gopenid="' + escAttr(g.openid || '') + '">' +
                     '<button onclick="qqSaveGroupName(this)" class="ok">保存</button>' +
                     '<span class="hint-sm break">' + esc(g.openid || '') + '</span>' +
@@ -2075,7 +2313,9 @@
                 html += '<div class="row list-divider">' +
                     '<span class="badge badge-warn">待绑定</span>' +
                     '<b class="code-lg">' + esc(p.code) + '</b>' +
-                    '<span class="hint-sm">在要加入的 QQ 群内发送该验证码即可绑定</span>' +
+                    '<span class="hint-sm">把机器人拉进目标群，然后在<b>那个群</b>里发送该验证码</span>' +
+                    '<span class="hint-sm break">同时只保留一个有效码；申请新码会作废旧码，成功加入一个群后此码自动注销。</span>' +
+                    '<span class="hint-sm break">若在已绑定的群里发送，机器人会提示「已绑定」而不会消耗此码。</span>' +
                     '</div>';
             });
             if (!has) {
@@ -2130,7 +2370,14 @@
             if (s) { s.textContent = (ok ? '成功: ' : '') + msg; s.className = ok ? 'status text-ok' : 'status text-bad'; }
         }
         function renderBackupState(cfg) {
+            // cfg / cfg.backup 都可能缺失：loadToolsConfig 只在 r.config 存在时
+            // 才调用本函数，但后端完全可能返回一个没有 backup 键的 config
+            // （旧版本配置文件、字段被裁剪等）。L2308 直接读 cfg.backup.enabled
+            // 会抛 TypeError 并冒泡到 loadToolsConfig 的 catch，导致
+            // renderBackupList 也不再执行 —— 整个「自动备份」板块空白。
+            cfg = cfg || {};
             const st = cfg.backup_state || {};
+            const bk = cfg.backup || {};
             const box = el('backup-state-box');
             if (!box) return;
             const badge = el('backup-state-badge');
@@ -2139,17 +2386,17 @@
                 lines.push('<span class="text-warn">⏳ 备份正在进行中…</span>');
                 if (badge) { badge.textContent = '备份中'; badge.className = 'status text-warn'; }
             } else {
-                if (badge) { badge.textContent = cfg.backup.enabled ? '自动备份已开启' : '自动备份已关闭'; badge.style.color = cfg.backup.enabled ? '#4ef09a' : '#888'; }
+                if (badge) { badge.textContent = bk.enabled ? '自动备份已开启' : '自动备份已关闭'; badge.style.color = bk.enabled ? '#4ef09a' : '#888'; }
             }
             if (st.last_result && st.last_result[0] === true) {
-                lines.push('上次备份：<span class="text-ok">' + String(st.last_result[1]) + '</span>');
+                lines.push('上次备份：<span class="text-ok">' + esc(String(st.last_result[1])) + '</span>');
             } else if (st.last_result && st.last_result[0] === false) {
-                lines.push('上次备份：<span class="text-bad">' + String(st.last_result[1]) + '</span>');
+                lines.push('上次备份：<span class="text-bad">' + esc(String(st.last_result[1])) + '</span>');
             } else {
                 lines.push('上次备份：<span class="empty">尚未执行</span>');
             }
             const next = Number(st.next_run) || 0;
-            if (next > 0 && cfg.backup.enabled) {
+            if (next > 0 && bk.enabled) {
                 const d = new Date(next * 1000);
                 const pad = function (x) { return (x < 10 ? '0' : '') + x; };
                 lines.push('下次自动备份：' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()));
@@ -2159,15 +2406,16 @@
         function renderBackupList(cfg) {
             const box = el('backup-list-box');
             if (!box) return;
-            const list = cfg.backups || [];
+            // 备份文件名可能来自用户上传的存档命名，属可控输入；
+            // 既进 onclick（JS 串）又进 innerHTML，两处都要处理。
+            const list = (cfg && cfg.backups) || [];
             if (!list.length) { box.innerHTML = '<p class="empty">暂无备份文件</p>'; return; }
             const rows = list.map(function (b) {
-                const q = JSON.stringify(String(b.name)).replace(/"/g, "&quot;");
                 return '<div class="list-item">'
-                    + '<span class="break">📄 ' + String(b.name) + '<br><small class="text-accent">' + fmtBytes(b.size) + '　' + String(b.mtime) + '</small></span>'
+                    + '<span class="break">📄 ' + esc(b.name) + '<br><small class="text-accent">' + esc(fmtBytes(b.size)) + '　' + esc(b.mtime) + '</small></span>'
                     + '<span class="row">'
-                    + '<button class="ok" onclick="restoreBackup(' + q + ')">恢复</button>'
-                    + '<button onclick="deleteBackup(' + q + ')">删除</button></span></div>';
+                    + '<button class="ok" onclick="restoreBackup(' + jsArg(b.name) + ')">恢复</button>'
+                    + '<button onclick="deleteBackup(' + jsArg(b.name) + ')">删除</button></span></div>';
             });
             box.innerHTML = rows.join('');
         }
@@ -2403,11 +2651,16 @@
                                 + '<span class="break"><b>' + esc(m.name || m.uuid) + '</b> '
                                 + '<span class="text-accent">v' + esc(m.version || '?') + '</span> '
                                 + gmodTypeLabel(m.type) + ' ' + state
-                                + '<div class="hint-sm break">' + esc(m.description || '（无描述）') + '</div>'
+                                + '<span class="help-q help-q-label" data-help="'
+                                + helpAttr(m.description || '该子插件未提供描述（manifest.json 中的 description 字段为空）')
+                                + '" role="button" tabindex="0" aria-label="查看子插件描述">描述</span>'
                                 + '<div class="hint-sm break">uuid: ' + esc(m.uuid) + '　依赖: ' + dep + miss + '</div>'
                                 + extra
                                 + '</span>'
                                 + toggle
+                                + (m.has_settings
+                                    ? '<button onclick="gmodOpenSettings(' + q + ')" title="该子插件的独立设置项">⚙ 设置</button>'
+                                    : '')
                                 + '<button onclick="viewGmod(' + q + ')" title="查看包内文件">📄</button>'
                                 + '<button onclick="uninstallGmod(' + q + ')" title="删除子插件文件">🗑</button>'
                                 + preview
@@ -2481,6 +2734,168 @@
             }
         }
 
+        // ---------- 子插件独立设置页 ----------
+        //
+        // 字段由子插件包内的 settings.json **声明**，这里只负责按声明渲染控件。
+        // 刻意不支持子插件自带 HTML —— 那等于把任意 JS 注入到管理员会话里，
+        // 而声明式只允许出现面板认识的这几种控件，注入面为零。
+        //
+        // 控件 id 约定：gmodset-<uuid>-<key>。uuid 里可能有连字符，但 key
+        // 已被主插件校验为纯标识符（字母/数字/下划线），所以从右往左切是安全的。
+
+        function gmodSetCtlId(uuid, key) {
+            return 'gmodset-' + String(uuid) + '-' + String(key);
+        }
+
+        // 密码字段的面罩串，必须与主插件 mod_loader.SETTINGS_MASK 一致。
+        // 前端看到它就原样提交回去，主插件会识别并跳过（保留磁盘原值）。
+        var GMOD_SET_MASK = '******';
+
+        function gmodFieldHtml(uuid, f) {
+            const id = gmodSetCtlId(uuid, f.key);
+            const label = esc(f.label || f.key);
+            let inner = '';
+            if (f.type === 'bool') {
+                // bfBool 用的 ios 开关带上文案，跟机器人编辑框保持一致
+                return '<div class="mb-sm"><label class="ios" data-on="启用" data-off="关闭">'
+                    + '<input type="checkbox" id="' + escAttr(id) + '"' + (f.default === true ? ' checked' : '') + '><i></i>'
+                    + ' <span class="ios-text">' + label + '</span></label>'
+                    + (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '')
+                    + '</div>';
+            }
+            if (f.type === 'select') {
+                let o = '';
+                (f.options || []).forEach(function (x) {
+                    o += '<option value="' + escAttr(String(x.value)) + '">' + esc(String(x.label)) + '</option>';
+                });
+                inner = '<select id="' + escAttr(id) + '" class="block-input">' + o + '</select>';
+            } else if (f.type === 'textarea') {
+                inner = '<textarea id="' + escAttr(id) + '" rows="5" class="block-input min-h-80"'
+                    + (f.placeholder ? ' placeholder="' + escAttr(f.placeholder) + '"' : '')
+                    + '></textarea>';
+            } else {
+                // text / password / number
+                const itype = (f.type === 'password') ? 'password' : (f.type === 'number' ? 'number' : 'text');
+                let extra = '';
+                if (f.type === 'number') {
+                    if (f.min != null) extra += ' min="' + escAttr(String(f.min)) + '"';
+                    if (f.max != null) extra += ' max="' + escAttr(String(f.max)) + '"';
+                    extra += ' step="any"';
+                }
+                inner = '<input type="' + itype + '" id="' + escAttr(id) + '" class="block-input"' + extra
+                    + (f.placeholder ? ' placeholder="' + escAttr(f.placeholder) + '"' : '')
+                    + '>';
+            }
+            return '<div class="mb-sm">'
+                + '<div class="field-label">' + label + '</div>'
+                + inner
+                + (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '')
+                + '</div>';
+        }
+
+        async function gmodOpenSettings(uuid) {
+            const uid = String(uuid);
+            let r;
+            try {
+                r = await apiGet('/api/gmods/settings?uuid=' + encodeURIComponent(uid));
+            } catch (e) {
+                gmodStatus('gmods-status', '读取设置失败: ' + e, false);
+                return;
+            }
+            if (!r || !r.ok) {
+                gmodStatus('gmods-status', '读取设置失败: ' + ((r && r.error) || '未知错误'), false);
+                return;
+            }
+            const fields = r.fields || [];
+            if (!fields.length) {
+                botEditOpenHtml('⚙ ' + esc(r.name || uid),
+                    '<p class="hint">该子插件未提供设置项（包内缺少 settings.json）。</p>'
+                    + '<div class="row mt"><button onclick="botEditClose()" class="btn-ghost">关闭</button></div>');
+                return;
+            }
+            const main = [], adv = [];
+            fields.forEach(function (f) {
+                if (!f || !f.type) return;
+                if (f.type === 'group') {
+                    const t = '<div class="modal-section-title">' + esc(f.label || '') + '</div>';
+                    (f.advanced ? adv : main).push(t);
+                    return;
+                }
+                (f.advanced ? adv : main).push(gmodFieldHtml(uid, f));
+            });
+
+            let body = main.join('');
+            if (adv.length) {
+                // 高级项默认收起：设置页一打开就是几十行，谁都不想看
+                body += '<details class="gmod-adv"><summary>高级选项</summary>' + adv.join('') + '</details>';
+            }
+            body += '<div class="row mt">'
+                + '<button class="ok" onclick="gmodSettingsSave(' + JSON.stringify(uid) + ')">💾 保存</button>'
+                + '<button class="text-bad" onclick="botEditClose()">取消</button>'
+                + '<span id="gmodset-status" class="hint"></span></div>';
+
+            botEditOpenHtml('⚙ ' + esc(r.name || uid) + ' 设置', body);
+
+            // 渲染完再填值 —— 密码字段的 placeholder 要等主插件给了面罩才知道
+            const vals = r.values || {};
+            fields.forEach(function (f) {
+                if (!f || !f.key) return;
+                const node = document.getElementById(gmodSetCtlId(uid, f.key));
+                if (!node) return;
+                const v = (f.key in vals) ? vals[f.key] : '';
+                if (f.type === 'bool') {
+                    node.checked = !!v;
+                } else if (f.type === 'password') {
+                    // 面罩值不填进 value（否则提交时看着像真值），改用 placeholder 提示
+                    if (String(v) === GMOD_SET_MASK) node.placeholder = '已设置（留空不修改）';
+                    else node.value = (v == null ? '' : String(v));
+                } else {
+                    node.value = (v == null ? '' : String(v));
+                }
+            });
+        }
+
+        async function gmodSettingsSave(uuid) {
+            const uid = String(uuid);
+            const st = document.getElementById('gmodset-status');
+            function setSt(msg, ok) {
+                if (!st) return;
+                st.textContent = msg || '';
+                st.className = 'hint ' + (ok === true ? 'text-ok' : (ok === false ? 'text-bad' : ''));
+            }
+            // 从 DOM 反查当前有哪些字段，避免依赖外层的 fields 变量
+            const nodes = document.querySelectorAll('[id^="gmodset-' + uid + '-"]');
+            const values = {};
+            const seenPwd = {};
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
+                const key = node.id.slice(('gmodset-' + uid + '-').length);
+                if (node.type === 'checkbox') {
+                    values[key] = !!node.checked;
+                } else if (node.type === 'password') {
+                    seenPwd[key] = true;
+                    const raw = String(node.value || '');
+                    // 空 = 管理员没动它（可能是"已设置"状态）→ 不提交，保留原值
+                    if (raw === '') continue;
+                    values[key] = raw;
+                } else {
+                    values[key] = node.value;
+                }
+            }
+            setSt('保存中…', null);
+            try {
+                const r = await apiPost('/api/gmods/config/save', { uuid: uid, values: values });
+                if (r && r.ok) {
+                    setSt('✓ ' + (r.message || '已保存'), true);
+                    gmodStatus('gmods-status', '✓ 已保存子插件设置', true);
+                } else {
+                    setSt('✗ ' + ((r && r.error) || '保存失败'), false);
+                }
+            } catch (e) {
+                setSt('✗ 保存失败: ' + e, false);
+            }
+        }
+
         // ---------- 包内文件查看 / 在线编辑 ----------
         async function viewGmod(uuid, file) {
             gmodCurrent = String(uuid);
@@ -2495,10 +2910,11 @@
                 const list = el('gmod-file-list');
                 if (list) {
                     list.innerHTML = (r.files || []).map(function (f) {
-                        const q = JSON.stringify(String(f)).replace(/"/g, '&quot;');
+                        // 包内文件名/子插件 id 都来自压缩包，属不可信输入：
+                        // 必须用 jsArg 生成合法 JS 字面量，不能简单拼单引号。
                         const act = (f === r.file) ? ' text-ok' : '';
                         return '<div class="list-item break' + act + '">📄 <a class="btn-link" onclick="viewGmod('
-                            + JSON.stringify(gmodCurrent) + ', ' + q + ')">' + esc(f) + '</a></div>';
+                            + jsArg(gmodCurrent) + ', ' + jsArg(f) + ')">' + esc(f) + '</a></div>';
                     }).join('') || '<p class="empty">包内没有文件</p>';
                 }
                 if (el('gmod-file-head')) {
@@ -2653,7 +3069,10 @@
         }
 
         function packRowHtml(p, kind) {
-            const q = escAttr(String(p.uuid || ''));
+            // 模组包 uuid 来自第三方 manifest.json，属不可信输入。
+            // 它会被塞进 onchange 的 JS 串里，所以用 jsArg 而不是 escAttr
+            // （escAttr 只防 HTML，防不住反斜杠 + 单引号的 JS 串逃逸）。
+            const q = jsArg(p.uuid || '');
             const name = esc(String(p.name || p.uuid || ''));
             const ver = esc(String(p.version || '?'));
             const parent = esc(String(p.parent || ''));
@@ -2667,7 +3086,7 @@
                 const checked = p.enabled ? ' checked' : '';
                 ctrl = '<label class="ios" title="启用 / 停用（需重启服务器生效）">'
                      + '<input type="checkbox"' + checked
-                     + ' onchange="toggleModPack(this,\'' + q + '\',\'' + kind + '\')">'
+                     + ' onchange="toggleModPack(this,' + q + ',' + jsArg(kind) + ')">'
                      + '<i></i></label>';
             } else {
                 // 全局目录的包：没有独立的启用状态
@@ -2823,10 +3242,10 @@
                     '  <div class="hint-sm break">' + extra + '</div>' +
                     '  <div class="hint-sm">互通: ' + (sync.qq_to_mc === false ? '群→服✘' : '群→服✓') + ' ' + (sync.mc_to_qq === false ? '服→群✘' : '服→群✓') + '</div>' +
                     '  <div class="row mt">' +
-                    '    <label class="ios" data-on="启用" data-off="禁用"><input type="checkbox"' + (c.enabled ? ' checked' : '') + ' onchange="botsToggle(\'' + c.id + '\', this.checked)"><i></i> <span class="ios-text">' + (c.enabled ? '启用' : '禁用') + '</span></label>' +
+                    '    <label class="ios" data-on="启用" data-off="禁用"><input type="checkbox"' + (c.enabled ? ' checked' : '') + ' onchange="botsToggle(' + jsArg(c.id) + ', this.checked)"><i></i> <span class="ios-text">' + (c.enabled ? '启用' : '禁用') + '</span></label>' +
                     '    <div class="spacer"></div>' +
-                    '    <button onclick="botsEdit(\'' + c.id + '\')">✏️ 编辑</button>' +
-                    '    <button onclick="botsDelete(\'' + c.id + '\', \'' + botsEsc(c.name || '').replace(/'/g, "\\'") + '\')" class="text-bad">🗑 删除</button>' +
+                    '    <button onclick="botsEdit(' + jsArg(c.id) + ')">✏️ 编辑</button>' +
+                    '    <button onclick="botsDelete(' + jsArg(c.id) + ', ' + jsArg(c.name || '') + ')" class="text-bad">🗑 删除</button>' +
                     '  </div>' +
                     '</div>';
             }).join('');
@@ -2935,7 +3354,12 @@
             {k:'notify_stop', t:'bool', l:'服务器下线播报'},
             {k:'server_start_msg', t:'text', l:'上线提示语'},
             {k:'server_stop_msg', t:'text', l:'下线提示语'},
-            {k:'qq_to_mc_format', t:'text', l:'群→服 格式（%s=群名/名字, %s=内容）'},
+            // qq_to_mc_format 的占位符语义固定为「昵称 / 群名 / 内容」，
+            // 与后端 qqrelay.format_relay 保持一致。旧文案写的是
+            // 「%s=群名/名字」，两种可能混在一起说，导致用户配出来的
+            // 格式显示成一串 openid（第一个位置填的是群名，取不到群名
+            // 时又回退成了 openid）。
+            {k:'qq_to_mc_format', t:'text', l:'群→服 格式（%s=昵称, %s=群名, %s=内容）'},
             {k:'mc_to_qq_format', t:'text', l:'服→群 格式（%s=名字, %s=消息）'},
             {k:'join_format', t:'text', l:'进服播报格式（%s=名字）'},
             {k:'leave_format', t:'text', l:'退服播报格式（%s=名字）'},
@@ -3087,7 +3511,7 @@
                 '<div class="modal-grid-2">' + bfSyncHtml(card, pf) + '</div>' +
                 groupsBlock +
                 '<div class="row mt">' +
-                '<button class="ok" onclick="botsEditSave(\'' + card.id + '\', \'' + card.type + '\', \'' + pf + '\')">💾 保存</button>' +
+                '<button class="ok" onclick="botsEditSave(' + jsArg(card.id) + ', ' + jsArg(card.type) + ', ' + jsArg(pf) + ')">💾 保存</button>' +
                 '<button class="text-bad" onclick="botEditClose()">取消</button>' +
                 '<span id="' + pf + '-status" class="hint"></span></div>';
 
@@ -3192,14 +3616,8 @@
             var _m2 = pollMessages;    _m2.gmInterval = 2000; gmRegisterPoll('sec-players', _m2);
             var _c2 = pollConsole;     _c2.gmInterval = 2000; gmRegisterPoll('sec-players', _c2);
             var _c2b = pollConsole;    _c2b.gmInterval = 2000; gmRegisterPoll('sec-console', _c2b);
-            // 日志中心：根据当前 Tab 只轮询对应的那一份
-            var _lg = function () {
-                const chatPane = el('lg-chat-pane');
-                const onConsole = chatPane && chatPane.classList.contains('hidden');
-                if (onConsole) pollConsole('lg-console-panel', 'lg-console-autoscroll');
-                else pollMessages('lg-message-panel', 'lg-msg-autoscroll');
-            };
-            _lg.gmInterval = 2000; gmRegisterPoll('sec-logs', _lg);
+            // 注：原来这里还给已删除的日志中心板块（id 与「日志」同义）注册了匿名轮询，
+            // 现随板块合并一并移除（否则会对不存在的板块每 2s 空跑一次请求）。
 
             // 触屏滑动：从屏幕左缘往右划展开，往左划收起
             var _tx = 0, _ty = 0, _tActive = false;
@@ -3222,6 +3640,10 @@
             document.addEventListener('keydown', function (ev) {
                 if (ev.key === 'Escape' && gmSidebarOpen()) gmCloseSidebar();
             });
+
+            // 跨服：角色切换即时生效，不必等保存或刷新
+            var _crossRoleEl = el('cross-role');
+            if (_crossRoleEl) _crossRoleEl.addEventListener('change', syncCrossVisibility);
 
             gmStartPolls(gmActiveSection);
         }

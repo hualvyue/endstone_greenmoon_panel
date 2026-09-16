@@ -655,3 +655,151 @@ class OneBotAdapter:
             self.call_api(pack, callback, timeout)
         else:
             self.send_pack(pack)
+
+    # ------------------------------------------------- 群文件 / 图片 / 语音
+    #
+    # 下面这些是 OneBot v11 的「富媒体」能力。packets.py 里早就把包构建器
+    # 写好了，但一直没接上来，所以子插件拿不到。
+    #
+    # ⚠ 与 send_group_msg 的区别：这些 action **必须等待返回值**
+    #   （拿文件列表 / 拿下载链接 / 确认上传结果），所以走 call_api，
+    #   由调用方传 callback。callback 在适配器的 asyncio 线程里执行，
+    #   不要去碰游戏世界状态。
+
+    def get_group_root_files(
+        self, group_id: int, file_count: int = 50,
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """列出群文件根目录（返回 files / folders）。"""
+        self.call_api(packets.group_root_files(group_id, file_count), callback, timeout)
+
+    def get_group_files_by_folder(
+        self, group_id: int, folder_id: str, file_count: int = 50,
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """列出群文件某个子目录。"""
+        self.call_api(
+            packets.group_files_by_folder(group_id, folder_id, file_count),
+            callback, timeout,
+        )
+
+    def get_group_file_url(
+        self, group_id: int, file_id: str,
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """取群文件下载直链（返回 {"url": ...}）。"""
+        self.call_api(packets.group_file_url(group_id, file_id), callback, timeout)
+
+    def get_group_file_system_info(
+        self, group_id: int,
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """取群文件系统信息（文件数 / 上限等）。"""
+        self.call_api(packets.group_file_system_info(group_id), callback, timeout)
+
+    def upload_group_file(
+        self, group_id: int, file: str, name: str, folder_id: str | None = None,
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """上传文件到群。
+
+        ``file`` 可以是本地绝对路径，也可以是 ``file://`` URI。
+        是否支持远程 URL / base64 取决于具体的 OneBot 实现。
+        """
+        self.call_api(packets.upload_group_file(group_id, file, name, folder_id),
+                      callback, timeout)
+
+    def delete_group_file(
+        self, group_id: int, file_id: str,
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """删除群文件（注意：不可恢复，调用方需自行确认）。"""
+        self.call_api(packets.delete_group_file(group_id, file_id), callback, timeout)
+
+    def get_image(
+        self, file: str,
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """用图片 ``file`` 标识换取可下载的 url。
+
+        消息段里的 ``file`` 通常就是一个文件名（如 ``abc.jpg``），
+        拿到 url 后才能下载真实图片内容。
+        """
+        self.call_api(packets.image_info(file), callback, timeout)
+
+    def get_record(
+        self, file: str, out_format: str = "mp3",
+        callback: Callable[[Any], None] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> None:
+        """用语音 ``file`` 标识换取音频文件路径。"""
+        self.call_api(packets.record_info(file, out_format), callback, timeout)
+
+    # ---------------------------------------------------- 同步调用（阻塞）
+    #
+    # gm.bot 的对外 API 是**同步**风格（子插件里直接 `data = bot.xxx()`），
+    # 而上面那些 call_xxx 都是回调式。这里提供一个把回调转成阻塞等待的
+    # 适配器，专门给 gm.bot 用。
+    #
+    # ⚠ 绝不能在服务器主线程调用（会卡服）。gm.bot 里的这些入口一律是
+    #   「异步版」或者「由调用方在后台线程里用」，不要在 tick 里直接用。
+
+    def call_api_sync(
+        self,
+        action: str,
+        params: dict[str, Any] | None = None,
+        timeout: float = API_TIMEOUT,
+    ) -> Any:
+        """同步调用一个 OneBot action，返回结果（失败返回 None）。
+
+        内部用一个 threading.Event 等待 asyncio 线程回调；超时返回 None。
+        """
+        done = threading.Event()
+        box: dict[str, Any] = {"data": None}
+
+        def _cb(data: Any) -> None:
+            box["data"] = data
+            done.set()
+
+        try:
+            self.call_action(action, params, _cb, timeout)
+        except Exception:
+            return None
+        # 多给 1 秒余量，让 call_api 内部的 wait_for 先超时并回调 None
+        if not done.wait(timeout + 1.0):
+            return None
+        return box["data"]
+
+    def get_group_root_files_sync(self, group_id: int, file_count: int = 50,
+                                  timeout: float = API_TIMEOUT) -> Any:
+        """``get_group_root_files`` 的同步版本。"""
+        return self.call_api_sync("get_group_root_files",
+                                  {"group_id": group_id, "file_count": file_count},
+                                  timeout)
+
+    def get_group_file_url_sync(self, group_id: int, file_id: str,
+                                timeout: float = API_TIMEOUT) -> Any:
+        """``get_group_file_url`` 的同步版本。"""
+        return self.call_api_sync("get_group_file_url",
+                                  {"group_id": group_id, "file_id": file_id},
+                                  timeout)
+
+    def upload_group_file_sync(self, group_id: int, file: str, name: str,
+                               folder_id: str | None = None,
+                               timeout: float = 60.0) -> Any:
+        """``upload_group_file`` 的同步版本（上传大文件较慢，超时给足）。"""
+        params: dict[str, Any] = {"group_id": group_id, "file": file, "name": name}
+        if folder_id:
+            params["folder_id"] = folder_id
+        return self.call_api_sync("upload_group_file", params, timeout)
+
+    def get_image_sync(self, file: str, timeout: float = API_TIMEOUT) -> Any:
+        """``get_image`` 的同步版本。"""
+        return self.call_api_sync("get_image", {"file": file}, timeout)

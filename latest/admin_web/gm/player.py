@@ -105,10 +105,20 @@ def kick(name: str, reason: str = "") -> bool:
 
 
 def teleport(name: str, x: float, y: float, z: float) -> bool:
-    """把玩家传送到指定坐标。"""
-    from endstone import Location  # 延迟导入：避免插件未加载时 import 失败
+    """把玩家传送到指定坐标。
+
+    ⚠ ``Location`` 属于 ``endstone.level``，**不在** endstone 顶层。
+    写成 ``from endstone import Location`` 会抛 ``ImportError``，
+    导致本接口一调就废（而且是延迟导入，装包/启动时都发现不了，
+    只有真去传送玩家时才崩）。
+    """
+    # 延迟导入：避免插件未加载时 import 失败。
+    # 路径以官方文档为准：Level ¶ Classes: ... Location
+    from endstone.level import Location
 
     def _do(pl: Any) -> bool:
+        # Location 的构造签名是 (dimension, x, y, z, pitch=0.0, yaw=0.0)，
+        # 第一个参数是 Dimension 而不是 world 名字。
         world = pl.location.dimension
         pl.teleport(Location(world, float(x), float(y), float(z)))
         return True

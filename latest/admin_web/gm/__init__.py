@@ -24,13 +24,16 @@
 ``admin``      面板状态直读（系统指标 / 玩家 / 消息）
 ``console``    控制台日志与控制台指令
 ``event``      游戏事件注册
+``mapart``     把图片画到地图上（缩放 / 编码 / 发放）
+``config``     读写**自己包内**的 config.json（与面板「设置」页共用同一份）
 
 权限
 ----
-涉及面板数据的模块（``bot`` / ``bindings`` / ``cross`` / ``admin`` / ``console``）
-需要在子插件的 ``manifest.json`` 里声明 ``permissions``，例如：
+涉及面板数据的模块（``bot`` / ``bindings`` / ``cross`` / ``admin`` /
+``console`` / ``config``）需要在子插件的 ``manifest.json`` 里声明
+``permissions``，例如：
 
-    { "type": "py", "permissions": ["players", "logs", "bots", "bindings", "cross"] }
+    { "type": "py", "permissions": ["players", "logs", "bots", "bindings", "cross", "config"] }
 
 写 ``"*"`` 表示全部。不声明则默认空集，只能使用游戏侧能力（server / player / event）。
 """
@@ -51,12 +54,24 @@ from ._context import (
 from ._errors import GmError, GmNotReady, GmPermissionError
 
 # 子模块必须在 context 之后导入：它们的模块级代码会用 require_plugin 等
-from . import admin, bindings, bot, console, cross, event, player, players, server
+from . import (
+    admin,
+    bindings,
+    bot,
+    config,
+    console,
+    cross,
+    event,
+    mapart,
+    player,
+    players,
+    server,
+)
 
 __all__ = [
     # 子模块
     "server", "player", "players", "bot", "bindings", "cross",
-    "admin", "console", "event",
+    "admin", "console", "event", "mapart", "config",
     # 上下文与异常
     "attach", "detach", "get_plugin", "require_plugin", "current_owner",
     "require_grant", "granted", "api_version",

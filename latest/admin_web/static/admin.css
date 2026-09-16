@@ -710,6 +710,16 @@ td { color: var(--gm-text); }
 .modal-section-title { font-size: 14px; font-weight: 700; color: var(--gm-warn); margin: 12px 0 10px; }
 .modal-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 16px; }
 
+/* 子插件设置页的「高级选项」折叠区。默认收起 —— 设置项多的子插件
+   一展开就是几十行，把常用的几项挤到看不见的地方去了。 */
+.gmod-adv { margin-top: 12px; border-top: 1px solid var(--gm-border); padding-top: 10px; }
+.gmod-adv > summary {
+    cursor: pointer; font-size: 13px; font-weight: 700;
+    color: var(--gm-text-mute); padding: 4px 0; user-select: none;
+}
+.gmod-adv > summary:hover { color: var(--gm-text); }
+.gmod-adv[open] > summary { color: var(--gm-warn); margin-bottom: 8px; }
+
 /* ---------- 15. Toast ---------- */
 #toast {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-24px);
@@ -828,6 +838,21 @@ h2 .help-q, h3 .help-q { font-size: 11px; }
     padding: 1px 5px;
     border-radius: 6px;
     background: var(--gm-inset);
+}
+
+/* 带文字标签的问号（子插件卡片的「描述」）。
+   .help-q 本体是 18×18 的定宽圆形，不覆盖会把文字裁掉。 */
+.help-q-label {
+    width: auto;
+    height: auto;
+    padding: 1px 8px;
+    border-radius: 999px;
+    margin-left: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    /* 覆盖 .help-q 的 middle：在文字行里 middle 会偏高，
+       baseline 才和前面的名称/版本/徽章对齐 */
+    vertical-align: baseline;
 }
 
 /* ---------- 19. 临时账户权限选择 ---------- */

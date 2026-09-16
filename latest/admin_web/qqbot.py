@@ -8,7 +8,51 @@ import threading
 import time
 import traceback
 
+from . import qqrelay
 from .core import DEFAULT_QQBOT_CONFIG, _to_slot
+
+
+class QQImageEvent(object):
+    """一条来自 QQ 群的图片消息（入站）。
+
+    主插件与子插件（``gm.bot.on_image``）共用这个对象。
+
+    字段
+    ----
+    ``adapter_id``   收到消息的机器人卡片 id（多卡片环境下区分是哪张卡）
+    ``adapter_name`` 该卡片的显示名
+    ``group_id``     群 openid
+    ``sender_id``    发送者的 member_openid（用来查账号绑定）
+    ``sender_name``  发送者群昵称
+    ``images``       图片列表，每项 ``{url, content_type, filename, size, width, height}``
+    ``text``         同一条消息里的文字（可能为空串，纯图消息就是空）
+    ``message_id``   消息 id，可用于被动回复
+    ``raw``          原始消息体（需要协议里其它字段时用）
+
+    ⚠ ``images[i]["url"]`` 是**带签名、会过期**的临时下载地址。
+    拿到后请尽快下载，不要持久化保存这个 URL。
+    """
+
+    __slots__ = (
+        "adapter_id", "adapter_name", "group_id", "sender_id", "sender_name",
+        "images", "text", "message_id", "raw",
+    )
+
+    def __init__(self, adapter_id="", adapter_name="", group_id="", sender_id="",
+                 sender_name="", images=None, text="", message_id="", raw=None):
+        self.adapter_id = str(adapter_id or "")
+        self.adapter_name = str(adapter_name or "")
+        self.group_id = str(group_id or "")
+        self.sender_id = str(sender_id or "")
+        self.sender_name = str(sender_name or "")
+        self.images = list(images or [])
+        self.text = str(text or "")
+        self.message_id = str(message_id or "")
+        self.raw = raw if isinstance(raw, dict) else {}
+
+    def __repr__(self):
+        return (f"QQImageEvent(card={self.adapter_id!r}, group={self.group_id!r}, "
+                f"sender={self.sender_name!r}, images={len(self.images)})")
 
 
 class _TokenBucket(object):
@@ -198,6 +242,93 @@ class QQBotAPI(object):
             raise
         return resp.json()
 
+    # ------------------------------------------------------------ 富媒体
+    #
+    # QQ 官方协议**没有**「列出群文件」这种接口（那是客户端能力，
+    # 开放平台不暴露），也拿不到群号。官方能做的富媒体是：
+    #   ① 上传一份媒体文件，换回 file_info / file_uuid（有有效期）
+    #   ② 用 msg_type=7 发一条引用该 file_info 的消息
+    # 文字用 msg_type=0。
+    #
+    # ⚠ 上传接口的完整路径在不同环境/版本上略有差异，因此这里把
+    #   「先试 v2、失败回落旧路径」做成显式逻辑，并在失败时把响应体
+    #   写进日志 —— 否则线上只能看到一个光秃秃的 404，无从下手。
+
+    def upload_media(self, group_openid, file_url, file_type=1, srv_send_msg=False):
+        """上传媒体，返回 ``file_info`` 字符串（失败抛异常）。
+
+        ``file_type``：1=图片 2=视频 3=语音 4=文件
+        ``file_url``：公网可访问的媒体地址（官方要求 URL，不接受本地路径）
+        ``srv_send_msg``：True 时由服务端直接发出，不返回 file_info
+        """
+        target = str(group_openid or "").strip()
+        if not target:
+            raise RuntimeError("未指定群，无法上传媒体")
+        src = str(file_url or "").strip()
+        if not src:
+            raise RuntimeError("媒体地址为空")
+
+        payload = {
+            "file_type": int(file_type),
+            "url": src,
+            "srv_send_msg": bool(srv_send_msg),
+        }
+        headers = {
+            "Authorization": f"QQBot {self.get_access_token()}",
+            "Content-Type": "application/json",
+        }
+
+        last_err = None
+        for path in (f"/v2/groups/{target}/files",
+                     f"/v2/groups/{target}/files/upload"):
+            url = f"{self.msg_api}{path}".replace("api.bot.qq.com", "api.sgroup.qq.com")
+            try:
+                resp = self.http.post(url, json=payload, headers=headers, timeout=60)
+                if resp.status_code >= 400:
+                    last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    self._log("warning", f"[QQ] 上传媒体失败 {path}: {last_err}")
+                    continue
+                data = resp.json() or {}
+                info = str(data.get("file_info") or "").strip()
+                if info:
+                    return info
+                if data.get("file_uuid"):
+                    return str(data["file_uuid"])
+                last_err = f"响应缺少 file_info: {str(data)[:200]}"
+                self._log("warning", f"[QQ] 上传媒体响应异常 {path}: {last_err}")
+            except Exception as e:
+                last_err = str(e)
+                self._log("warning", f"[QQ] 上传媒体异常 {path}: {e}")
+        raise RuntimeError(f"上传媒体失败: {last_err}")
+
+    def send_media_message(self, group_openid, file_info, msg_id=""):
+        """发送一条富媒体消息（msg_type=7，需先拿到 ``file_info``）。"""
+        target = str(group_openid or "").strip()
+        info = str(file_info or "").strip()
+        if not target or not info:
+            raise RuntimeError("群或 file_info 为空，无法发送媒体消息")
+        url = f"{self.msg_api}/v2/groups/{target}/messages".replace(
+            "api.bot.qq.com", "api.sgroup.qq.com"
+        )
+        payload = {"msg_type": 7, "media": {"file_info": info}}
+        if msg_id:
+            payload["msg_id"] = msg_id
+        resp = self.http.post(
+            url, json=payload,
+            headers={"Authorization": f"QQBot {self.get_access_token()}",
+                     "Content-Type": "application/json"},
+            timeout=30,
+        )
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            # 把响应体打出来 —— 官方接口的报错信息只在体里，光看状态码没用
+            body = getattr(e, "response", None)
+            if body is not None:
+                self._log("error", f"[QQ] 发送媒体响应详情: {body.text[:300]}")
+            raise
+        return resp.json()
+
 class QQBotGateway(object):
                                                            
 
@@ -242,6 +373,24 @@ class QQBotGateway(object):
 
     _AUTH_CLOSE_CODES = (4004, 4013, 4014)
 
+    def is_connected(self) -> bool:
+        """网关当前是否已连上 WebSocket（只读、不抛异常）。
+
+        ★ 为什么要有这个公开方法
+        ----------------------
+        ``Hub.status()`` 原先直接读 ``gw._connected.is_set()`` —— 一个
+        **私有属性**。QQ 官方网关和 OneBot 网关是两套完全独立实现，
+        这个私有名没有任何约定保证会一直存在。哪天 OneBot 网关换成
+        别的连接管理方式，``hub.status()`` 就会静默退化成「永远未连接」，
+        面板上机器人在线但显示离线，而且不报错。
+
+        现在 Hub 统一调 ``is_connected()``，两套网关各自实现即可。
+        """
+        try:
+            return bool(self._connected.is_set())
+        except Exception:
+            return False
+
     def _is_auth_failure(self, exc):
 
         try:
@@ -282,6 +431,8 @@ class QQBotGateway(object):
                     th.join(timeout=3)
                 except Exception:
                     pass
+        # worker 线程已退出（或超时），确保连接池被释放
+        self._close_api()
         self.logger.info("[QQ] 网关已停止")
 
     def _next_backoff(self):
@@ -337,6 +488,27 @@ class QQBotGateway(object):
                 pass
             self._loop = None
             self._connected.clear()
+            # ★ 关掉本轮的 HTTP 连接池。
+            #
+            # _run() 每次都会 new 一个 QQBotAPI，而 QQBotAPI.__init__ 里
+            # 建了 requests.Session()（内含连接池，持有 socket）。
+            # 监督线程在鉴权失败/断线时会反复重启 worker，
+            # 如果这里不关，每轮就泄漏一份连接池 —— 长时间抖动重连后
+            # 会累积到 "Too many open files"，最终整个网关再也起不来。
+            self._close_api()
+
+    def _close_api(self):
+        """关闭当前 API 的连接池（幂等，不抛异常）。"""
+        api = getattr(self, "_api", None)
+        if api is None:
+            return
+        try:
+            sess = getattr(api, "http", None)
+            if sess is not None:
+                sess.close()
+        except Exception:
+            pass
+        self._api = None
 
     async def _run(self):
         self._api = QQBotAPI(self.config, self.requests)
@@ -469,13 +641,134 @@ class QQBotGateway(object):
         except Exception:
             pass
 
+    # ------------------------------------------------------ 入站图片
+    #
+    # QQ 群消息里的图片不在 ``content``（那里只有文字），而是挂在
+    # ``attachments`` 数组里，形如：
+    #
+    #     {"content_type": "image/png",
+    #      "url": "https://multimedia.nt.qq.com.cn/download?...",
+    #      "filename": "xxx.png", "size": 12345, "width": 100, "height": 100}
+    #
+    # 注意 ``url`` 是**带签名、会过期**的临时地址（通常几小时后失效），
+    # 所以拿到后要尽快下载，不能存起来慢慢用。
+
+    @staticmethod
+    def _extract_attachments(data):
+        """从消息体里挑出图片附件，返回 ``[{url, content_type, filename, size, width, height}]``。
+
+        兼容两种字段名：官方 WS 协议用 ``attachments``，部分
+        代理/网关会写成 ``attachment``（单数）；两者都认，
+        避免换个网关就静默收不到图。
+        """
+        raw = None
+        for key in ("attachments", "attachment", "images", "image"):
+            got = data.get(key)
+            if got:
+                raw = got
+                break
+        if raw is None:
+            return []
+        if isinstance(raw, dict):
+            raw = [raw]
+        if not isinstance(raw, list):
+            return []
+
+        out = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or item.get("image_url")
+                      or item.get("download_url") or "").strip()
+            if not url:
+                continue
+            ctype = str(item.get("content_type") or item.get("contentType")
+                        or item.get("type") or "").strip().lower()
+            # content_type 可能是 image/png、image/jpeg……
+            # 也可能只给了个 "image"。非图片类型（语音、文件）跳过。
+            if ctype and "image" not in ctype:
+                continue
+            out.append({
+                "url": url,
+                "content_type": ctype or "image/*",
+                "filename": str(item.get("filename") or "").strip(),
+                "size": item.get("size") or 0,
+                "width": item.get("width") or 0,
+                "height": item.get("height") or 0,
+            })
+        return out
+
+    def _dispatch_image(self, group_openid, sender_openid, sender_name,
+                        images, content, msg_id, data):
+        """把入站图片派发给已注册的钩子（主插件与子插件共用）。
+
+        钩子签名：``fn(ev)``，``ev`` 是 ``QQImageEvent``。
+        任何一个钩子抛异常都不影响其它钩子 —— 图片类钩子往往要做
+        网络下载，不能让它把整条消息处理链路带崩。
+        """
+        # 两个列表里**任意一个**非空都要继续派发。
+        # 早先这里只看 `_qq_image_hooks`（主插件内部钩子），空就直接返回 ——
+        # 但主插件自己本来就没有内置的图片处理，这个列表常态为空，
+        # 于是**子插件注册的钩子永远收不到任何图片**（功能整条静默失效）。
+        if not getattr(self.plugin, "_qq_image_hooks", None) \
+                and not getattr(self.plugin, "_gm_image_hooks", None):
+            return
+
+        # ⚠ 一律用 getattr 兜底取卡片信息。
+        # ``_card_id`` 是 Hub 在 ``_spawn`` 里**动态挂上来**的，而
+        # ``_card_name`` 以前根本不存在 —— 直接写 ``self._card_name``
+        # 会让每一次图片派发都抛 AttributeError（被外层 except 记成
+        # 「派发图片事件失败」），图片功能整条失效。
+        # 这类「用了不存在的属性」的问题不会在启动时暴露，只有真收到
+        # 图片才炸，所以取值处必须防御。
+        ev = QQImageEvent(
+            adapter_id=getattr(self, "_card_id", "") or "",
+            adapter_name=getattr(self, "_card_name", "") or "",
+            group_id=str(group_openid or ""),
+            sender_id=str(sender_openid or ""),
+            sender_name=str(sender_name or ""),
+            images=list(images or []),
+            text=str(content or ""),
+            message_id=str(msg_id or ""),
+            raw=data,
+        )
+
+        # 先跑全局（主插件内部）钩子，再跑子插件钩子；
+        # 复制一份再遍历，防止回调里增删导致 RuntimeError。
+        for group_name, lst in (("plugin", getattr(self.plugin, "_qq_image_hooks", None)),
+                                ("gm", getattr(self.plugin, "_gm_image_hooks", None))):
+            if not lst:
+                continue
+            for fn in list(lst):
+                try:
+                    fn(ev)
+                except Exception as e:
+                    self.logger.warning(
+                        f"[QQ] 图片钩子 {getattr(fn, '__name__', fn)} 执行失败: {e}")
+
     async def _handle_group_message(self, data):
         try:
             content = str(data.get("content", "") or "").strip()
-            if not content:
+            attachments = self._extract_attachments(data)
+            # 注意：不能因为 content 为空就 return。
+            # QQ 群里「只发一张图、不带文字」是极常见的用法，那种消息
+            # content 就是空串，图片只在 attachments 里。原来这里直接
+            # return，导致纯图片消息整条被丢弃（子插件的图片钩子也就
+            # 永远收不到东西）。
+            if not content and not attachments:
                 return
             sender = data.get("author") or {}
-            sender_name = str(sender.get("member_name") or sender.get("username") or "未知")
+            # ⚠ 官方消息体里**没有 ``member_name`` 这个字段**。
+            # 昵称在 ``username``（见 QQ 官方文档 GROUP_AT_MESSAGE_CREATE
+            # 的 User 结构：id / username / bot / union_openid /
+            # union_user_account / user_openid / member_openid / member_role）。
+            # 原先优先读 ``member_name`` 永远取不到，一路 or 下去落到
+            # ``"未知"``，游戏内于是显示不出是谁在说话。
+            #
+            # 这里不再用「未知」兜底，而是留空 —— 由 qqrelay.format_relay
+            # 统一决定缺昵称时显示什么（它会给一个可读的占位词），
+            # 免得同一个概念在两个模块里各有一套兜底文案。
+            sender_name = str(sender.get("username") or "").strip()
             sender_openid = str(sender.get("member_openid") or "")
             group_openid = str(data.get("group_openid") or data.get("group_id") or "")
             msg_id = str(data.get("id") or "")
@@ -492,21 +785,68 @@ class QQBotGateway(object):
             bound_ids = set(g["openid"] for g in self._bound_groups())
             is_bound = bool(group_openid) and group_openid in bound_ids
 
+            # ---- 已绑定的群里发了「当前验证码」→ 明确回一句，别装死 ----
+            #
+            # 场景：A 群已绑定，用户又申请了一个码（准备加 B 群），
+            # 结果在 A 群里把码发了出来。原实现会走下面的通用分支，
+            # 码被当成普通聊天内容转发到游戏里，机器人**一个字都不回**，
+            # 用户以为消息发丢了、或者以为验证码失效了。
+            #
+            # ⚠ 触发条件必须**同时**满足两点，缺一不可：
+            #   1) 本群已绑定（is_bound）；
+            #   2) 内容**精确等于**当前有效的验证码。
+            # 绝不能放宽成「已绑定群发的任何数字」之类 —— 下面紧跟着
+            # 图片派发、`!` 指令、自定义关键词、查状态、账号绑定码绑定、
+            # QQ→MC 转发等一长串逻辑（尤其账号绑定码也是 5 位纯数字），
+            # 一旦误判就会把用户在已绑定群里的正常消息整条吃掉。
+            if is_bound and group_openid:
+                _cur_pending = self.config.get("pending_group_binds") or []
+                _cur_code = ""
+                try:
+                    if _cur_pending and isinstance(_cur_pending[0], dict):
+                        _cur_code = str(_cur_pending[0].get("code", "") or "")
+                except Exception:
+                    _cur_code = ""
+                if content and content in (c for c in (_cur_code, self.binding_code or "") if c):
+                    await self._send_qq_text(
+                        "ℹ️ 本群已经绑定过了，无需重复绑定。\n"
+                        "该验证码是给「还没加入的新群」用的 —— 请把机器人拉进目标群，"
+                        "在那个群里发送这个验证码。\n"
+                        "如需更换主群或解绑，请在服务器 Web 后台「QQ机器人 → 群管理」里操作。",
+                        msg_id,
+                    )
+                    # 注意：这里**不**消耗验证码。它属于另一个还没绑的群，
+                    # 在这里吃掉会导致用户去目标群发时反而绑定失败。
+                    return
+
             if not is_bound:
                 pending = self.config.get("pending_group_binds") or []
                 code_is_pending = group_openid and bool(pending) and content == str(pending[0].get("code", ""))
                 if code_is_pending:
-                    if not str(self.config.get("group_openid", "") or "").strip():
+                    # ``_complete_binding`` 在本群**已经是主群**时会直接 return
+                    # （它开头就挡了这一条）。如果这里不问青红皂白地报
+                    # 「主群绑定成功」，就是在为一个什么都没发生的操作发成功回执。
+                    # 所以先问一句「主群位是不是本来就是本群」。
+                    _cur_primary = str(self.config.get("group_openid", "") or "").strip()
+                    if not _cur_primary:
                         await asyncio.to_thread(self._complete_binding, group_openid)
                         await self._send_qq_text("✅ 主群绑定成功！可发送「设置群名 名字」为本群命名", msg_id)
+                    elif _cur_primary == str(group_openid):
+                        await self._send_qq_text("ℹ️ 本群已经是主群了，无需重复绑定。", msg_id)
                     else:
                         if self._add_extra_group(group_openid, group_openid):
                             await self._send_qq_text("✅ 已加入互联群！可发送「设置群名 名字」为本群命名", msg_id)
                         else:
                             await self._send_qq_text("⚠️ 该群已在互联列表中", msg_id)
+                    # 成功加入一个群 → 注销该验证码（一码一用）。
                     self._consume_pending_code()
                     return
                 if group_openid and content == (self.binding_code or ""):
+                    # 同上：已经是主群就别报「成功」。``binding_code`` 是主卡
+                    # 的固定绑定码，在同一群里重复发会一直命中这一条。
+                    if str(self.config.get("group_openid", "") or "").strip() == str(group_openid):
+                        await self._send_qq_text("ℹ️ 本群已经是主群了，无需重复绑定。", msg_id)
+                        return
                     await asyncio.to_thread(self._complete_binding, group_openid)
                     await self._send_qq_text("✅ 绑定成功！已将本群设为机器人的主群。", msg_id)
                     return
@@ -524,6 +864,19 @@ class QQBotGateway(object):
                 self._ensure_extra_group_registered(group_openid)
             except Exception:
                 pass
+
+            # 已绑定的群里，把图片派发给钩子（子插件靠这个收图）。
+            # 放在这里而不是开头，是为了不处理未绑定群的消息 ——
+            # 否则随便谁拉个群发图都能触发地图画生成，等于开了个
+            # 免费的白嫖入口（生成地图是有开销的）。
+            if attachments:
+                try:
+                    self._dispatch_image(
+                        group_openid, sender_openid, sender_name,
+                        attachments, content, msg_id, data,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"[QQ] 派发图片事件失败: {e}")
 
             try:
                 pl = self.plugin
@@ -567,7 +920,10 @@ class QQBotGateway(object):
                     return
                 cmd = content[1:].strip()
                 if cmd:
-                    self.logger.info(f"[QQ] 管理员 {sender_name} 执行指令：{cmd}")
+                    # 日志里昵称可能为空（部分消息不带 username），
+                    # 这里补一个可读兜底，免得打出「管理员  执行指令」。
+                    _who = sender_name or "未知"
+                    self.logger.info(f"[QQ] 管理员 {_who} 执行指令：{cmd}")
                     self._run_on_server(lambda c=cmd: self.server.dispatch_command(self.server.command_sender, c))
                     await self._send_qq_text(f"✅ 已执行指令：{cmd}", msg_id)
                 return
@@ -585,13 +941,19 @@ class QQBotGateway(object):
 
             content = self._filter_banned(content)
             if self.config.get("qq_to_mc", True):
-                fmt = self.config.get("qq_to_mc_format", "[QQ] %s：%s")
-                gname = self._group_display_name(group_openid) or sender_name
-                self._broadcast_game(fmt % (gname, content))
+                # 群名用于显示；取不到就交给 format_relay 兜底
+                gname = self._group_display_name(group_openid)
+                text = qqrelay.format_relay(
+                    self.config.get("qq_to_mc_format") or qqrelay.DEFAULT_FORMAT,
+                    sender_name, gname, content,
+                )
+                self._broadcast_game(text)
                 cross = getattr(self.plugin, "cross", None)
                 if cross is not None and cross.enabled():
                     try:
-                        cross.send_qq_relay(gname, content)
+                        # send_qq_relay 自身兼容新旧参数形态，
+                        # 这里按新形态传：发言人 + 群名 + 内容
+                        cross.send_qq_relay(sender_name, gname, content)
                     except Exception:
                         pass
         except Exception as e:
@@ -810,14 +1172,38 @@ class QQBotGateway(object):
         return [g["openid"] for g in self._bound_groups() if g.get("openid")]
 
     def _group_display_name(self, openid):
+        """取群名用于显示。取不到就返回空串，**绝不返回 openid**。
+
+        为什么要这样：``groups[].name`` 在 core.py 规范化时，缺名字会
+        回退成 openid 本身（见 ``_qqbot_public_state`` / ``group_edit``）。
+        所以查表拿到的 ``name`` **有可能就是一串 openid**。
+
+        而 openid 正是用户报的那个问题——游戏里显示成
+        「[QQ] 7FCD011F67733A4572DCDBF2D525F201：？」。一旦它被当成
+        群名填进格式串，就等于什么都没修。所以这里要做一次识别：
+        名字长得跟群标识一样就丢掉，交给 ``qqrelay.format_relay``
+        填一个可读的占位词。
+
+        主群（``group_openid``）同理：以前这里 ``return oid if oid ==
+        primary else ""`` —— 主群没填名字时直接把 openid 当群名返回，
+        正是线上那个现象的直接来源。
+
+        ⚠ 配置里**没有** ``group_name`` 这个键（群名只存在
+        ``groups[].name`` 里）。别凭印象去读一个不存在的字段 ——
+        那正是本轮 ``_card_name`` 那个 bug 的同类错误。
+        主群若没登记在 groups 里，就拿不到名字，返回空串让调用方兜底。
+        """
         oid = str(openid or "").strip()
         if not oid:
             return ""
-        primary = str(self.config.get("group_openid", "") or "").strip()
         for g in self._bound_groups():
-            if g["openid"] == oid:
-                return g["name"]
-        return oid if oid == primary else ""
+            if str(g.get("openid") or "") == oid:
+                nm = str(g.get("name") or "").strip()
+                # 名字等于标识本身 → 说明当初就没填名字，不算有效群名。
+                if nm and nm != oid:
+                    return nm
+                break
+        return ""
 
     def _filter_banned(self, text):
 

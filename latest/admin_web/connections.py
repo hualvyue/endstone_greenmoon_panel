@@ -46,7 +46,7 @@ def _default_sync() -> dict[str, Any]:
         "mc_to_qq": True,
         "join_to_qq": True,
         "leave_to_qq": True,
-        "qq_to_mc_format": "[QQ] %s：%s",
+        "qq_to_mc_format": "[QQ] %s@%s：%s",
         "mc_to_qq_format": "[游戏] %s：%s",
         "join_format": "[游戏] %s 加入了服务器",
         "leave_format": "[游戏] %s 离开了服务器",

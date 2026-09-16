@@ -217,10 +217,16 @@ class OneBotInterop:
         if banned is None:
             return
         if card.get("sync", {}).get("qq_to_mc", True):
-            fmt = card.get("sync", {}).get("qq_to_mc_format", "[QQ] %s：%s")
-            gname = str(group_id)
-            self._broadcast_game(fmt % (gname, banned))
-            self._cross_relay(gname, banned)
+            # 群名：OneBot 侧能从 card 的群列表里查到名字，查不到才用 id。
+            # 旧实现直接 str(group_id)，于是游戏里永远是一串数字。
+            gname = self._group_display_name(card, group_id)
+            from .. import qqrelay
+            text = qqrelay.format_relay(
+                card.get("sync", {}).get("qq_to_mc_format") or qqrelay.DEFAULT_FORMAT,
+                sender_name, gname, banned,
+            )
+            self._broadcast_game(text)
+            self._cross_relay(sender_name, gname, banned)
 
     def _handle_private(self, card: dict[str, Any], adapter, data: dict[str, Any]) -> None:
         content = _extract_text(data)
@@ -242,6 +248,61 @@ class OneBotInterop:
             return False
         groups = self.hub.manager.parse_groups(card.get("main_group"))
         return str(group_id) in {str(g) for g in groups}
+
+    def _group_display_name(self, card: dict[str, Any], group_id) -> str:
+        """取群名用于显示。取不到返回空串，交给上层兜底。
+
+        OneBot 协议确实有 ``get_group_list`` 能拿群名，但它是**异步回调**
+        接口，而这里处在同步的消息处理路径上 —— 为了填一个显示名去发
+        请求并等回调，只会把消息延迟拖长、还要处理超时与失败。
+        所以走本地配置：卡片里存过 ``groups[].name``，直接查。
+
+        ⚠ 为什么不再回退群号
+        --------------------
+        旧实现查不到就 ``return gid``（群号）。看起来"至少能看出是哪个
+        群"，但 OneBot 的 ``group_id`` 常常也是一串数字/长标识 ——
+        用户看到的还是「昵称@123456789：内容」这种，观感上跟没修一样。
+        而且 ``qqrelay.format_relay`` 已经会把空缺的群名填成「群」，
+        这里再塞一个群号进去，等于绕过了那层兜底。所以统一返回空串。
+
+        ⚠ 数据源必须是 ``conn_mgr.adapters``
+        -----------------------------------
+        卡片列表存在 ``ConnectionManager.adapters``，**不是**
+        ``plugin.web_config["qq_bots"]`` —— 后者这个键根本不存在
+        （以前这里读的就是它，``get`` 一路返回 None，整段查表代码
+        从未生效过）。这类"读了不存在的键"的 bug 不会报错，
+        只是**静默不工作**，所以宁可写死真实位置。
+        """
+        gid = str(group_id if group_id is not None else "").strip()
+        if not gid:
+            return ""
+
+        def _look(groups):
+            for g in (groups or []):
+                if isinstance(g, dict) and str(g.get("openid", "") or "") == gid:
+                    nm = str(g.get("name") or "").strip()
+                    # 名字等于标识本身 → 当初就没填名字，不算有效群名。
+                    if nm and nm != gid:
+                        return nm
+            return ""
+
+        try:
+            # 1) 全局卡片表（权威来源）
+            mgr = getattr(self.plugin, "conn_mgr", None)
+            adapters = getattr(mgr, "adapters", None)
+            if isinstance(adapters, list):
+                for c in adapters:
+                    if isinstance(c, dict):
+                        nm = _look(c.get("groups"))
+                        if nm:
+                            return nm
+            # 2) 兜底：调用方自己传进来的 card
+            nm = _look(card.get("groups") if isinstance(card, dict) else None)
+            if nm:
+                return nm
+        except Exception:
+            pass
+        return ""
 
     def _is_admin(self, card: dict[str, Any], user_id) -> bool:
         if user_id in (None, ""):
@@ -323,11 +384,18 @@ class OneBotInterop:
         except Exception:
             return []
 
-    def _cross_relay(self, group_name: str, text: str) -> None:
+    def _cross_relay(self, sender_name: str, group_name: str, text: str) -> None:
+        """把一条群消息推到跨服聊天。
+
+        ``sender_name`` 是发言人昵称（跨服那边要显示「谁说的」），
+        ``group_name`` 是群名（附加信息）。旧签名只有 ``(group_name, text)``，
+        把群名填进了玩家的位置 —— 那会显示成「群名 说：内容」。
+        """
         try:
             cross = getattr(self.plugin, "cross", None)
             if cross is not None and cross.enabled() and text:
-                cross.send_qq_relay(group_name, text)
+                # send_qq_relay 自身兼容新旧两种参数形态，这里直接按新形态调
+                cross.send_qq_relay(sender_name, group_name, text)
         except Exception as e:
             self._log.warning(f"[OneBot互通] 跨服推送失败: {e}")
 

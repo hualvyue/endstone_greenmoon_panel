@@ -49,6 +49,7 @@ from endstone.event import (
 )
 
 from .mod_loader import mime_for as _gmod_mime_for
+from .mod_loader import SETTINGS_MASK as MASKED_SECRET
 
 from .core import (
     DEFAULT_CROSS_CONFIG,
@@ -127,16 +128,414 @@ def decode_bmp_24bit(data: bytes) -> List[List[Tuple[int, int, int]]]:
     return pixels
 
 class ImageMapRenderer(MapRenderer):
+    """把一张 128×128 的 RGB 点阵渲染到地图上。
+
+    点阵结构 ``pixels[y][x] = (r, g, b)``。
+
+    ★★★ 为什么"渲染器在、包也发了，画面却是白的"（本类存在的真正理由）
+    -------------------------------------------------------------------
+    这是本项目里**最难查的一个 bug**，结论必须原样留在这里，否则一定会
+    被下一个人重新踩一遍。反汇编 ``endstone 0.11.10`` 的
+    ``libendstone_runtime.so`` 逐条确认到的机制：
+
+    1. ``EndstoneMapView`` 的**构造函数**在最后会自己挂一个内置渲染器::
+
+           EndstoneMapView::EndstoneMapView(MapItemSavedData& md) {
+               ...
+               // 1d5b70: new(0x18) → EndstoneMapRenderer(view, md)
+               // 1d5b86: call EndstoneMapRenderer::EndstoneMapRenderer
+               // 1d5bc0: call EndstoneMapView::addRenderer(内置渲染器)
+           }
+
+       也就是说 **每张地图天生至少有一个渲染器**。
+       ⇒ ``len(view.renderers)`` **永远 ≥ 1**，拿它判断"我们的渲染器在不在"
+         是**错的**：你看到的那个 1 极可能从来不是我们的渲染器。
+
+    2. 内置渲染器 ``EndstoneMapRenderer::render()``（0x220bb0）干的事是::
+
+           把 MapItemSavedData::getPixels() 的 128×128 存档像素
+           逐格 set_pixel 到 canvas 上
+             ↑ MapItemSavedData+0x30 那 64KB 数组
+
+       它画的是**存档里的像素**。而 endstone **没有任何 API** 能把插件
+       画的像素写进存档（``MapItemSavedData::getPixels()`` 在全运行时
+       只有一个调用者，就是这里，且只读）。
+       ⇒ 地图画从来没进过存档，所以内置渲染器画出来 **必定是一片全 0**，
+         按 endstone 的色板就是**白色**。
+
+    3. ``EndstoneMapView::render(player)``（0x1d61e0）是**按 vector 顺序
+       依次**调每个渲染器的::
+
+           for (r : renderers) {
+               canvas = canvasCache[r][playerId];
+               canvas->setBase(mapData->getPixels());   // 每次都用存档像素打底
+               r->render(view, canvas, player);         // 往同一张 canvas 上画
+               canvas->getBuffer() → rd.buffer;         // 结果拷进 RenderData
+           }
+
+       ⇒ **后画的盖先画的。** 内置渲染器排在**前面**（它是构造时挂的），
+         我们的渲染器 ``add_renderer`` 追加在**后面**……
+
+       等等，那我们的应该盖住内置的才对。**问题恰恰相反**：内置渲染器在
+       我们之后**再被调用时会用存档像素打底（setBase）重新铺满整个
+       canvas**，把我们已经画好的覆盖回全 0。
+
+    ★ 真正的修复
+    -------------
+    不要跟顺序赌 —— **每次 render 都自己铺底**。``setBase`` 是这条链路里
+    唯一会被别人改动的状态，那我们就在自己的 ``render()`` 开头**重新把
+    点阵铺满整个画布**（``render()`` 本就逐像素写满 128×128，已经等价于
+    全量覆盖）。所以本类**不需要**额外铺底动作 —— 逐像素写满就是铺底。
+
+    真正需要做的是：**确保我们的渲染器排在 vector 的最后**（最后画 =
+    最终生效），并在挂载后**复核**一次位置。
+    ``GreenMoonPlugin._attach_mapart_renderer`` 负责这件事。
+
+    ---- 像素是怎么到玩家客户端的（同一份反汇编确认）----
+    ``render()`` 的结果进的是 **内存缓存**（``EndstoneMapView`` 的
+    ``RenderData``），**不写存档**。真正把它送出去的是发包链路：
+
+        Player::sendMap → 造地图包（128×128 全 0 占位）
+                        → player->sendPacket(packet)
+                        → BatchedNetworkPeer 的地图 hook
+                          调 view->render(player)
+                          → 用 RenderData 的像素覆盖 packet.pixels
+
+    所以**只要渲染器挂在地图上且排在最后、地图包正常发出**，画面就是对的。
+    """
+    #: 缓存键选择，不是持久化开关（详见 __init__ 下方长注释）。
+    #: True = 每位玩家一份 RenderData；False = 全体共用一个槽。
+    #: 保持一致用 True，避免将来加 per-player 逻辑时静默串味。
+    CONTEXTUAL = True
+
     def __init__(self, pixels: List[List[Tuple[int, int, int]]]):
-        super().__init__(is_contextual=False)
+        super().__init__(is_contextual=self.CONTEXTUAL)
         self.pixels = pixels
+        #: 首次调用打点用的标志（见 render 的 docstring）。
+        #: 放在实例上而不是类上 —— 每张地图画一个渲染器实例，
+        #: 这样每张图各自打一条，不会互相把标志吃掉。
+        self._logged_first_call = False
+
+    # ------------------------------------------------------------------
+    # is_contextual 到底是什么（反汇编 endstone 0.11.10 确认）
+    # ------------------------------------------------------------------
+    # ⚠ 先纠正一个我们**曾经写错**的结论，别再被它带偏：
+    #
+    #   旧注释声称 "is_contextual=True 会让像素并进地图自身像素数据、
+    #   随存档落盘"。**这是错的。** 反汇编 render() 的完整流程后确认：
+    #   无论 True 还是 False，渲染结果都只进一个**内存**哈希表
+    #   （EndstoneMapView 的 RenderData），**从不写回 MapItemSavedData**。
+    #   enstone 也**没有**任何 API 能把插件画的像素写进存档。
+    #   （MapItemSavedData::getPixels() 在整个运行时只有一个调用者：
+    #      EndstoneMapRenderer 的构造函数，且只是读来当底图。）
+    #
+    # 那 is_contextual 到底控制什么 —— 它控制 **RenderData 的缓存键**：
+    #
+    #   EndstoneMapView::render(player) 的实际流程：
+    #       playerId = -1;  hasContextual = false;
+    #       for (r : renderers)              // 找第一个 contextual 渲染器
+    #           if (r->is_contextual) {     // 第 8 字节，构造时写入
+    #               playerId = player.id;
+    #               hasContextual = true;
+    #               break;                  // ← 找到就停
+    #           }
+    #
+    #       RenderData& rd = renderDataMap[playerId];   // ← 缓存键
+    #       if (hasContextual)
+    #           renderDataMap.erase(-1);    // 清掉"无 contextual"的共享槽
+    #
+    #       memset(rd.buffer, 0, ...);      // 清零
+    #       for (r : renderers) {
+    #           canvas = canvasCache[r][playerId];
+    #           canvas->setBase(mapData->getPixels());  // 底图（只读）
+    #           r->render(view, canvas, player);        // 各自的像素
+    #           canvas->getBuffer() → rd.buffer;        // 结果拷进缓存
+    #       }
+    #       return &rd;                     // ← 返回给发包方
+    #
+    #   ★ 注意上面这个循环里**没有 break** —— 所有渲染器都会跑一遍，
+    #     而且**每个渲染器都往同一张 canvas 上画**。所以：
+    #
+    #         vector 里排在后面的渲染器，其绘制结果覆盖前面的。
+    #         但 setBase 在每个渲染器开跑前都会把存档像素重新铺满 ——
+    #         哪怕你的渲染器排在最后，只要之后**还有**渲染器跑，
+    #         你的像素就会被它的 setBase 洗掉。
+    #
+    #     实测（用户的完整运行日志）：地图上只有内置渲染器时，
+    #     画面 = 存档像素 = 全 0 = **纯白**。这与"地图画从没进过存档"
+    #     完全吻合。**这就是白图的根因。**
+    #
+    #   ⇒ 因此本类的 render() 必须**自己铺满全程**（逐像素写满 128×128
+    #     本身就等价于全量覆盖，不依赖 setBase 给的底图）。
+    #     挂载时也必须确保本渲染器排在 vector 末尾，避免被后跑的
+    #     内置渲染器 setBase 洗掉。见 ``attach_mapart_renderer``。
+    #
+    #   也就是说：False 时所有玩家共用 playerId=-1 这一个槽（省内存，
+    #   但"渲染结果确实与玩家无关"才安全）；True 时每位玩家一个槽
+    #   （多花一点内存，换完全不共享）。对我们的固定地图画，两者都正确。
+    #
+    # 真正把像素送到客户端的是**发包链路**，与这个标志无关：
+    #   Player::sendMap(view)
+    #     → 造 ClientboundMapItemDataPacket，硬编码 128×128 宽高
+    #     → packet.pixels.resize(128*128)（全 0 占位）
+    #     → player->sendPacket(packet)
+    #         → BatchedNetworkPeer::sendPacket 里有个 endstone 的 hook：
+    #             若待发的是地图包 → view->render(player)
+    #             → 用 RenderData 的像素**逐格覆盖** packet.pixels
+    #   ★ render() 在整个 76MB 运行时里**只有这一个调用点**。
+    #     这就是"原版的渲染时机"：发包时渲染。
+    #
+    # 结论：只要渲染器挂在地图上、且地图包被发出，像素就会到客户端。
+    #      这与 is_contextual 取值无关 —— 它纯粹是缓存键的选择。
+    #
+    # 那为什么会白图？见 render() 里的诊断埋点：把"没被调用"和
+    # "调用了没效果"这两种成因区分开，别再靠猜。
+    #
+    # 我们仍保持 True：地图画本就与玩家无关，但用 False 会让所有玩家
+    # 共享一个 RenderData 槽 —— 万一将来有人加了 per-player 逻辑
+    # （比如"只给队长看坐标"），False 会静默串味。True 没有任何这类风险，
+    # 代价只是每位玩家多一份 128×128 的内存，可以忽略。
+
+    def initialize(self, view: MapView) -> None:
+        """渲染器被挂到地图上时的初始化钩子。
+
+        ⚠ 这里**故意留空**，不是漏写。
+
+        ``initialize()`` 拿不到 ``MapCanvas``（签名只有 ``(view)``），
+        所以**画不了像素** —— 想在这里把图补上根本无从下手。
+        它跑在 tick 里，在这里读盘或依赖外部状态，一旦抛异常就是崩 tick，
+        收益却为零。
+
+        地图画重登/重启后的可见性**不靠这个钩子**，靠的是
+        ``ImageMapRenderer.render`` 自己全量铺像素 + 进服恢复流程
+        （``GreenMoonPlugin._restore_mapart_now``）把渲染器补挂回去。
+        """
+        return None
 
     def render(self, view: MapView, canvas: MapCanvas, player: Player) -> None:
+        """把 128×128 点阵逐像素写进画布。
+
+        ⚠ 为什么每一层都要兜异常
+        ------------------------
+        这个方法在**服务器 tick 里**被调用。此处抛出的异常会打断整个 tick，
+        后果比"画错一个像素"严重得多。
+
+        原先这里是不带保护的（点阵一定来自刚解码的内存数据，足够可信）。
+        但自从加入地图画持久化恢复（``GreenMoonPlugin._record_mapart`` /
+        ``_restore_mapart_now``）之后，这个渲染器**第一次有机会拿到从磁盘
+        读回来的像素** —— 文件被截断、被手工改坏、磁盘出错，都可能让
+        ``self.pixels`` 短几行或某行短几个元素。
+
+        ``gm/_mapview.py`` 里那份等价实现一直是有保护的；出于同样的理由，
+        这里对齐成完全一致的写法：行缺失就停，像素缺失就跳过。
+
+        ★ 诊断埋点（2026-09 追查"说恢复了但还是白图"）
+        --------------------------------------------
+        这个方法由 **C++ 在发包时调用**，插件侧完全看不到它有没有被执行。
+        于是"白图"就有两种完全不同的可能，从日志上根本分不清：
+
+            A. render() 压根没被调用  → 渲染器没生效（挂错了/被丢了）
+            B. render() 跑了但没效果  → 像素写进了画布，却被丢弃了
+
+        所以在**第一次被调用**时打一条日志，把这个二分法变成可观测的：
+        日志里出现 "渲染器已被调用" = A 排除，问题在 B；
+        日志里没有这一行 = A 成立，要查渲染器为什么没被用上。
+
+        只打第一条（``_logged_first_call``），因为这个方法在每位玩家、
+        每个发包批次里都会被调用，每次都打会直接刷爆日志。
+        """
+        # 只在第一次调用时打点，之后静默（见 docstring）。
+        if not self._logged_first_call:
+            self._logged_first_call = True
+            try:
+                import logging as _logging
+                _logging.getLogger("GreenMoonPanel").info(
+                    "[地图画] 渲染器已被调用（render 首次执行）—— "
+                    "说明渲染器挂载成功、原版正在使用它")
+            except Exception:
+                pass
+
         for y in range(128):
-            row = self.pixels[y]
+            try:
+                row = self.pixels[y]
+            except IndexError:
+                break
             for x in range(128):
-                r, g, b = row[x]
-                canvas.set_pixel_color(x, y, (r, g, b))
+                try:
+                    r, g, b = row[x]
+                    canvas.set_pixel_color(x, y, (r, g, b))
+                except Exception:
+                    continue
+
+def attach_mapart_renderer(view, renderer):
+    """把``renderer``挂到``view``上，并保证它**排在渲染器列表末尾**。
+
+    ★★ 这是白图 bug 的修复本体，改动前务必读完类 docstring 的那三条机制。
+
+    为什么必须"排在末尾"
+    --------------------
+    ``EndstoneMapView::render(player)`` 是**顺序遍历**渲染器列表的，
+    且**每个渲染器都往同一张 canvas 上画**（详见类 docstring）。而
+    ``EndstoneMapView`` 构造函数会**先**挂一个内置的
+    ``EndstoneMapRenderer``（画存档像素，对地图画而言恒为全 0 = 白）。
+
+    于是渲染顺序决定了谁能活到最后：
+
+        内置(先) → 我们(后)   ⇒ 我们的像素最后写入，**赢**  ✅
+        我们(先) → 内置(后)   ⇒ 内置用存档像素(全 0)盖掉我们  ❌ 白图
+
+    ``view.add_renderer(r)`` 是**追加**到向量末尾的，所以单次挂载天然
+    就是"内置在先、我们在后"的正确顺序。**但**如果把已有列表里的位置
+    弄乱了（例如先挂我们的、之后地图对象被重建而内置渲染器又被追加
+    到我们后面），顺序就会反转，白图重现。
+
+    所以本函数不只"挂"，还**做两件保证**：
+      1. 已经挂过我们的渲染器（同 id）就不重复挂 —— 幂等；
+      2. 挂完复核一次位置，**只要发现末尾不是我们，就重排到末尾**。
+
+    返回 True 表示"挂载/排序后，本渲染器确实位于末尾"。
+
+    参数
+    ----
+    view : MapView
+        ``server.get_map(id)`` 或 ``server.create_map()`` 返回的视图。
+    renderer : ImageMapRenderer
+        要挂的地图画渲染器。
+
+    **本函数在任何情况下都不抛异常** —— 它在 tick 里被调用，
+    抛异常会打断整个 tick，比画错严重得多。
+    """
+    try:
+        # 用 id() 判断"是不是同一个渲染器实例"。C++ 侧持有的每个
+        # Python 渲染器都有稳定的 id，重复调用时能认出自己。
+        target = id(renderer)
+
+        def _ids():
+            try:
+                return [id(r) for r in (view.renderers or [])]
+            except Exception:
+                return []
+
+        def _others():
+            """取出"除我们以外的"渲染器。
+
+            ⚠ 为什么不能只靠 id(r) != target 过滤：
+            ``view.renderers`` 返回的是 vector 的**拷贝**，里面的元素是
+            C++ 侧重新包装过的 shared_ptr。对端stone 的 MapRenderer 而言，
+            Python 包装层每次取回都可能是新对象，``id()`` 并不稳定 ——
+            只按 id 过滤会把"我们自己的"也当成"别人"，重排时就会
+            把它再追加一遍，产生**副本**（实测结果：
+            ``['builtin', 'builtin', 'ours']``，内置渲染器跑了两遍）。
+
+            所以这里加一层**按类型认人**：属于本类（或其子类）的一律算
+            "我们的"，全部剔除（含早先挂在错误位置上的副本）。
+            """
+            out = []
+            try:
+                for r in (view.renderers or []):
+                    if id(r) == target:
+                        continue
+                    if isinstance(r, type(renderer)):
+                        continue
+                    out.append(r)
+            except Exception:
+                return None
+            return out
+
+        def _ours_all():
+            """取出列表里**所有**我们的渲染器（含挂在错位的副本）。"""
+            out = []
+            try:
+                for r in (view.renderers or []):
+                    if id(r) == target or isinstance(r, type(renderer)):
+                        out.append(r)
+            except Exception:
+                return None
+            return out
+
+        seen = _ids()
+        if target in seen:
+            if seen and seen[-1] == target and seen.count(target) == 1:
+                return True
+        else:
+            try:
+                view.add_renderer(renderer)
+            except Exception:
+                return False
+            seen = _ids()
+            if seen and seen[-1] == target:
+                return True
+
+        # ---- 走到这里 = 位置不对（或存在重复），必须重排 ----
+        others = _others()
+        if others is None:
+            return False
+
+        # ★ 关键：把**所有**我们的实例先摘干净（不只是 target）。
+        # 只摘 target 会漏掉挂在错位的副本 —— 实测会得到
+        # ['ours', 'builtin', 'ours']，末尾那个还是被内置的 setBase 洗掉。
+        for r in (_ours_all() or []):
+            try:
+                view.remove_renderer(r)
+            except Exception:
+                continue
+        # "其它"渲染器也摘一遍，然后按原顺序重挂 —— 保证它们仍在前。
+        for r in others:
+            try:
+                view.remove_renderer(r)
+            except Exception:
+                continue
+        for r in others:
+            try:
+                view.add_renderer(r)
+            except Exception:
+                continue
+        # 最后才追加我们，独占末尾。
+        try:
+            view.add_renderer(renderer)
+        except Exception:
+            return False
+
+        final = _ids()
+        return bool(final) and final[-1] == target
+    except Exception:
+        return False
+
+
+def _is_mapart_renderer(obj, renderer_cls):
+    """判断 ``obj`` 是不是我们自己挂的地图画渲染器（而不是内置那个）。
+
+    ★ 为什么不能只看"有几个渲染器"
+    ------------------------------
+    用户日志里那句「现有渲染器 1 个」是**误判的根源**：
+    ``EndstoneMapView`` 构造时会自动挂一个内置
+    ``EndstoneMapRenderer``（画存档像素），所以**任何地图天生就有 1 个**。
+
+    ⇒ ``len(view.renderers) >= 1`` **恒成立**，用它判断"我们的渲染器
+      还在不在"永远为真，恢复逻辑于是什么都不做 —— 白图就这么来的。
+
+    正确做法是**按类型认人**：``isinstance`` 检查是不是
+    ``ImageMapRenderer``。内置那个是 C++ 对象，不会是 Python 类的实例。
+    """
+    try:
+        return isinstance(obj, renderer_cls)
+    except Exception:
+        return False
+
+
+def has_mapart_renderer(view, renderer_cls):
+    """``view`` 上**有没有我们自己的**地图画渲染器。
+
+    与 ``_is_mapart_renderer`` 配套：绕开"内置渲染器恒存在"这个坑。
+    任何异常一律当作"没有"处理（宁可多补挂一次，也不要漏掉）。
+    """
+    try:
+        for r in (view.renderers or []):
+            if _is_mapart_renderer(r, renderer_cls):
+                return True
+    except Exception:
+        pass
+    return False
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -157,9 +556,31 @@ class _ConsoleStreamCapture:
         self._orig_stdout = None
         self._orig_stderr = None
         self._reader_thread = None
+        self._pipe_read = None
         self._stop = False
 
     def start(self) -> bool:
+        # ★ 幂等保护：已在采集时先停掉上一次。
+        #
+        # 旧实现直接 os.dup(1)/os.dup(2) 再 dup2 覆盖，如果 start()
+        # 被调用两次而中间没有 stop()（插件热重载时很常见：disable
+        # 没走完就 enable 了），上一次 dup 出来的 fd 立刻失去引用 →
+        # 永久泄漏；而且 stdout 被套了两层管道，同一条日志会被采集
+        # 两次，面板里就出现重复行。
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            try:
+                self.stop()
+            except Exception:
+                pass
+        else:
+            # 线程已死但 fd 还在（异常退出路径）也要清干净
+            self._restore()
+            try:
+                if getattr(self, "_pipe_read", None) is not None:
+                    os.close(self._pipe_read)
+                    self._pipe_read = None
+            except Exception:
+                pass
         try:
 
             try:
@@ -190,6 +611,15 @@ class _ConsoleStreamCapture:
 
     def stop(self):
         self._stop = True
+        # 先唤醒/收拢读线程，再关读端 —— 直接关会让阻塞在 os.read 的
+        # 线程抛 OSError 退出（已有 except OSError 兜着），但显式 join
+        # 一下能保证不会再往日志缓冲区写。
+        try:
+            if self._reader_thread is not None and self._reader_thread.is_alive() \
+                    and self._reader_thread is not threading.current_thread():
+                self._reader_thread.join(timeout=2)
+        except Exception:
+            pass
         try:
             if getattr(self, "_pipe_read", None) is not None:
                 os.close(self._pipe_read)
@@ -325,6 +755,143 @@ def _is_conn_error(exc) -> bool:
     return isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError,
                             TimeoutError, socket.timeout))
 
+
+# ============================================================================
+# 路径 → 所需权限 scope 映射表
+# ============================================================================
+#
+# ★ 为什么要改成**表驱动**
+# ----------------------
+# 原来是 ``_scope_for_path`` 里一条 20 多行的 if 链。这种写法有三个问题：
+#
+#   1. **新增端点极易漏登记**。写完一个新的 ``/api/xxx`` 分支，忘了回头
+#      往 if 链里加一行，这个端点就落到末尾的 ``return set()``。
+#      而缺省集合在 ``_scope_gate`` 里会被兜底成 ``{"account"}`` ——
+#      看起来「有权限控制」，实际上凡是拥有 account 权限的用户都能访问，
+#      而 account 是「账户与安全」这种几乎人人有的高频权限。
+#      也就是说：**漏登记 = 静默提权**，而且不报错。
+#
+#   2. 顺序敏感，难以推理。前缀匹配必须排在同名精确匹配之后，改一行
+#      可能悄悄影响另一条。
+#
+#   3. 无法被程序检查 —— 没有地方能「遍历所有已注册端点」做一致性验证。
+#
+# 表驱动后，规则集中在一处，且可以被自检函数遍历验证
+# （见 ``check_scope_coverage``，测试里会调它）。
+#
+# 匹配优先级：**精确 > 前缀**，同类别内按表顺序取第一个命中。
+# 前缀统一约定以 ``/`` 结尾（如 ``/api/qqbot/``），避免
+# ``/api/mods`` 被 ``/api/mod/`` 误吞这类前缀陷阱。
+
+#: 需要任意一个权限即可（登录用户都能访问）
+_SCOPE_ANY = {"__any__"}
+
+#: 精确路径 → scope 集合
+_SCOPE_EXACT: "dict[str, set]" = {
+    "/admin": _SCOPE_ANY,
+    "/api/auth/me": _SCOPE_ANY,
+    # /api/login 在 _handle_api 里**早于**鉴权闸门就被短路处理掉了
+    # （还没登录，当然不能要求权限），正常永远走不到 _scope_gate。
+    # 这里显式登记 __any__ 是为了两件事：
+    #   ① 让覆盖自检不用给它开白名单特例（少一处「靠人记住」的知识）；
+    #   ② 防止将来有人把登录处理挪到闸门之后 —— 那时它会落到「未登记 →
+    #      兜底 account」上，登录反而要求 account 权限，死锁。
+    "/api/login": _SCOPE_ANY,
+    "/api/players": {"players", "detail", "logs"},
+    "/api/system/stats": {"players", "detail", "logs"},
+    "/api/messages": {"logs", "players", "detail"},
+    "/api/console": {"console", "logs"},
+    "/api/scoreboards": {"scoreboard", "console"},
+    "/api/objective": {"scoreboard", "console"},
+    "/api/score": {"scoreboard", "console"},
+    "/api/gamerules": {"gamerules"},
+    "/api/gamerule": {"gamerules"},
+    "/api/bans": {"bans"},
+    "/api/ban": {"bans"},
+    "/api/unban": {"bans"},
+    "/api/permission": {"perm", "worlds", "gamerules"},
+    "/api/properties": {"perm", "worlds", "gamerules"},
+    "/api/properties/save": {"perm", "worlds", "gamerules"},
+    "/api/properties/set": {"perm", "worlds", "gamerules"},
+    "/api/worlds": {"worlds"},
+    "/api/world/switch": {"worlds"},
+    "/api/restart": {"account"},
+    "/api/whitelist/applications": {"whitelist"},
+    "/api/whitelist/review": {"whitelist"},
+    "/api/mods": {"mods"},
+    "/files": {"files"},
+}
+
+#: 控制台执行类端点（只写，全部归 console）
+_SCOPE_EXACT.update({
+    p: {"console"} for p in (
+        "/api/kill", "/api/message", "/api/give", "/api/health", "/api/tag",
+        "/api/kick", "/api/op", "/api/teleport", "/api/map",
+        "/api/console/command",
+    )
+})
+
+#: 前缀 → scope 集合。键**必须**以 ``/`` 结尾。
+_SCOPE_PREFIX: "list[tuple[str, set]]" = [
+    ("/api/player/", {"players", "detail", "logs"}),
+    ("/api/qqbot/", {"qqbot"}),
+    ("/api/bots/", {"qqbot"}),
+    ("/api/cross/", {"cross"}),
+    ("/api/backup/", {"backup"}),
+    ("/api/tools/config", {"backup", "cloud"}),
+    ("/api/cloud/", {"cloud"}),
+    ("/api/gametools", {"gametools"}),
+    ("/api/mod/", {"mods"}),
+    ("/api/gmods", {"mods"}),
+    ("/api/diag", {"diag"}),
+    ("/api/account/", {"account"}),
+    ("/api/security/", {"account"}),
+    ("/api/files/", {"files"}),
+]
+
+
+def _scopes_for_path(path: str) -> set:
+    """查表得到 ``path`` 所需的权限 scope 集合（未登记返回空集）。
+
+    匹配顺序：先精确、后前缀。返回的是**新 set**，调用方随便改不会
+    污染表（原实现每次 ``return {...}`` 也是新对象，语义一致）。
+    """
+    p = path or ""
+    hit = _SCOPE_EXACT.get(p)
+    if hit is not None:
+        return set(hit)
+    for prefix, scopes in _SCOPE_PREFIX:
+        if p.startswith(prefix):
+            return set(scopes)
+    return set()
+
+
+def check_scope_coverage(known_paths) -> "list[str]":
+    """自检：``known_paths`` 里有哪些 ``/api/`` 路径没登记 scope。
+
+    返回未登记路径列表（空表示全部覆盖）。供测试调用 ——
+    这是表驱动换来的关键收益：**漏登记可以被自动发现**，
+    而 if 链时代只能靠人肉比对。
+
+    ``/api/`` 本身会被忽略：它是 `path.startswith('/api/')` 这类
+    **前缀判定**被扫描器顺带抠出来的，并不是一个真实端点；
+    ``/api/account`` 之类没有尾斜杠的路径也同理。
+    """
+    missing = []
+    for p in known_paths or ():
+        if not p.startswith("/api/"):
+            continue
+        # 以 / 结尾的「半截路径」是 startswith 前缀，不是端点
+        if p.endswith("/") and p.count("/") <= 2:
+            continue
+        if p in _SCOPE_EXACT:
+            continue
+        if any(p.startswith(pref) for pref, _ in _SCOPE_PREFIX):
+            continue
+        missing.append(p)
+    return missing
+
+
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -395,62 +962,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         return path == "/whitelist" or path in ("/api/whitelist/apply", "/api/whitelist/status")
 
     def _scope_for_path(self, path: str) -> set:
-                                                                                       
-                                                                                                                     
-           
-        p = path or ""
-        if p == "/admin":
-            return {"__any__"}
-        if p == "/api/auth/me":
-            return {"__any__"}
-        if p == "/api/players" or p.startswith("/api/player/") or p == "/api/system/stats":
-            return {"players", "detail", "logs"}
-        if p == "/api/messages":
-            return {"logs", "players", "detail"}
-        if p == "/api/console":
-            return {"console", "logs"}
-        if p == "/api/scoreboards" or p == "/api/objective":
-            return {"scoreboard", "console"}
-        if p == "/api/score":
-            return {"scoreboard", "console"}
-        if p in ("/api/kill", "/api/message", "/api/give", "/api/health", "/api/tag",
-                 "/api/kick", "/api/op", "/api/teleport", "/api/map", "/api/console/command"):
-            return {"console"}
-        if p == "/api/gamerules" or p == "/api/gamerule":
-            return {"gamerules"}
-        if p == "/api/bans" or p == "/api/ban" or p == "/api/unban":
-            return {"bans"}
-        if p == "/api/permission" or p == "/api/properties" or p == "/api/properties/save" or p == "/api/properties/set":
-            return {"perm", "worlds", "gamerules"}
-        if p == "/api/worlds" or p == "/api/world/switch":
-            return {"worlds"}
-        if p == "/api/restart":
-            return {"account"}
-        if p == "/api/whitelist/applications" or p == "/api/whitelist/review":
-            return {"whitelist"}
-        if p.startswith("/api/qqbot/") or p.startswith("/api/bots/"):
-            return {"qqbot"}
-        if p.startswith("/api/cross/"):
-            return {"cross"}
-        if p.startswith("/api/backup/"):
-            return {"backup"}
-        if p.startswith("/api/tools/config"):
-            return {"backup", "cloud"}
-        if p.startswith("/api/cloud/"):
-            return {"cloud"}
-        if p.startswith("/api/gametools"):
-            return {"gametools"}
-        if p == "/api/mods" or p.startswith("/api/mod/"):
-            return {"mods"}
-        if p.startswith("/api/gmods"):
-            return {"mods"}
-        if p.startswith("/api/diag"):
-            return {"diag"}
-        if p.startswith("/api/account/") or p.startswith("/api/security/"):
-            return {"account"}
-        if p.startswith("/api/files/") or p == "/files":
-            return {"files"}
-        return set()
+
+        return _scopes_for_path(path)
 
     def _ip_in_cidr(self, ip: str, cidr: str) -> bool:
         try:
@@ -878,6 +1391,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_gmods_files(parsed.query)
             elif path == '/api/gmods/pages':
                 self._handle_api_gmods_pages()
+            elif path == '/api/gmods/settings':
+                self._handle_api_gmods_settings(parsed.query)
             elif path == '/api/mods':
                 self._handle_api_mods()
             elif path == '/api/auth/me':
@@ -1059,6 +1574,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_gmods_disable(data)
             elif path == '/api/gmods/file/save':
                 self._handle_api_gmods_file_save(data)
+            elif path == '/api/gmods/config/save':
+                self._handle_api_gmods_config_save(data)
             elif path == '/api/cross/config/save':
                 self._handle_cross_config_save(data)
             elif path == '/api/cross/test':
@@ -2438,6 +2955,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             for m in ld.list_mods():
                 item = dict(m)
                 item["loaded"] = str(m.get("uuid")) in loaded
+                # 让前端知道这张卡片要不要显示「⚙ 设置」按钮。
+                # 摘要在这里算而不是让前端每张卡片发一次请求 —— 十个子插件
+                # 就是十个请求，而 schema 解析要读文件 + 过校验，没必要。
+                try:
+                    item.update(ld.mod_config_summary(str(m.get("uuid"))))
+                except Exception:
+                    item["has_settings"] = False
+                    item["field_count"] = 0
                 mods.append(item)
             self._send_json({
                 "ok": True,
@@ -2683,6 +3208,139 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 got = None
             out[ptype] = {"uuid": ld.enabled_uuid(ptype), "active": bool(got)}
         self._send_json({"ok": True, "pages": out})
+
+    def _handle_api_gmods_settings(self, query):
+        """读取某个子插件的设置 schema 与当前值。
+
+        返回 ``fields``（已校验的字段声明）与 ``values``（当前值，已按
+        schema 补过默认值）。前端照着这两样渲染表单。
+        """
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        qs = urllib.parse.parse_qs(query or "")
+        uuid = str((qs.get("uuid") or [""])[0] or "").strip()
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        rec = ld.installed(uuid)
+        if not rec:
+            self._send_json({"ok": False, "error": "子插件不存在"}, 404)
+            return
+        try:
+            fields = ld.settings_schema(uuid, log_invalid=True)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"解析 settings.json 失败: {e}"}, 500)
+            return
+        try:
+            stored = ld.read_mod_config(uuid)
+        except Exception:
+            stored = {}
+        values = self._gmod_settings_values(fields, stored)
+        self._send_json({
+            "ok": True,
+            "uuid": uuid,
+            "name": rec.get("name") or uuid,
+            "type": rec.get("type"),
+            "has_settings": bool(fields),
+            "fields": fields,
+            "values": values,
+        })
+
+    def _gmod_settings_values(self, fields, stored):
+        """把磁盘值整理成"前端直接可填"的形态。
+
+        两件事：
+        1. schema 声明了、config.json 里却没有的键 → 用 schema 的 default 补
+           （不落盘，只补在响应里）。这样作者在 settings.json 写了默认值，
+           管理员第一次打开设置页看到的就是那个值，不用自己猜。
+        2. ``password`` 类型且已有值 → 回传面罩串，**不回传明文**。
+           前端看到面罩就不回写，保留磁盘原值。
+
+           注意这是防"肩窥"（管理员开着设置页被人看到），**不是**加密存储 ——
+           明文仍在 config.json 里，因为子插件自己要能读回真值。这一点和面板
+           现有的 access_token / app_secret 是同一套待遇，不做更高承诺。
+        """
+        values = {}
+        for fld in fields or []:
+            if not isinstance(fld, dict):
+                continue
+            key = fld.get("key")
+            if not key:
+                continue
+            ftype = fld.get("type")
+            if key in (stored or {}):
+                val = stored[key]
+                if ftype == "password":
+                    values[key] = MASKED_SECRET if str(val) else ""
+                else:
+                    values[key] = val
+            elif "default" in fld:
+                values[key] = fld["default"]
+            else:
+                values[key] = False if ftype == "bool" else ""
+        return values
+
+    def _handle_api_gmods_config_save(self, data):
+        """保存子插件的设置。
+
+        仅管理员可用 —— 子插件配置里可能有 token、群号这类东西，
+        临时账号一律拒绝（比照 .gmmod 的安装/卸载）。
+        """
+        if not self._gmod_admin_only():
+            return
+        ld = self._gmod_loader()
+        if ld is None:
+            return
+        d = data or {}
+        uuid = str(d.get("uuid", "") or "").strip()
+        values = d.get("values")
+        if not uuid:
+            self._send_json({"ok": False, "error": "缺少 uuid"}, 400)
+            return
+        if not isinstance(values, dict):
+            self._send_json({"ok": False, "error": "values 必须是对象"}, 400)
+            return
+        try:
+            fields = ld.settings_schema(uuid, log_invalid=True)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"解析 settings.json 失败: {e}"}, 500)
+            return
+        if not fields:
+            self._send_json({
+                "ok": False,
+                "error": "该子插件未提供设置项（包内缺少 settings.json）",
+            }, 400)
+            return
+
+        # 面罩值原样回传时**跳过**：那说明管理员没动这个输入框，
+        # 不跳过的话会把密码改成一串星号。
+        by_key = {}
+        for fld in fields:
+            if isinstance(fld, dict) and fld.get("key"):
+                by_key[fld["key"]] = fld
+        payload = {}
+        for key, val in values.items():
+            name = str(key)
+            fld = by_key.get(name)
+            if fld is None:
+                continue
+            if fld.get("type") == "password" and str(val) == MASKED_SECRET:
+                continue
+            payload[name] = val
+
+        try:
+            ok, rejected, msg = ld.write_mod_config(uuid, payload)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"保存失败: {e}"}, 500)
+            return
+        if not ok:
+            self._send_json({"ok": False, "error": msg or "保存失败", "rejected": rejected}, 400)
+            return
+        out = {"ok": True, "message": msg or "配置已保存", "rejected": rejected}
+        if rejected:
+            out["message"] += f"（{len(rejected)} 项未通过校验被忽略: {', '.join(rejected[:5])}）"
+        self._send_json(out)
 
     def _fs_root(self) -> Path:
         return (self.plugin._find_server_root() or Path.cwd()).resolve()
@@ -3457,62 +4115,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_error(f"生成地图失败: {e}")
 
     def _execute_map(self, player_name: str, image_data: bytes):
-        target = self.plugin.server.get_player(player_name)
-        if not target:
-            return False, f"玩家 {player_name} 不在线"
+        """转发到插件上的权威实现（``GreenMoonPlugin._execute_map``）。
 
-        try:
-            pixels = decode_bmp_24bit(image_data)
-        except Exception as e:
-            return False, f"图片解码失败: {e}"
+        ⚠ 历史 bug 备忘：地图画的实现原先**只**长在本类（HTTP 处理器）上。
+        面板自己调得到，但 ``gm/mapart.py`` 调的是 ``plugin._execute_map``，
+        插件对象上压根没这个方法 —— 子插件一调用就报
+        ``'GreenMoonPlugin' object has no attribute '_execute_map'``。
 
-        try:
-            dimension = target.dimension
-        except AttributeError:
-            try:
-                dimension = target.location.dimension
-            except AttributeError:
-                return False, "无法获取玩家所在维度"
-
-        try:
-            map_view = self.plugin.server.create_map(dimension)
-        except TypeError:
-            try:
-                map_view = self.plugin.server.create_map()
-            except Exception:
-                return False, "当前 Endstone 不支持创建地图"
-
-        renderer = ImageMapRenderer(pixels)
-        map_view.add_renderer(renderer)
-
-        item_type = ItemType.get("minecraft:filled_map") or ItemType.get("filled_map")
-        if not item_type:
-            return False, "无法获取 filled_map 物品类型"
-        item_stack = item_type.create_item_stack(1)
-
-        meta = item_stack.item_meta
-        if not isinstance(meta, MapMeta):
-            from endstone.inventory import ItemMeta
-            meta = ItemMeta()
-        meta.map_view = map_view
-        item_stack.set_item_meta(meta)
-
-        remaining = target.inventory.add_item(item_stack)
-        if remaining:
-
-            try:
-                dimension.drop_item(target.location, item_stack)
-            except Exception as e:
-                self.plugin.logger.warning(f"背包已满且掉落失败: {e}")
-            self.plugin.logger.warning(f"{player_name} 背包已满，地图丢在地上")
-
-        try:
-            target.send_message("§c[警告] §e你收到了一张地图画，该地图渲染可能不稳定，请勿在低版本客户端使用。")
-        except Exception:
-            pass
-
-        self.plugin.logger.info(f"为 {player_name} 生成地图，ID={map_view.id}")
-        return True, f"已为 {player_name} 生成地图，ID: {map_view.id}（已发放）"
+        实现在插件侧才是对的（它要用 server / scheduler / 玩家背包），
+        所以搬到那儿去，这里只做转发，免得两边各留一份慢慢长歪。
+        """
+        plugin = getattr(self, "plugin", None)
+        impl = getattr(plugin, "_execute_map", None)
+        if impl is None:
+            return False, "插件未提供地图生成实现（_execute_map 缺失）"
+        return impl(player_name, image_data)
 
     def _execute_allowlist_add(self, name: str):
 
