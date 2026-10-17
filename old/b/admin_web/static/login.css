@@ -1,0 +1,18 @@
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif;background:radial-gradient(1100px 600px at 15% -10%,#22345c 0%,#141a30 45%,#0c101f 100%) fixed;min-height:100vh;display:flex;align-items:center;justify-content:center;color:#e6ecff;padding:20px}
+.card{width:100%;max-width:400px;background:rgba(20,26,46,0.92);border:1px solid #2a3550;border-radius:16px;padding:34px 32px;box-shadow:0 18px 50px rgba(0,0,0,0.5)}
+.logo{font-size:20px;font-weight:700;display:flex;align-items:center;gap:10px;letter-spacing:.5px}
+.logo .plain{color:#cfd9f2}.logo .acc{color:#4ecca3}
+.sub{color:#8b96ad;font-size:13px;margin:10px 0 22px;line-height:1.7}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:13px;color:#c3cde0;margin-bottom:6px}
+.field input{width:100%;background:#0f1626;color:#eef3ff;border:1px solid #2a3550;border-radius:10px;padding:11px 13px;font-size:14px;outline:none;transition:border-color .15s}
+.field input:focus{border-color:#4ecca3;box-shadow:0 0 0 3px rgba(78,204,163,0.15)}
+.btn{width:100%;background:linear-gradient(135deg,#2ea97c,#36c795);color:#06231a;font-weight:700;font-size:15px;border:none;border-radius:10px;padding:12px;cursor:pointer;letter-spacing:3px;transition:filter .15s}
+.btn:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.6;cursor:wait}
+.msg{margin-top:14px;font-size:13px;color:#4ecca3;text-align:center;min-height:18px}
+.foot{text-align:center;margin-top:18px;font-size:12px;color:#5b6b8f}
+.foot a{color:#7aa0ff;text-decoration:none}
+</style>

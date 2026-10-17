@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import queue
 import random
@@ -27,6 +28,16 @@ from .message import format_message
 USER_AGENT = "GreenMoonPanel (Endstone)"
 
 API_TIMEOUT = 10.0
+# 一个包最多重试几次（超过就丢弃，避免队头阻塞 / 无限重发）
+SEND_MAX_TRIES = 5
+
+class OneBotAPIError(RuntimeError):
+    """OneBot 对端返回了非 0 的 retcode。
+
+    单独定义成一个类型，是为了让调用方能明确区分
+    「网络/连接层失败」和「协议层拒绝了这次调用」——
+    两者该做的补救完全不同（前者重试，后者改参数）。
+    """
 SEND_QUEUE_SIZE = 100
 # 入站事件派发队列容量：超出时丢最旧保内存（与发送队列同策略）
 DISPATCH_QUEUE_SIZE = 2000
@@ -281,6 +292,8 @@ class OneBotAdapter:
     async def _main(self) -> None:
         self._connected_event = asyncio.Event()
         self._send_queue = asyncio.Queue(maxsize=SEND_QUEUE_SIZE)
+        # 重试暂存位（代替「把整条队列掏空再塞回去」的做法，见 _requeue_head）
+        self._retry_head = None
         self._sender_task = asyncio.create_task(
             self._sender_loop(),
             name=f"GreenMoon-OneBot-Sender-{self.adapter_id or 'default'}",
@@ -347,16 +360,52 @@ class OneBotAdapter:
             self.logger.warning(f"[OneBot] 已断开，{delay:.1f}s 后重连（第 {attempt} 次）")
             await asyncio.sleep(delay)
 
+    @staticmethod
+    def _extract_bearer(value: str) -> str:
+        """从 Authorization 头里取出 token。
+
+        兼容三种常见写法：``Bearer xxx`` / ``Token xxx`` / 裸 ``xxx``。
+        原来只认字面量 ``Bearer ``，而 NapCat / Lagrange 的部分版本
+        发的是 ``Token xxx``，另有一些网关直接发裸 token ——
+        结果是「配置里 token 填得完全正确，反向连接还是被 4001 拒掉」。
+        """
+        s = str(value or "").strip()
+        if not s:
+            return ""
+        parts = s.split(None, 1)
+        if len(parts) == 2 and parts[0].lower() in ("bearer", "token"):
+            return parts[1].strip()
+        return s
+
     async def _reverse_serve(self) -> None:
         async def handler(ws: Any) -> None:
             headers = getattr(ws, "request", None)
             headers = getattr(headers, "headers", {}) or {}
             auth = headers.get("Authorization", "")
-            self_id = headers.get("X-Self-ID", "")
+            # 头名大小写不敏感：http 库会把 header 规范化成 Title-Case
+            # （X-Self-Id），而 OneBot 规范写的是 X-Self-ID。
+            self_id = headers.get("X-Self-ID", "") or headers.get("X-Self-Id", "")
 
-            if self.access_token and auth != f"Bearer {self.access_token}":
-                self.logger.warning("[OneBot] 反向连接鉴权失败")
-                await ws.close(code=4001, reason="unauthorized")
+            if self.access_token:
+                got = self._extract_bearer(auth)
+                if not hmac.compare_digest(str(got), str(self.access_token)):
+                    self.logger.warning("[OneBot] 反向连接鉴权失败")
+                    await ws.close(code=4001, reason="unauthorized")
+                    return
+
+            # ★ 只接收「属于本卡片」的客户端。
+            # 原来无论 X-Self-ID 是什么都 ``self._clients.add(ws)``，
+            # 而广播/调用又是发给 _clients 里的**所有**连接。
+            # 于是：一个 QQ 号配置错误、或者同一个 NapCat 实例连到了
+            # 两张卡片上，就会让「本该走 A 卡的回复」被 B 卡也发一遍，
+            # 玩家看到重复消息；反过来 A 卡的调用可能落在 B 号上执行。
+            # 配置了 bot_qq 且客户端自报的 self_id 不匹配时，明确拒绝。
+            if self.bot_qq and self_id and str(self_id) != str(self.bot_qq):
+                self.logger.warning(
+                    f"[OneBot] 反向连接 self_id={self_id} 与卡片配置的 "
+                    f"bot_qq={self.bot_qq} 不一致，已拒绝"
+                )
+                await ws.close(code=4003, reason="self_id mismatch")
                 return
 
             self._clients.add(ws)
@@ -423,14 +472,41 @@ class OneBotAdapter:
             echo_key = str(echo)
             fut = self._pending.pop(echo_key, None)
             if fut is not None:
+                # ★ retcode 判定要覆盖三种失败表示。
+                # OneBot v11 里 status 可能是 "ok"/"async"/"failed"，
+                # 而**部分实现（含 NapCat 某些版本）根本不发 status**，
+                # 只给 retcode。原判断用 ``data.get("status") == "failed"``
+                # 只覆盖了 status，一旦对端只发 retcode=100（参数错）
+                # 或 1400（群不存在），这里会当成功放过去 ——
+                # 上层 await 到的结果是「成功」，于是「消息发不出去但界面显示已发送」。
+                failed = False
+                status = data.get("status")
                 retcode = data.get("retcode")
-                if data.get("status") == "failed" or (retcode is not None and retcode != 0):
+                if status == "failed":
+                    failed = True
+                elif retcode is not None:
+                    try:
+                        if int(retcode) != 0:
+                            failed = True
+                    except (TypeError, ValueError):
+                        failed = True
+                if failed:
                     self.logger.warning(
-                        f"[OneBot] API 失败 retcode={retcode} status={data.get('status')} "
+                        f"[OneBot] API 失败 retcode={retcode} status={status} "
                         f"wording={data.get('wording') or data.get('message') or ''}"
                     )
                 if not fut.done():
-                    fut.set_result(data.get("data"))
+                    # 失败时给 awaiting 的上层一个明确的异常，而不是 None，
+                    # 否则调用方无法区分「成功但没数据」和「失败了」。
+                    if failed:
+                        fut.set_exception(
+                            OneBotAPIError(
+                                f"retcode={retcode} status={status} "
+                                f"{data.get('wording') or data.get('message') or ''}".strip()
+                            )
+                        )
+                    else:
+                        fut.set_result(data.get("data"))
                 self.bus.emit(f"packid_{echo}", data.get("data"))
 
         if self.adapter_id and "_lumen_adapter_id" not in data:
@@ -479,30 +555,28 @@ class OneBotAdapter:
         self._drop_pack(dropped)
 
     def _requeue_head(self, pack: dict[str, Any]) -> None:
-        q = self._send_queue
-        if q is None:
-            return
-        try:
-            items: list[Any] = []
-            while True:
-                try:
-                    items.append(q.get_nowait())
-                except asyncio.QueueEmpty:
-                    break
-            maxsize = q.maxsize or 0
-            if maxsize and items and len(items) + 1 > maxsize:
-                self._drop_pack(items.pop(0))
-            q.put_nowait(pack)
-            for it in items:
-                q.put_nowait(it)
-        except Exception:
-            self.logger.exception("[OneBot] 发送队列重排失败")
+        """把失败的包放回队首重试。
+
+        ⚠ 只放回**原包**，不要连同整个队列一起重排。
+        原实现先把队列里所有元素 ``get_nowait()`` 掏空，再依次 put 回去 ——
+        这在并发下会把别的协程刚入队的包也一起搬一遍；更糟的是
+        ``q.get_nowait()`` 与 ``_evict_oldest`` 的淘汰可能同时发生，
+        导致同一个包被 put 两次（重复发送）。
+        真正的「放回队首」用 ``putleft`` 语义：asyncio.Queue 没有
+        ``putleft``，所以这里用一个显式的``_retry_head`` 暂存位，
+        sender_loop 每轮优先取它。
+        """
+        self._retry_head = pack
 
     async def _sender_loop(self) -> None:
         while self._running:
             try:
                 await self._connected_event.wait()
-                pack = await asyncio.wait_for(self._send_queue.get(), timeout=1.0)
+                if getattr(self, "_retry_head", None) is not None:
+                    pack = self._retry_head
+                    self._retry_head = None
+                else:
+                    pack = await asyncio.wait_for(self._send_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
             except (asyncio.CancelledError, RuntimeError, GeneratorExit):
@@ -531,7 +605,18 @@ class OneBotAdapter:
                 self._requeue_head(pack)
                 raise
             except Exception:
-                self._requeue_head(pack)
+                # 退避 + 上限：原实现是「失败 → 原样重排队 → sleep 2s」，
+                # 对端长时间不可达时这个包会被无限重发，
+                # 而且每轮都占着队列头，后面的消息永远发不出去（队头阻塞）。
+                pack["_send_tries"] = int(pack.get("_send_tries", 0) or 0) + 1
+                if pack["_send_tries"] <= SEND_MAX_TRIES:
+                    self._requeue_head(pack)
+                else:
+                    self.logger.error(
+                        f"[OneBot] 包重试 {SEND_MAX_TRIES} 次仍失败，丢弃 "
+                        f"action={pack.get('action')}"
+                    )
+                    self._drop_pack(pack)
                 await asyncio.sleep(2.0)
 
     def send_pack(self, pack: dict[str, Any]) -> None:

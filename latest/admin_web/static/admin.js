@@ -6,14 +6,24 @@
                 const r = await apiGet('/api/diag');
                 if (!r || r.error) { if (st) st.textContent = '读取失败: ' + (r ? r.error : '无响应'); return; }
                 const d = r.diag || {};
-                const lines = [
+                const lines = [];
+                // ★★★ 存储故障优先显示在最上方：用户反馈"日志写入错误"时，
+                // 这是唯一能说明"为什么"的地方（其余统计项帮不上忙）。
+                if (d.log_error) lines.push('★★★ 日志未能正常启用：' + d.log_error);
+                if (d.data_dir_error) lines.push('★★★ 数据目录解析失败：' + d.data_dir_error);
+                if (d.packaging_error) lines.push('★★★ ' + d.packaging_error);
+                if (lines.length) lines.push('');
+                lines.push('数据目录(data_dir)   : ' + (d.data_dir || '(未设置)'));
+                lines.push('日志文件(log_path)   : ' + (d.log_path || '(未启用)'));
+                lines.push('');
+                lines.push(
                     'tick间隔(tick_gap_ms) : ' + (d.tick_gap_ms != null ? d.tick_gap_ms : '?') + '  ms（正常约 50ms）',
                     'tick偏大次数(slow)   : ' + (d.tick_slow_count != null ? d.tick_slow_count : '?'),
                     '排队/执行中任务      : ' + (d.current ? String(d.current) : '(无)') + '   |  排队计数=' + (d.pending != null ? d.pending : '?'),
                     '备份正在执行         : ' + (d.backup_running ? '是' : '否'),
                     'UP: ' + (d.cloud_cfg ? ('cloud_enabled=' + d.cloud_cfg.enabled + ' check_join=' + d.cloud_cfg.check_on_join + ' token=' + (d.cloud_cfg.token_set ? '已设置' : '未设置')) : ''),
                     '诊断开关: ' + (d.enabled ? '开启' : '关闭') + '   |  详细日志: ' + (d.detailed ? '开启' : '关闭')
-                ];
+                );
                 let ev = d.events || [];
                 lines.push('');
                 lines.push('--- 最近诊断事件 (' + ev.length + ') ---');
@@ -33,6 +43,9 @@
                 if (de) de.checked = !!(d.enabled);
                 const dd = el('diag-detailed');
                 if (dd) dd.checked = !!(d.detailed);
+                // 级别下拉回填。后端 min_level 为空串 = 跟随复选框。
+                const dm = el('diag-min-level');
+                if (dm) dm.value = d.min_level || '';
             } catch (e) {
                 if (st) st.textContent = '读取失败: ' + e;
             }
@@ -40,9 +53,22 @@
         async function setDiagToggle(key, val) {
             const st = el('diag-status');
             try {
-                const r = await apiGet('/api/diag/toggle?key=' + key + '&v=' + (val ? 1 : 0));
+                // POST 而非 GET：这是写操作，挂在 GET 上会被浏览器预取/爬虫误触发。
+                const r = await apiPost('/api/diag/toggle', { key: key, v: val ? 1 : 0 });
                 if (!r || !r.ok) { if (st) st.textContent = '保存失败: ' + (r ? r.error : '无响应'); return; }
                 if (st) st.textContent = (key === 'enabled' ? '诊断功能' : '详细日志') + '已' + (val ? '开启' : '关闭');
+                loadDiag();
+            } catch (e) { if (st) st.textContent = '保存失败: ' + e; }
+        }
+        async function setDiagMinLevel(val) {
+            const st = el('diag-status');
+            try {
+                // 与 setDiagToggle 同样走 POST：都是写操作。
+                // ★ 级别必须原样传字符串（含空串），不能像布尔开关那样转 0/1
+                //   —— 后端对 min_level 做的是字符串白名单校验。
+                const r = await apiPost('/api/diag/toggle', { key: 'min_level', v: val || '' });
+                if (!r || !r.ok) { if (st) st.textContent = '保存失败: ' + (r ? r.error : '无响应'); return; }
+                if (st) st.textContent = '面板日志级别已设为 ' + (r.effective || 'info');
                 loadDiag();
             } catch (e) { if (st) st.textContent = '保存失败: ' + e; }
         }
@@ -56,6 +82,18 @@
         console.log('[GM] 前端版本 v2026.08.26-B 已加载');
 
         function el(id) { return document.getElementById(id); }
+
+        //: 取一个控件的当前值 —— 原生控件和页面自定义下拉都能用。
+        //: 页面自定义下拉的宿主是 <div>，没有 .value，所以必须先问 gmSelect。
+        //: gmSelect 在本文件后面才定义，所以用运行时判断而不是引用期判断。
+        function gmv(id) {
+            var e = el(id);
+            if (!e) return '';
+            if (typeof gmSelect !== 'undefined' && gmSelect.mounted(id)) {
+                return gmSelect.get(id);
+            }
+            return (e.value == null ? '' : String(e.value));
+        }
 
         function showStatus(msg, ok) {
             let t = document.getElementById('toast');
@@ -179,7 +217,13 @@
         /* 统一维护 .ios 开关文案，避免「状态变了文字没变」 */
         document.addEventListener('change', function (ev) {
             var t = ev.target;
-            if (!t || t.type !== 'checkbox' || !t.closest) return;
+            if (!t || !t.closest) return;
+
+            // 注：接管级别选择器现在是页面自定义下拉（gmSelect），
+            // 它的变更由 mount 时传入的 aiSetAutonomy 回调处理，
+            // 不再走这里的 change 分支 —— 自定义下拉不产生原生 change 事件。
+
+            if (t.type !== 'checkbox') return;
             var lab = t.closest('.ios');
             if (!lab) return;
             var txt = lab.querySelector('.ios-text');
@@ -272,22 +316,42 @@
             gmActiveSection = id;
             gmStartPolls(id);
             try {
-                if (id === 'sec-account') loadAccount();
+                if (id === 'sec-account') {
+                    // 诊断已并入本板块，一起加载
+                    loadAccount();
+                    loadDiag();
+                }
                 else if (id === 'sec-cross') loadCross();
-                else if (id === 'sec-diag') loadDiag();
                 else if (id === 'sec-players') refreshPlayers();
                 else if (id === 'sec-gamerules') loadGamerules();
                 else if (id === 'sec-bans') loadBans();
                 else if (id === 'sec-whitelist') loadWhitelist();
                 else if (id === 'sec-properties') loadProperties();
                 else if (id === 'sec-worlds') loadWorlds();
-                else if (id === 'sec-scoreboard') loadScoreboards();
-                else if (id === 'sec-bots') loadBots();
-                else if (id === 'sec-mods') loadMods();
+                // ★ 记分板 / 权限管理已并入「操作控制台」，不再有独立板块 id。
+                //   进入控制台时把这两个子块的玩家下拉与列表一起拉一次。
+                else if (id === 'sec-console') { pollConsole(); loadScoreboards(); }
+                else if (id === 'sec-bots') { loadBots(); qrFillCards(); aiLoadPurposeSummary(); }
+                else if (id === 'sec-regex') loadRegex();
+                // ★ 模组页**不做自动扫描**：那两个栏位要遍历磁盘上的
+                //   resource_packs / behavior_packs 与两个 world_*_packs.json，
+                //   每次切进来都扫一遍纯属浪费。改成只渲染上次扫过的结果，
+                //   用户点「🔄 刷新」才真正扫一次。
+                else if (id === 'sec-mods') renderMods();
                 else if (id === 'sec-gmods') loadGmods();
                 else if (id === 'sec-files') loadFiles();
+                else if (id === 'sec-region') regionRefresh();
+                else if (id === 'sec-ext') extLoadPanels();
                 else if (id === 'sec-gametools') loadGameTools();
-                else if (id === 'sec-console') pollConsole();
+                else if (id === 'sec-trust') loadTrust();
+                else if (id === 'sec-ai') {
+                    aiLoadPrompts();   // 预填内置默认提示词（用户要看到默认长什么样）
+                    aiLoad(); aiLoadAudit(); aiLoadUndo();
+                }
+                // 云黑板块：进板块就把统计与明细拉一次（都是只读查询，
+                // 新版接口下是两次很轻的 GET）。旧版服务会返回友好提示，
+                // 不弹错误。
+                else if (id === 'sec-cloud') { loadCloudStats(); loadCloudBans(); }
             } catch (e) { /* 忽略板块加载错误 */ }
         }
 
@@ -295,14 +359,38 @@
             const chatTab = el('tab-chat'), conTab = el('tab-console');
             const chatPane = el('chat-pane'), conPane = el('console-pane');
             if (!chatTab || !conTab || !chatPane || !conPane) return;
+
+            // ★ 显示/隐藏必须**同时**管住 style.display 和 .hidden 类。
+            //
+            //   历史上 console-pane 上同时挂了 .hidden 类（CSS 里是
+            //   `.hidden { display: none }`）和 style="display:none"。
+            //   而这里原本只改内联样式：把 style.display 清成 '' 之后，
+            //   元素的 display 回退到 CSS 层，.hidden 的 display:none 立刻
+            //   接管 —— 于是「点一下控制台标签，内容框就消失」。
+            //   聊天栏没有 .hidden 类，所以一直是好的。
+            //
+            //   两套机制并存迟早会打架。这里统一走 syncPane()，两边一起设，
+            //   并把 .hidden 当作唯一真相来源之外的冗余标记清掉。
+            function syncPane(pane, visible) {
+                if (visible) {
+                    pane.classList.remove('hidden');
+                    pane.style.display = '';
+                } else {
+                    pane.classList.add('hidden');
+                    // 显式设 none 而不是留空：留空会回退到 CSS，
+                    // 万一 .hidden 被别的样式覆盖就藏不住了。
+                    pane.style.display = 'none';
+                }
+            }
+
             if (which === 'chat') {
                 chatTab.classList.add('active'); conTab.classList.remove('active');
-                chatPane.style.display = ''; conPane.style.display = 'none';
+                syncPane(chatPane, true); syncPane(conPane, false);
                 // 切过去立刻拉一次，否则要等下一个 2s 轮询才出内容
                 pollMessages('message-panel', 'msg-autoscroll');
             } else {
                 conTab.classList.add('active'); chatTab.classList.remove('active');
-                conPane.style.display = ''; chatPane.style.display = 'none';
+                syncPane(chatPane, false); syncPane(conPane, true);
                 pollConsole('console-panel', 'console-autoscroll');
             }
         }
@@ -344,7 +432,80 @@
                         + '　·　内存 ' + (Number(s.mem_used_mb) || 0) + ' / ' + (Number(s.mem_total_mb) || 0) + ' MB'
                         + '　·　磁盘 ' + (Number(s.disk_used_gb) || 0) + ' / ' + (Number(s.disk_total_gb) || 0) + ' GB';
                 }
+                renderEnv(s.env);
             }).catch(function () {});
+        }
+
+        // 运行环境：给用户一个「该下哪个包」的明确标识
+        function renderEnv(env) {
+            var box = el('pane-env');
+            if (!env || !env.os_name) {
+                if (box) box.classList.add('hidden');
+                return;
+            }
+            if (box) box.classList.remove('hidden');
+            function put(id, v) { var e = el(id); if (e) e.textContent = v || '未知'; }
+            put('env-os', env.os_detail || env.os_name);
+            put('env-arch',
+                (env.arch || '未知') + (env.bits ? '（' + env.bits + ' 位）' : ''));
+            put('env-py', env.python || '未知');
+            put('env-bits', env.bits ? env.bits + ' 位' : '未知');
+
+            var tag = el('env-pip-target');
+            if (tag) tag.textContent = env.pip_target || '—';
+
+            var hint = el('env-hint');
+            if (hint) {
+                var parts = [];
+                if (env.lib_bundle) {
+                    parts.push('面板离线库包请选 <b>' + esc(env.lib_bundle) + '</b>');
+                }
+                if (env.libext) {
+                    parts.push('本机动态库后缀为 <b>' + esc(env.libext) + '</b>');
+                }
+                hint.innerHTML = parts.length
+                    ? parts.join('　·　')
+                    : '按上面的标识下载即可。';
+            }
+        }
+
+        // 复制下载标识。navigator.clipboard 在 http:// （非 https）下不可用，
+        // 所以留一个 execCommand 的兜底 —— 面板常常是内网 http 访问的。
+        function copyEnvTag(id) {
+            var node = el(id);
+            var st = el('env-copy-status');
+            var text = node ? (node.textContent || '').trim() : '';
+            if (!text || text === '—') {
+                if (st) st.textContent = '暂无可复制的标识';
+                return;
+            }
+            function done(ok) {
+                if (!st) return;
+                st.textContent = ok ? '✓ 已复制' : '✗ 复制失败，请手动选中';
+                st.className = 'status ' + (ok ? 'text-ok' : 'text-bad');
+                setTimeout(function () { if (st) st.textContent = ''; }, 2000);
+            }
+            function fallback() {
+                try {
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.setAttribute('readonly', '');
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    var ok = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    done(ok);
+                } catch (e) { done(false); }
+            }
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(function () { done(true); }, fallback);
+                } else {
+                    fallback();
+                }
+            } catch (e) { fallback(); }
         }
 
         // 兼容反向代理子路径（如 https://host/server/admin）：脚本内所有请求统一走 apiPath 计算前缀
@@ -840,7 +1001,7 @@
         }
 
         async function adjustHealth() {
-            const r = await apiPost('/api/health', { player_name: el('health-player').value, operation: el('health-op').value, value: parseInt(el('health-value').value, 10) });
+            const r = await apiPost('/api/health', { player_name: el('health-player').value, operation: gmv('health-op'), value: parseInt(el('health-value').value, 10) });
             showStatus(r.message || r.error, !!r.success);
         }
 
@@ -853,7 +1014,7 @@
         function removeTag() { doTag('remove'); }
 
         async function setScore() {
-            const r = await apiPost('/api/score', { player_name: el('score-player').value, objective: el('score-objective').value, score: parseInt(el('score-value').value, 10), operation: el('score-op').value });
+            const r = await apiPost('/api/score', { player_name: el('score-player').value, objective: el('score-objective').value, score: parseInt(el('score-value').value, 10), operation: gmv('score-op') });
             showStatus(r.message || r.error, !!r.success);
         }
 
@@ -864,13 +1025,13 @@
         }
 
         async function setOp() {
-            const r = await apiPost('/api/op', { player_name: el('op-player').value, value: el('op-value').value === 'true' });
+            const r = await apiPost('/api/op', { player_name: el('op-player').value, value: gmv('op-value') === 'true' });
             showStatus(r.message || r.error, !!r.success);
             refreshPlayers();
         }
 
         async function teleportPlayer() {
-            const r = await apiPost('/api/teleport', { player_name: el('tp-player').value, x: parseFloat(el('tp-x').value), y: parseFloat(el('tp-y').value), z: parseFloat(el('tp-z').value), dimension: el('tp-dimension').value });
+            const r = await apiPost('/api/teleport', { player_name: el('tp-player').value, x: parseFloat(el('tp-x').value), y: parseFloat(el('tp-y').value), z: parseFloat(el('tp-z').value), dimension: gmv('tp-dimension') });
             showStatus(r.message || r.error, !!r.success);
         }
 
@@ -1386,7 +1547,7 @@
         async function addObjective() {
             const name = el('obj-name').value.trim();
             if (!name) { showStatus('请输入目标名称', false); return; }
-            const r = await apiPost('/api/objective', { action: 'add', name: name, display_name: el('obj-display').value.trim() || name, render_type: el('obj-render').value });
+            const r = await apiPost('/api/objective', { action: 'add', name: name, display_name: el('obj-display').value.trim() || name, render_type: gmv('obj-render') });
             showStatus(r.message || r.error, !!r.success);
             if (r.success) { el('obj-name').value = ''; el('obj-display').value = ''; loadScoreboardsFull(); }
         }
@@ -1728,34 +1889,567 @@
         }
         initConsoleCmd();
 
+        // ==================== 区块日志与恢复 ====================
+        //
+        // 对应后端 /api/region/*。同一套接口 AI 也在调用，所以这里做的
+        // 每件事都有"人做了一遍"的留痕；反过来，AI 发起的回档也会出现
+        // 在下面的「回档会话」列表里 —— 服主能看见 AI 动过什么。
+        // ========================================================
+
+        var REGION_ACTION_CN = {
+            break: '破坏', place: '放置', explode: '炸毁',
+            leaves_decay: '树叶凋零', block_grow: '生长',
+            block_form: '形成', liquid_flow: '液体流动'
+        };
+
+        function regionStatus(text, isErr) {
+            var n = el('region-status');
+            if (!n) return;
+            n.textContent = text || '';
+            n.className = 'status' + (isErr ? ' err' : '');
+        }
+
+        function regionActionCn(a) {
+            return REGION_ACTION_CN[a] || a || '?';
+        }
+
+        function regionFmt(n) {
+            return (n == null ? 0 : n).toLocaleString('zh-CN');
+        }
+
+        // 区块记录设置：读的是 /api/tools/config 里的 block_record 一节
+        // （与全局配置同一份数据，只是这个板块只允许改它）。
+        var regionCfgCache = {};
+
+        //: 颗粒度档位说明，索引即 level 值。与后端 RegionAPI._ACTION_MIN_LEVEL
+        //: 必须对得上，否则面板说的和实际记的会不一致。
+        var REGION_LEVEL_DESC = [
+            '当前：关闭 —— 不记录任何方块变更，因此无法回档。',
+            '当前：仅破坏（含爆炸）—— 能恢复被挖掉／被炸掉的建筑，占用磁盘最小。'
+                + '注意此档位无法回档「谁盖的违章建筑」。',
+            '当前：破坏 + 放置 —— 可完整回档一片区域的改动（推荐）。'
+        ];
+
+        function regionCfgToUi() {
+            const set = function (id, v) { const n = el(id); if (n) n.value = (v == null ? '' : v); };
+            set('region-cfg-retention', regionCfgCache.retention_days);
+            set('region-cfg-maxrec', regionCfgCache.max_records_per_rollback);
+            set('region-cfg-batch', regionCfgCache.blocks_per_batch);
+            set('region-cfg-maxarea', regionCfgCache.max_area_blocks);
+            set('region-cfg-maxrows', regionCfgCache.max_rows_per_query);
+            // 颗粒度：滑块 + 说明。level 缺失时回退看旧的 enabled 布尔
+            // （老配置文件只有开关、没有档位），true 语义等价于「全部记录」。
+            const lv = (regionCfgCache.level != null)
+                ? Number(regionCfgCache.level)
+                : (regionCfgCache.enabled ? 2 : 0);
+            set('region-cfg-level', lv);
+            regionLevelDesc();
+        }
+
+        function regionLevelDesc() {
+            const n = el('region-cfg-level');
+            const box = el('region-cfg-level-desc');
+            if (!box) return;
+            const lv = Math.max(0, Math.min(Number((n || {}).value || 0), 2));
+            box.textContent = REGION_LEVEL_DESC[lv] || REGION_LEVEL_DESC[0];
+            box.className = 'hint-sm' + (lv > 0 ? ' ok' : '');
+        }
+
+        // ★ 设置从 /api/region/status 的 settings 字段读，**不**去调
+        //   /api/tools/config —— 后者要求 backup/cloud 权限，而本板块
+        //   只需要 region 权限。用它会表现为"只授了 region 的账号打开
+        //   设置区一片空白"。
+        function regionLoadSettings(fromStatus) {
+            const s = (fromStatus && fromStatus.settings) || null;
+            if (s) {
+                regionCfgCache = s;
+                regionCfgToUi();
+            }
+        }
+
+        function regionCfgMsg(text, isErr) {
+            const n = el('region-cfg-msg');
+            if (!n) return;
+            n.textContent = text || '';
+            n.className = 'hint-sm' + (isErr ? ' err' : ' ok');
+        }
+
+        // ---------- 玩家行为记录（已从 AI 板块并入本板块）----------
+        // 配置存在 behavior_record 段，保存也走本板块的 /api/region/settings ——
+        // 这样"看/改记录系统的配置"只需要 region 权限，不需要 AI 权限。
+        var REGION_BH_DESC = {
+            '0': '当前：关闭，不记录任何行为。',
+            '1': '当前：仅记录聊天内容。',
+            '2': '当前：聊天 + 敏感行为（TNT 放置/点燃、床与重生锚爆炸、打火石、岩浆桶等）。',
+            '3': '当前：全记录（含进出服、方块增删、命令、死亡、传送、攻击、拾取物品、打开容器）。'
+        };
+
+        function regionBhMsg(text, isErr) {
+            const n = el('region-bh-msg');
+            if (!n) return;
+            n.textContent = text || '';
+            n.className = 'hint-sm' + (isErr ? ' err' : ' ok');
+        }
+
+        function regionBhDesc() {
+            const box = el('region-bh-desc');
+            if (!box) return;
+            const v = String((el('region-bh-level') || {}).value || '0');
+            box.textContent = REGION_BH_DESC[v] || REGION_BH_DESC['0'];
+        }
+
+        function regionLoadBehavior(fromStatus) {
+            const s = (fromStatus && fromStatus.behavior_settings) || null;
+            if (!s) return;
+            const set = function (id, v) { const n = el(id); if (n) n.value = (v == null ? '' : v); };
+            set('region-bh-level', s.level);
+            set('region-bh-keep-days', s.keep_days);
+            set('region-bh-max-records', s.max_records);
+            set('region-bh-query-limit', s.query_limit);
+            regionBhDesc();
+        }
+
+        async function regionSaveBehavior() {
+            const num = function (id, dflt, lo, hi) {
+                let v = Number((el(id) || {}).value);
+                if (!isFinite(v)) v = dflt;
+                return Math.max(lo, Math.min(v, hi));
+            };
+            const r = await apiPost('/api/region/settings', {
+                section: 'behavior_record',
+                config: {
+                    level: num('region-bh-level', 0, 0, 3),
+                    keep_days: num('region-bh-keep-days', 7, 1, 3650),
+                    max_records: num('region-bh-max-records', 50000, 1, 5000000),
+                    query_limit: num('region-bh-query-limit', 200, 1, 500)
+                }
+            });
+            if (r && r.ok) regionBhMsg('已保存');
+            else regionBhMsg((r && (r.error || r.message)) || '保存失败', true);
+        }
+
+        async function regionToggle(on) {
+            if (on) {
+                if (!confirm('开启区块记录？\n\n开启后会持续把方块变更写入磁盘数据库，' +
+                             '并在超出保留天数后自动清理。')) return;
+            } else {
+                if (!confirm('关闭区块记录？\n\n关闭后不再记录新的方块变更，' +
+                             '已有记录仍保留（可在设置里调整保留天数）。')) return;
+            }
+            // 一键开关直接落到颗粒度上：开 = 2（破坏 + 放置），关 = 0。
+            // 只想记破坏的话，用下面的滑块选 1 —— 这样"开关"和"档位"
+            // 是同一个状态的两个入口，不会出现两套互相矛盾的配置。
+            const patch = Object.assign({}, regionCfgCache, { level: on ? 2 : 0 });
+            const r = await apiPost('/api/region/settings', { config: patch });
+            if (r && r.ok) {
+                regionCfgMsg(on ? '已开启' : '已关闭');
+                regionRefresh();
+            } else {
+                regionCfgMsg((r && (r.error || r.message)) || '操作失败', true);
+            }
+        }
+
+        async function regionSaveSettings() {
+            const num = function (id, dflt) {
+                const v = Number((el(id) || {}).value);
+                return isFinite(v) && v > 0 ? v : dflt;
+            };
+            const patch = Object.assign({}, regionCfgCache, {
+                retention_days: num('region-cfg-retention', 30),
+                max_records_per_rollback: num('region-cfg-maxrec', 5000),
+                blocks_per_batch: num('region-cfg-batch', 400),
+                max_area_blocks: num('region-cfg-maxarea', 4000000),
+                max_rows_per_query: num('region-cfg-maxrows', 200),
+                // 颗粒度：0 关闭 / 1 仅破坏 / 2 破坏+放置
+                level: (function () {
+                    const v = Number((el('region-cfg-level') || {}).value);
+                    return isFinite(v) ? Math.max(0, Math.min(v, 2)) : 0;
+                })()
+            });
+            const r = await apiPost('/api/region/settings', { config: patch });
+            if (r && r.ok) {
+                regionCfgMsg('已保存');
+                regionCfgCache = patch;
+                regionRefresh();
+            } else {
+                regionCfgMsg((r && (r.error || r.message)) || '保存失败', true);
+            }
+        }
+
+        async function regionRefresh() {
+            const r = await apiGet('/api/region/status');
+            if (!r || !r.ok) {
+                regionStatus(r && r.error ? ('加载失败：' + r.error) : '加载失败', true);
+                return;
+            }
+            const d = r.data || {};
+            var off = el('region-off');
+            if (off) off.classList.toggle('hidden', !!d.enabled);
+            if (!d.enabled) regionStatus('未开启', true);
+            else regionStatus(d.busy ? '回档进行中…' : '就绪');
+            // 状态里已经带了本板块的设置快照，顺手刷新设置区
+            regionLoadSettings(d);
+            // 玩家行为记录同属本板块，一起刷新（status 里带的
+            // behavior_settings 就是为了省掉一次独立请求）
+            regionLoadBehavior(d);
+
+            var box = el('region-stats');
+            if (box) {
+                const lim = d.limits || {};
+                box.innerHTML =
+                    kvRow('方块记录', regionFmt(d.records)) +
+                    kvRow('已回档', regionFmt(d.rolled_back)) +
+                    kvRow('世界事件', regionFmt(d.events)) +
+                    kvRow('回档次数', regionFmt(d.sessions)) +
+                    kvRow('最早记录', d.oldest || '—') +
+                    kvRow('库大小', ((d.file_bytes || 0) / 1024).toFixed(1) + ' KB') +
+                    kvRow('待落盘', regionFmt(d.queued_records)) +
+                    kvRow('单次上限', regionFmt(lim.max_records_per_rollback) + ' 条') +
+                    kvRow('体积上限', regionFmt(lim.max_area_blocks) + ' 格');
+            }
+            regionLoadLog();
+            regionLoadSessions();
+        }
+
+        function kvRow(k, v) {
+            return '<div class="kv"><span class="kv-k">' + esc(k) +
+                   '</span><span class="kv-v">' + esc(v) + '</span></div>';
+        }
+
+        async function regionLoadLog() {
+            const actor = (el('region-filter-actor') || {}).value || '';
+            const r = await apiGet('/api/region/log?limit=30' +
+                (actor ? '&actor=' + encodeURIComponent(actor) : ''));
+            const tb = el('region-log');
+            if (!tb) return;
+            if (!r || !r.ok) { tb.innerHTML = '<tr><td colspan="4">加载失败</td></tr>'; return; }
+            const rows = (r.data && r.data.rows) || [];
+            if (!rows.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">暂无记录</td></tr>'; return; }
+            tb.innerHTML = rows.map(function (x) {
+                return '<tr><td>' + esc(x.time || '') + '</td><td>' + esc(x.actor || '') +
+                    '</td><td>' + esc(regionActionCn(x.action)) + '</td><td class="mono">' +
+                    esc(x.x + ', ' + x.y + ', ' + x.z) + '</td></tr>';
+            }).join('');
+        }
+
+        async function regionLoadSessions() {
+            const r = await apiGet('/api/region/sessions?limit=30');
+            const tb = el('region-sessions');
+            if (!tb) return;
+            if (!r || !r.ok) { tb.innerHTML = '<tr><td colspan="8">加载失败</td></tr>'; return; }
+            const rows = (r.data && r.data.rows) || [];
+            if (!rows.length) { tb.innerHTML = '<tr><td colspan="8" class="empty">还没有回档记录</td></tr>'; return; }
+            tb.innerHTML = rows.map(function (s) {
+                const box = '(' + s.x1 + ',' + s.y1 + ',' + s.z1 + ')~(' + s.x2 + ',' + s.y2 + ',' + s.z2 + ')';
+                const mins = Math.round((s.seconds || 0) / 60);
+                const state = s.undone ? '<span class="tag">已撤销</span>' : '<span class="tag ok">有效</span>';
+                return '<tr><td>#' + esc(s.id) + '</td><td>' + esc(s.time || '') + '</td><td>' +
+                    esc(s.player || '') + '</td><td class="mono">' + esc(box) + '</td><td>' +
+                    esc(mins + ' 分钟') + '</td><td>' + esc(s.block_count || 0) + '</td><td>' + state +
+                    '</td><td>' + (s.undone ? '' :
+                        '<button onclick="regionUndo(' + escAttr(s.id) + ')">↩️ 撤销</button>') +
+                    '</td></tr>';
+            }).join('');
+        }
+
+        // 把页面上的输入整理成后端认识的区域描述
+        function regionBuildRegion() {
+            const p1 = ((el('region-p1') || {}).value || '').trim();
+            const p2 = ((el('region-p2') || {}).value || '').trim();
+            if (p1 && p2) {
+                const a = p1.split(/[,，\s]+/).map(Number);
+                const b = p2.split(/[,，\s]+/).map(Number);
+                if (a.length === 3 && b.length === 3 && a.every(isFinite) && b.every(isFinite)) {
+                    return { p1: a, p2: b };
+                }
+                throw new Error('对角两点格式应为 x1,y1,z1 与 x2,y2,z2');
+            }
+            const c = ((el('region-center') || {}).value || '').trim();
+            const rad = Number((el('region-radius') || {}).value || 0);
+            if (c && rad > 0) {
+                const arr = c.split(/[,，\s]+/).map(Number);
+                if (arr.length === 3 && arr.every(isFinite)) {
+                    return { center: arr, radius: rad };
+                }
+                throw new Error('中心点格式应为 x,y,z');
+            }
+            throw new Error('请填中心点+半径，或对角两点');
+        }
+
+        function regionCommon() {
+            return {
+                dimension: ((el('region-dim') || {}).value || '').trim(),
+                minutes: Number((el('region-minutes') || {}).value || 60)
+            };
+        }
+
+        function regionShowResult(r, title) {
+            const box = el('region-result');
+            if (!box) return;
+            if (!r) { box.innerHTML = '<div class="err">无响应</div>'; return; }
+            const d = r.data || {};
+            let html = '<div class="card ' + (r.ok ? 'ok' : 'err') + '"><b>' +
+                esc(title) + '</b><div class="mt-xs">' + esc(r.message || '') + '</div>';
+            if (r.ok && d.records_hit != null) {
+                const byAction = d.by_action || {};
+                const parts = Object.keys(byAction).map(function (k) {
+                    return esc(regionActionCn(k)) + ' ' + regionFmt(byAction[k]);
+                });
+                const byActor = d.by_actor || {};
+                const who = Object.keys(byActor).map(function (k) {
+                    return esc(k) + ' ' + regionFmt(byActor[k]);
+                }).slice(0, 5);
+                html += '<div class="mt-xs">命中 <b>' + regionFmt(d.records_hit) + '</b> 条' +
+                    (d.truncated ? '（<span class="warn">已达上限被截断</span>）' : '') +
+                    (parts.length ? '<br>按动作：' + parts.join('、') : '') +
+                    (who.length ? '<br>主要涉及：' + who.join('、') : '') +
+                    (d.since_text ? '<br>起点：' + esc(d.since_text) : '') + '</div>';
+            }
+            html += '</div>';
+            box.innerHTML = html;
+        }
+
+        async function regionPreview() {
+            let region;
+            try { region = regionBuildRegion(); }
+            catch (e) { regionShowResult({ ok: false, message: e.message, data: {} }, '参数有误'); return; }
+            const c = regionCommon();
+            const r = await apiPost('/api/region/preview',
+                Object.assign({ region: region }, c));
+            regionShowResult(r, '影响面预览');
+            if (r && r.ok) regionStatus('预览完成（未改动世界）');
+        }
+
+        async function regionRollback() {
+            let region;
+            try { region = regionBuildRegion(); }
+            catch (e) { regionShowResult({ ok: false, message: e.message, data: {} }, '参数有误'); return; }
+            const c = regionCommon();
+            // ★ 回档会改动世界且开销不小，必须让人再说一次"确定"。
+            //   这里是最后一道人工闸门；AI 侧由审批流程承担同样职责。
+            if (!confirm('确定要把该区域恢复到 ' + c.minutes +
+                         ' 分钟之前吗？\n\n回档会在撤销窗口内可反悔，但仍建议先做备份。')) {
+                regionStatus('已取消'); return;
+            }
+            const r = await apiPost('/api/region/rollback',
+                Object.assign({ region: region }, c));
+            regionShowResult(r, '回档');
+            if (r && r.ok) { regionStatus('回档已启动'); setTimeout(regionRefresh, 1500); }
+        }
+
+        async function regionUndo(sid) {
+            if (!confirm('确定撤销回档 #' + sid + ' 吗？')) return;
+            const r = await apiPost('/api/region/undo', { session_id: sid });
+            regionShowResult(r, '撤销回档 #' + sid);
+            if (r && r.ok) setTimeout(regionRefresh, 1500);
+        }
+
+        async function regionUndoLast() {
+            if (!confirm('确定撤销最近一次回档吗？')) return;
+            const r = await apiPost('/api/region/undo', {});
+            regionShowResult(r, '撤销最近一次回档');
+            if (r && r.ok) setTimeout(regionRefresh, 1500);
+        }
+
+        // ==================== 第三方插件面板 ====================
+        //
+        // 别的插件把自己的设置项挂到这里，用户就能在一个后台里配所有插件。
+        // 这个板块是"隐形"的：没有插件接入时连导航项一起隐藏。
+        // ========================================================
+
+        var extCurrent = null;      // 当前选中的 pid
+        var extFields = [];
+        var extPanelMeta = null;
+
+        function extStatus(text, isErr) {
+            var n = el('ext-status');
+            if (!n) return;
+            n.textContent = text || '';
+            n.className = 'status' + (isErr ? ' err' : '');
+        }
+
+        async function extLoadPanels() {
+            const r = await apiGet('/api/ext/panels');
+            const list = el('ext-list');
+            if (!list) return;
+            if (!r || !r.ok) { extStatus('加载失败', true); return; }
+            const panels = r.panels || [];
+            extRefreshNav(panels.length);
+            var empty = el('ext-empty');
+            if (empty) empty.classList.toggle('hidden', panels.length > 0);
+            if (!panels.length) { list.innerHTML = ''; return; }
+            extStatus(panels.length + ' 个插件');
+            list.innerHTML = panels.map(function (p) {
+                return '<button type="button" class="ext-item' +
+                    (p.pid === extCurrent ? ' active' : '') + '" onclick="extOpen(' +
+                    escAttr(JSON.stringify(p.pid)) + ')">' +
+                    '<span class="ext-icon">' + esc(p.icon || '🧩') + '</span>' +
+                    '<span class="ext-meta"><b>' + esc(p.title) + '</b>' +
+                    '<span class="hint-sm">' + esc(p.description || (p.field_count + ' 个设置项')) +
+                    '</span></span></button>';
+            }).join('');
+            // 首次进入自动选中第一个，省一次点击
+            if (!extCurrent && panels.length) extOpen(panels[0].pid);
+        }
+
+        // ★ 隐形入口：只有真有插件接入时才放出导航项与板块本身。
+        function extRefreshNav(count) {
+            var nav = el('nav-ext');
+            var sec = el('sec-ext');
+            if (nav) nav.classList.toggle('hidden', !(count > 0));
+            if (sec && !(count > 0) && sec.style.display === 'block') {
+                // 正在看这个板块时插件全部撤走了 —— 退回首页，别留白屏
+                showSection('sec-players', document.querySelector('.sidebar a'));
+            }
+        }
+
+        async function extOpen(pid) {
+            extCurrent = pid;
+            const r = await apiGet('/api/ext/panel?pid=' + encodeURIComponent(pid));
+            const body = el('ext-body');
+            if (!body) return;
+            if (!r || !r.ok) {
+                body.innerHTML = '<p class="err">加载失败：' + esc((r && r.error) || '未知错误') + '</p>';
+                return;
+            }
+            extFields = r.fields || [];
+            extPanelMeta = r.panel || {};
+            const values = r.values || {};
+            let html = '<div class="ext-head"><h3>' + esc(extPanelMeta.icon || '🧩') + ' ' +
+                esc(extPanelMeta.title || pid) + '</h3>';
+            if (extPanelMeta.version) html += '<span class="tag">' + esc(extPanelMeta.version) + '</span>';
+            if (extPanelMeta.author) html += '<span class="hint-sm">作者 ' + esc(extPanelMeta.author) + '</span>';
+            html += '</div>';
+            if (extPanelMeta.description) {
+                html += '<p class="hint-sm">' + esc(extPanelMeta.description) + '</p>';
+            }
+            if (!extFields.length) {
+                html += '<p class="empty mt">该插件没有声明设置项</p>';
+                body.innerHTML = html;
+                return;
+            }
+            html += '<div class="ext-form mt">' + extFields.map(function (f) {
+                return extFieldHtml(f, values[f.key]);
+            }).join('') + '</div>';
+            html += '<div class="row mt"><button class="ok" onclick="extSave()">💾 保存设置</button>' +
+                '<span class="hint-sm" id="ext-save-msg"></span></div>';
+            body.innerHTML = html;
+            // 同步左侧高亮
+            document.querySelectorAll('#ext-list .ext-item').forEach(function (b) {
+                b.classList.remove('active');
+            });
+            extLoadPanelsSilent();
+        }
+
+        async function extLoadPanelsSilent() {
+            // 只重画列表高亮，避免整体闪烁
+            const btns = document.querySelectorAll('#ext-list .ext-item');
+            btns.forEach(function (b) {
+                try {
+                    const pid = JSON.parse(b.getAttribute('onclick').match(/extOpen\((.*)\)/)[1]);
+                    b.classList.toggle('active', pid === extCurrent);
+                } catch (e) { /* 解析失败就不高亮，不影响使用 */ }
+            });
+        }
+
+        function extFieldHtml(f, val) {
+            const id = 'extf-' + f.key;
+            let input = '';
+            const v = val == null ? '' : val;
+            if (f.type === 'bool') {
+                input = '<label class="switch"><input type="checkbox" id="' + escAttr(id) + '"' +
+                    (v ? ' checked' : '') + '><span></span></label>';
+            } else if (f.type === 'select') {
+                input = '<select id="' + escAttr(id) + '">' + (f.options || []).map(function (o) {
+                    return '<option value="' + escAttr(o.value) + '"' +
+                        (String(o.value) === String(v) ? ' selected' : '') + '>' +
+                        esc(o.label) + '</option>';
+                }).join('') + '</select>';
+            } else if (f.type === 'textarea') {
+                input = '<textarea id="' + escAttr(id) + '" rows="4">' + esc(v) + '</textarea>';
+            } else if (f.type === 'group' || f.type === 'note') {
+                return '<div class="ext-group"><b>' + esc(f.label) + '</b>' +
+                    (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '') + '</div>';
+            } else {
+                const tp = f.type === 'password' ? 'password'
+                    : (f.type === 'number' ? 'number' : 'text');
+                input = '<input type="' + tp + '" id="' + escAttr(id) + '" value="' +
+                    escAttr(v) + '"' + (f.placeholder ? ' placeholder="' + escAttr(f.placeholder) + '"' : '') + '>';
+            }
+            return '<div class="ext-field"><label for="' + escAttr(id) + '">' + esc(f.label) +
+                '</label>' + input +
+                (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '') + '</div>';
+        }
+
+        function extCollect() {
+            const out = {};
+            extFields.forEach(function (f) {
+                if (f.type === 'group' || f.type === 'note') return;
+                const n = el('extf-' + f.key);
+                if (!n) return;
+                out[f.key] = (f.type === 'bool') ? n.checked
+                    : (f.type === 'number' ? Number(n.value) : n.value);
+            });
+            return out;
+        }
+
+        async function extSave() {
+            if (!extCurrent) return;
+            const msg = el('ext-save-msg');
+            if (msg) msg.textContent = '保存中…';
+            const r = await apiPost('/api/ext/panel/save',
+                { pid: extCurrent, values: extCollect() });
+            if (msg) {
+                msg.textContent = (r && r.ok) ? ('已保存' + (r.message ? '：' + r.message : ''))
+                    : ('失败：' + ((r && r.message) || (r && r.error) || '未知错误'));
+                msg.className = 'hint-sm ' + ((r && r.ok) ? 'ok' : 'err');
+            }
+            if (r && r.ok) extOpen(extCurrent);   // 重新读一次，反映真实落盘值
+        }
+
         // ==================== 账户与安全 ====================
         // 板块元数据：中文名 + 一句话解释 + 分组。键名与后端 _ALL_SCOPES 对齐。
         var GM_SCOPE_META = {
             players:    { n: '服务器信息', d: '玩家与运行状态', g: '常用' },
-            console:    { n: '操作控制台', d: '执行指令、给物、踢人', g: '常用' },
+            console:    { n: '操作控制台', d: '执行指令、给物、踢人、权限与记分板', g: '常用' },
             // logs 已并入「服务器信息」板块（见 admin.html），这里仅作为
             // 日志类 API 的授权 scope 保留，名称标注清楚以免误解。
             logs:       { n: '日志查看', d: '聊天与控制台日志（随服务器信息展示）', g: '常用' },
             bans:       { n: '封禁管理', d: '封禁 / 解封玩家', g: '玩家管理' },
             whitelist:  { n: '白名单审核', d: '审批进服申请', g: '玩家管理' },
             detail:     { n: '玩家详情', d: '单个玩家完整数据', g: '玩家管理' },
-            perm:       { n: '权限管理', d: 'OP 与权限组', g: '玩家管理' },
+            // ★ perm / scoreboard 已并入「操作控制台」，diag 已并入
+            //   「账户与安全」。这三个 scope 不再单独出现在授权列表里 ——
+            //   保留它们会让临时账户能勾选一个**页面上已不存在**的板块。
+            //   页面上的元素 ID 未变，JS 逻辑不受影响。
             gamerules:  { n: '游戏规则', d: '开关 gamerule', g: '服务器' },
             worlds:     { n: '多存档切换', d: '切换 / 管理存档', g: '服务器' },
             backup:     { n: '自动备份', d: '存档定时备份', g: '服务器' },
             files:      { n: '文件管理', d: '服务器文件读写', g: '服务器' },
-            diag:       { n: '诊断', d: '主线程卡顿排查', g: '服务器' },
             qqbot:      { n: '机器人管理', d: 'QQ 机器人配置', g: '扩展' },
             cross:      { n: '跨服互联', d: '多服数据同步', g: '扩展' },
             gametools:  { n: '签到与绑定', d: 'MC ↔ QQ 绑定、签到', g: '扩展' },
+            trust:      { n: '玩家可信度', d: '加权信任分、门禁与设备管理', g: '扩展' },
             cloud:      { n: '云黑名单', d: '云黑联合封禁', g: '扩展' },
             mods:       { n: '模组管理', d: '资源 / 行为包与子插件', g: '扩展' },
+            // AI 自动管理单独一个 scope：它能配置外部网络请求目标
+            // （base_url），也能看到全服日志分析结果，权限级别和
+            // 「签到绑定」这类日常功能不该混在一个开关里。
+            ai:         { n: 'AI 自动管理', d: '日志分析、白名单审核、自动巡查', g: '扩展' },
+            // ↓ v9.2 新增两个板块
+            //   region：能改世界方块 + 能看完整方块流水（含隐私），
+            //           敏感度高，单独一个开关。
+            //   ext   ：查看并配置其它插件挂进来的设置面板。
+            region:     { n: '区块日志与恢复', d: '方块变更流水、区域回档与撤销', g: '服务器' },
+            ext:        { n: '第三方插件面板', d: '集中配置接入的其它插件', g: '扩展' },
         };
         var GM_SCOPE_GROUPS = ['常用', '玩家管理', '服务器', '扩展'];
-        // 常用组合：一键勾选，省得一个个点
+        // 常用组合：一键勾选，省得一个个点。
+        // ★ 预设里只能出现**真实存在的 scope**。diag / perm / scoreboard
+        //   已并入别的板块，写进来会渲染成"勾不上/点了没反应"的空壳。
         var GM_SCOPE_PRESETS = {
-            '只读监控':   ['players', 'logs', 'diag'],
-            '日常运维':   ['players', 'logs', 'console', 'bans', 'whitelist', 'diag'],
+            '只读监控':   ['players', 'logs'],
+            '日常运维':   ['players', 'logs', 'console', 'bans', 'whitelist', 'trust'],
             '全部权限':   null,   // null = 全选
         };
 
@@ -1899,6 +2593,69 @@
                     if (ips) ips.value = (r.ips || []).join('\n');
                 }
             } catch (e) { /* ignore */ }
+            // 内置文档按钮（失败只是这一块不显示，不该影响整页）
+            try { await loadDocs(); } catch (e) { /* ignore */ }
+        }
+
+        // ==================== 内置文档与条款 ====================
+        //
+        // 文档正文按需从 /api/docs 拉取，不内联进页面（三篇加起来几十 KB，
+        // 内联会让 admin.html 每次都要重传一遍）。
+
+        async function loadDocs() {
+            const box = el('docs-buttons');
+            if (!box) return;
+            const st = el('docs-status');
+            const r = await apiGet('/api/docs/list');
+            if (!r || !r.ok || !r.docs || !r.docs.length) {
+                box.innerHTML = '<span class="hint">' +
+                    esc((r && r.error) || '暂无文档（插件包的 docs 目录可能缺失）') + '</span>';
+                return;
+            }
+            box.innerHTML = r.docs.map(function (d) {
+                return '<button onclick="docsOpen(' + jsArg(d.id) + ')" title=' +
+                    jsArg(d.desc || '') + '>📄 ' + esc(d.title) + '</button>';
+            }).join('');
+            if (st) st.textContent = '';
+        }
+
+        function docsClose() {
+            const m = document.getElementById('docs-mask');
+            if (m) m.remove();
+        }
+
+        async function docsOpen(id) {
+            const st = el('docs-status');
+            const mask = document.createElement('div');
+            mask.id = 'docs-mask';
+            mask.className = 'modal-mask';
+            mask.innerHTML = '<div class="modal doc-modal">' +
+                '<div class="row mb">' +
+                '<b class="modal-title">加载中…</b>' +
+                '<button onclick="docsClose()" class="btn-ghost">✕ 关闭</button></div>' +
+                '<div id="docs-body" class="doc-body"><p class="hint">正在读取…</p></div></div>';
+            mask.addEventListener('click', function (e) { if (e.target === mask) docsClose(); });
+            document.body.appendChild(mask);
+
+            try {
+                const r = await apiGet('/api/docs?id=' + encodeURIComponent(id));
+                const body = document.getElementById('docs-body');
+                const title = mask.querySelector('.modal-title');
+                if (!r || !r.ok || !r.html) {
+                    if (title) title.textContent = '文档';
+                    if (body) body.innerHTML = '<div class="err">' +
+                        esc((r && r.error) || '读取失败') + '</div>';
+                    if (st) { st.textContent = '文档读取失败'; st.className = 'status text-bad'; }
+                    return;
+                }
+                if (title) title.textContent = r.title || '文档';
+                // 内容是插件内置的 Markdown 渲染结果，不是用户输入。
+                if (body) body.innerHTML = r.html;
+                if (st) st.textContent = '';
+            } catch (e) {
+                const body = document.getElementById('docs-body');
+                if (body) body.innerHTML = '<div class="err">读取失败：' + esc(String(e)) + '</div>';
+            }
         }
 
         async function saveTestMode(checked) {
@@ -2108,7 +2865,10 @@
                 el('cross-enabled').checked = !!c.enabled;
                 el('cross-role').value = c.role || 'none';
                 el('cross-server-name').value = c.server_name || '本服';
+                // 后端下发的是掩码（"*"*len），不是明文。填进去让用户看到「已设置」，
+                // 不动这个框原样提交 → 后端识别全星号 → 保留原密码。
                 el('cross-password').value = c.password || '';
+                el('cross-password').placeholder = c.password_set ? '已设置（留空不修改）' : '未设置';
                 el('cross-master-url').value = c.master_url || '';
                 // 本服地址不再回填后端旧值 —— 它现在是「自动推断」的，
                 // 显示旧值只会误导。直接把当前浏览器地址写进隐藏字段。
@@ -2119,6 +2879,9 @@
                 el('cross-it-player').checked = it.player_data !== false;
                 el('cross-it-wl').checked = it.whitelist !== false;
                 el('cross-it-ban').checked = it.ban !== false;
+                // 实验板：默认关闭。后端缺该键（老 cross.json）时也按关闭处理。
+                el('cross-experimental').checked = c.experimental === true;
+                syncCrossExpHint();
             } catch (e) {
                 const s = el('cross-save-status');
                 if (s) { s.textContent = '加载失败：' + e; s.className = 'status text-bad'; }
@@ -2136,6 +2899,15 @@
             // 角色是从后端读回来的，读完必须同步一次显隐 ——
             // 否则刷新页面后会看到与当前角色不符的字段。
             syncCrossVisibility();
+        }
+
+        // 实验板提示文案随开关状态切换：关闭时只显示说明，打开时才显示风险警告。
+        // 默认关着却一直挂个红字警告，会让人以为服务器已经出问题了。
+        function syncCrossExpHint() {
+            const cb = el('cross-experimental');
+            if (!cb) return;
+            const warn = el('cross-exp-warn');
+            if (warn) warn.style.display = cb.checked ? '' : 'none';
         }
 
         function renderCrossStatus(d) {
@@ -2216,7 +2988,8 @@
                         player_data: el('cross-it-player').checked,
                         whitelist: el('cross-it-wl').checked,
                         ban: el('cross-it-ban').checked
-                    }
+                    },
+                    experimental: el('cross-experimental').checked
                 };
                 // 本服地址（self_url）：用自动推断的浏览器地址 —— 主服靠它回连本副服。
                 //
@@ -2440,6 +3213,11 @@
                     el('cloud-token').value = (c.token === '__SET__') ? '' : (c.token || '');
                     el('cloud-server-name').value = c.server_name || '';
                     el('cloud-kick-message').value = c.kick_message || '';
+                    if (el('cloud-api-style')) {
+                        // 老配置没有 api_style 字段 → 落到 auto，与后端默认一致
+                        const st = String(c.api_style || 'auto').toLowerCase();
+                        el('cloud-api-style').value = (st === 'rest' || st === 'legacy') ? st : 'auto';
+                    }
                     if (el('ban-sync-cloud')) el('ban-sync-cloud').checked = B(c.sync_default, false);
                 }
                 renderBackupState(__toolsCfg);
@@ -2461,7 +3239,8 @@
                     api_base: el('cloud-base').value.trim(),
                     token: el('cloud-token').value.trim(),
                     server_name: el('cloud-server-name').value.trim(),
-                    kick_message: el('cloud-kick-message').value.trim()
+                    kick_message: el('cloud-kick-message').value.trim(),
+                    api_style: el('cloud-api-style') ? el('cloud-api-style').value : 'auto'
                 }
             };
             try {
@@ -2469,6 +3248,9 @@
                 setToolsStatus('backup-save-status', r.message || '', !!r.ok);
                 setToolsStatus('cloud-save-status', r.ok ? '已保存' : (r.error || '保存失败'), !!r.ok);
                 loadToolsConfig();
+                // 保存后端点缓存被清（地址/协议可能变了），顺手重测一次，
+                // 让状态卡立刻反映新配置，而不是等用户想到再点测试。
+                if (r.ok) testCloud();
             } catch (e) { setToolsStatus('cloud-save-status', '保存失败: ' + e, false); }
         }
         async function triggerBackup() {
@@ -2497,10 +3279,139 @@
             } catch (e) { setToolsStatus('backup-save-status', '' + e, false); }
         }
         async function testCloud() {
+            const st = el('cloud-save-status');
+            const card = el('cloud-status-card');
+            if (st) { st.textContent = '检测中…'; st.className = 'status text-warn'; }
             try {
                 const r = await apiPost('/api/cloud/test', {});
                 setToolsStatus('cloud-save-status', (r.message || '测试完成') + (r.ok ? '（连接正常）' : '（连接失败）'), !!r.ok);
+                if (card) {
+                    const role = (r.data && r.data._role) || '';
+                    const roleText = role === 'admin' ? '管理员（可封禁/解封）'
+                                   : role === 'readonly' ? '只读 Key（仅可查黑）'
+                                   : '未识别（旧版接口无此能力）';
+                    const roleTone = role === 'admin' ? 'text-ok' : (role === 'readonly' ? 'text-warn' : 'text-mute');
+                    card.innerHTML = ''
+                        + '<div class="row"><b class="spacer">接入状态</b>'
+                        + '<span class="badge ' + (r.ok ? 'badge-ok' : 'badge-bad') + '">● ' + (r.ok ? '连接正常' : '连接失败') + '</span></div>'
+                        + '<div class="hint-sm mt-xs">接口协议：<b>' + esc(r.api_style || '未知') + '</b></div>'
+                        + '<div class="hint-sm">身份：<span class="' + roleTone + '">' + esc(roleText) + '</span></div>'
+                        + '<div class="hint-sm break">' + esc(r.message || '') + '</div>';
+                }
+                // 连上了就顺手拉一次总览与明细，省得用户再点两个刷新
+                if (r.ok) { loadCloudStats(); loadCloudBans(); }
             } catch (e) { setToolsStatus('cloud-save-status', '测试失败: ' + e, false); }
+        }
+
+        // ---------------- 云黑：总览 / 明细 / 手动查黑 ----------------
+        //
+        // 这三块都依赖新版 REST 接口。旧版服务上会返回
+        // ok:false + 「不支持列表查询（旧版接口）」，这里把它当成一句
+        // 普通说明展示，**不弹错误** —— 旧版服务本来就没有这些能力，
+        // 报错只会让用户以为配置坏了。
+        async function loadCloudStats() {
+            const box = el('cloud-stats-box');
+            const st = el('cloud-stats-status');
+            if (st) { st.textContent = '加载中…'; st.className = 'status'; }
+            try {
+                const r = await apiGet('/api/cloud/stats');
+                if (!r || !r.ok) {
+                    if (box) box.innerHTML = '<p class="hint">' + esc((r && r.message) || '加载失败') + '</p>';
+                    if (st) { st.textContent = '不可用'; st.className = 'status text-mute'; }
+                    return;
+                }
+                const s = r.stats || {};
+                const cell = function (n, label, tone) {
+                    return '<div class="stat-cell"><b class="' + (tone || '') + '">' + esc(String(n == null ? '-' : n)) + '</b>'
+                         + '<span class="hint-sm">' + esc(label) + '</span></div>';
+                };
+                if (box) {
+                    box.innerHTML = '<div class="row">'
+                        + cell(s.active_bans, '当前有效云黑', 'text-warn')
+                        + cell(s.bedrock, '基岩版分组')
+                        + cell(s.java, 'Java 版分组')
+                        + '</div>';
+                }
+                if (st) { st.textContent = '✓'; st.className = 'status text-ok'; }
+            } catch (e) {
+                if (box) box.innerHTML = '<p class="hint">加载失败: ' + esc(String(e)) + '</p>';
+                if (st) { st.textContent = '失败'; st.className = 'status text-bad'; }
+            }
+        }
+
+        function fmtExpire(ts) {
+            const n = Number(ts);
+            // 0 / null / 非法 一律视为永久（与文档「expires=0 表示永久」一致）
+            if (!isFinite(n) || n <= 0) return '永久';
+            const d = new Date(n * 1000);
+            return d.toLocaleString();
+        }
+
+        async function loadCloudBans() {
+            const tb = el('cloud-ban-list');
+            const st = el('cloud-bans-status');
+            const hint = el('cloud-bans-hint');
+            if (st) { st.textContent = '加载中…'; st.className = 'status'; }
+            try {
+                // 本插件面向 BDS，只看基岩版分组
+                const r = await apiGet('/api/cloud/list?edition=bedrock');
+                if (!r || !r.ok) {
+                    if (tb) tb.innerHTML = '';
+                    const m = (r && r.message) || '加载失败';
+                    if (hint) hint.textContent = m;
+                    if (st) { st.textContent = '不可用'; st.className = 'status text-mute'; }
+                    return;
+                }
+                const bans = r.bans || [];
+                if (hint) hint.textContent = '';
+                if (!bans.length) {
+                    if (tb) tb.innerHTML = '<tr><td colspan="5" class="hint">云黑列表为空</td></tr>';
+                } else if (tb) {
+                    tb.innerHTML = bans.map(function (b) {
+                        return '<tr>'
+                            + '<td>' + esc(String(b.player_name || '-')) + '</td>'
+                            + '<td class="break">' + esc(String(b.xuid || '-')) + '</td>'
+                            + '<td>' + esc(String(b.reason || '-')) + '</td>'
+                            + '<td>' + esc(String(b.server_name || '-')) + '</td>'
+                            + '<td>' + esc(fmtExpire(b.expires)) + '</td>'
+                            + '</tr>';
+                    }).join('');
+                }
+                if (st) { st.textContent = '✓ ' + bans.length + ' 条'; st.className = 'status text-ok'; }
+            } catch (e) {
+                if (tb) tb.innerHTML = '';
+                if (hint) hint.textContent = '加载失败: ' + e;
+                if (st) { st.textContent = '失败'; st.className = 'status text-bad'; }
+            }
+        }
+
+        async function cloudLookup() {
+            const box = el('cloud-lookup-result');
+            const xuid = el('cloud-lookup-xuid') ? el('cloud-lookup-xuid').value.trim() : '';
+            const ip = el('cloud-lookup-ip') ? el('cloud-lookup-ip').value.trim() : '';
+            if (!xuid && !ip) {
+                if (box) { box.innerHTML = '<span class="text-warn">请至少填写 XUID 或 IP</span>'; }
+                return;
+            }
+            if (box) box.innerHTML = '<span class="text-warn">查询中…</span>';
+            try {
+                const r = await apiPost('/api/cloud/lookup', { xuid: xuid, ip_address: ip });
+                if (!box) return;
+                if (!r || !r.ok) {
+                    box.innerHTML = '<span class="text-bad">✗ ' + esc((r && r.message) || '查询失败') + '</span>';
+                    return;
+                }
+                if (r.ban) {
+                    box.innerHTML = '<span class="text-bad">● 命中云黑</span>　'
+                        + '原因：<b>' + esc(String(r.ban.reason || '-')) + '</b>'
+                        + '　来源：' + esc(String(r.ban.server_name || '-'))
+                        + '　分组：' + esc(String(r.ban.edition || '-'));
+                } else {
+                    box.innerHTML = '<span class="text-ok">○ 未命中云黑</span>';
+                }
+            } catch (e) {
+                if (box) box.innerHTML = '<span class="text-bad">✗ ' + esc(String(e)) + '</span>';
+            }
         }
 
         // ==================== 签到与绑定 ====================
@@ -2574,6 +3485,1561 @@
                 const s = el('gametools-save-status');
                 if (s) { s.textContent = '保存失败: ' + e; s.className = 'status text-bad'; }
             }
+        }
+
+        // ==================== 玩家可信度（加权安全系统） ====================
+        // 与后端配置项的映射：DOM id -> config key
+        var TRUST_NUM_FIELDS = [
+            ['trust-min-score',         'min_score'],
+            ['trust-add-device-match',  'add_device_match'],
+            ['trust-add-device-new',    'add_device_new_first'],
+            ['trust-add-bound-qq',      'add_bound_qq'],
+            ['trust-add-daily-play',    'add_daily_play'],
+            ['trust-add-whitelist',     'add_whitelist_device'],
+            ['trust-add-signin-base',   'add_signin_base'],
+            ['trust-add-signin-perday', 'add_signin_streak_per_day'],
+            ['trust-add-signin-cap',    'add_signin_streak_cap'],
+            ['trust-sub-burst',         'sub_device_burst'],
+            ['trust-burst-hours',       'device_burst_window_hours'],
+            ['trust-burst-threshold',   'device_burst_threshold'],
+            ['trust-sub-miss-day',      'sub_signin_miss_per_day'],
+            ['trust-miss-grace',        'signin_grace_days'],
+            ['trust-miss-floor',        'signin_miss_floor'],
+            ['trust-hard-floor',        'hard_floor'],
+            ['trust-hard-ceiling',      'hard_ceiling'],
+            ['trust-manual-max',        'manual_step_max'],
+            ['trust-history-limit',     'history_limit']
+        ];
+        var TRUST_BOOL_FIELDS = [
+            ['trust-enabled',            'enabled'],
+            ['trust-notify',             'notify_on_join'],
+            ['trust-miss-floor-enabled', 'signin_miss_floor_enabled'],
+            ['trust-perm-enabled',       'perm_tier_enabled']
+        ];
+
+        var trustState = { cfg: null, defaults: null, players: [], stats: {} };
+
+        function trustNum(v, def) {
+            var n = parseFloat(v);
+            return isFinite(n) ? n : def;
+        }
+
+        function trustStatus(id, msg, ok) {
+            var s = el(id);
+            if (!s) return;
+            s.textContent = msg || '';
+            s.className = 'status ' + (ok === true ? 'text-ok' : (ok === false ? 'text-bad' : 'text-warn'));
+        }
+
+        function trustReasonLabel(code, map) {
+            if (!code) return '综合评估';
+            return (map && map[code]) || code;
+        }
+
+        function trustScoreClass(score, need) {
+            if (score >= need + 20) return 'text-ok';
+            if (score >= need) return 'text-warn';
+            return 'text-bad';
+        }
+
+        async function loadTrust() {
+            try {
+                var q = el('trust-search') ? el('trust-search').value.trim() : '';
+                var url = '/api/trust' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+                var r = await apiGet(url);
+                if (!r || !r.ok) throw new Error((r && r.error) || '加载失败');
+                trustState.cfg = r.config || {};
+                trustState.defaults = r.defaults || {};
+                trustState.players = r.players || [];
+                trustState.stats = r.stats || {};
+                trustState.reasons = r.reasons || {};
+                renderTrustConfig();
+                renderTrustList();
+                renderTrustStats();
+                if (el('trust-dirs')) {
+                    el('trust-dirs').textContent =
+                        '玩家档案：' + (r.player_dir || '-') + '\n自动备份：' + (r.backup_dir || '-');
+                }
+                trustStatus('trust-status', '✓ 已加载', true);
+            } catch (e) {
+                trustStatus('trust-status', '✗ ' + e, false);
+            }
+        }
+
+        function renderTrustConfig() {
+            var c = trustState.cfg || {};
+            var d = trustState.defaults || {};
+            function val(k) { return (c[k] !== undefined && c[k] !== null) ? c[k] : d[k]; }
+
+            TRUST_NUM_FIELDS.forEach(function (p) {
+                var node = el(p[0]);
+                if (node) {
+                    var v = val(p[1]);
+                    node.value = (v === undefined || v === null) ? '' : v;
+                }
+            });
+            TRUST_BOOL_FIELDS.forEach(function (p) {
+                var node = el(p[0]);
+                if (node) node.checked = !!val(p[1]);
+            });
+            if (el('trust-kick-msg')) {
+                el('trust-kick-msg').value = (val('kick_message') || '');
+            }
+            renderTrustTiers();
+        }
+
+        function renderTrustTiers() {
+            var box = el('trust-tiers-box');
+            if (!box) return;
+            var tiers = (trustState.cfg && trustState.cfg.perm_tiers) || [];
+            if (!Array.isArray(tiers)) tiers = [];
+            if (!tiers.length) {
+                box.innerHTML = '<p class="empty">暂无档位。至少添加一个才能启用联动。</p>';
+                return;
+            }
+            box.innerHTML = tiers.map(function (t, i) {
+                return '<div class="row mb-xs" data-tier="' + i + '">'
+                    + '<label class="hint w-90">≥ 分数</label>'
+                    + '<input type="number" class="trust-tier-score w-80" step="1" value="' + esc(String(t.score == null ? '' : t.score)) + '">'
+                    + '<label class="hint ml-sm">权限组名</label>'
+                    + '<input type="text" class="trust-tier-group w-140" value="' + esc(String(t.group || '')) + '">'
+                    + '<label class="hint ml-sm">备注</label>'
+                    + '<input type="text" class="trust-tier-label w-140" value="' + esc(String(t.label || '')) + '">'
+                    + '<button class="mini danger ml-sm" onclick="trustRemoveTier(' + i + ')">移除</button>'
+                    + '</div>';
+            }).join('');
+        }
+
+        function trustAddTier() {
+            if (!trustState.cfg) trustState.cfg = {};
+            if (!Array.isArray(trustState.cfg.perm_tiers)) trustState.cfg.perm_tiers = [];
+            trustState.cfg.perm_tiers.push({ score: 60, group: 'trusted', label: '可信玩家' });
+            renderTrustTiers();
+        }
+
+        function trustRemoveTier(i) {
+            if (!trustState.cfg || !Array.isArray(trustState.cfg.perm_tiers)) return;
+            trustState.cfg.perm_tiers.splice(i, 1);
+            renderTrustTiers();
+        }
+
+        function collectTrustTiers() {
+            var box = el('trust-tiers-box');
+            if (!box) return [];
+            var out = [];
+            Array.prototype.forEach.call(box.querySelectorAll('[data-tier]'), function (row) {
+                var sc = row.querySelector('.trust-tier-score');
+                var gp = row.querySelector('.trust-tier-group');
+                var lb = row.querySelector('.trust-tier-label');
+                var score = trustNum(sc && sc.value, 0);
+                var group = (gp && gp.value || '').trim();
+                if (!group) return;              // 没填组名的档位直接丢掉
+                out.push({ score: score, group: group,
+                           label: (lb && lb.value || '').trim() });
+            });
+            return out;
+        }
+
+        async function saveTrust() {
+            var d = trustState.defaults || {};
+            var payload = { trust: {} };
+            var t = payload.trust;
+
+            TRUST_NUM_FIELDS.forEach(function (p) {
+                var node = el(p[0]);
+                if (node) t[p[1]] = trustNum(node.value, d[p[1]]);
+            });
+            TRUST_BOOL_FIELDS.forEach(function (p) {
+                var node = el(p[0]);
+                if (node) t[p[1]] = !!(node && node.checked);
+            });
+            if (el('trust-kick-msg')) {
+                t.kick_message = el('trust-kick-msg').value;
+            }
+            t.perm_tiers = collectTrustTiers();
+
+            // 上限必须大于下限，否则钳位会反过来。前端先挡一道，给个明确提示。
+            if (t.hard_ceiling < t.hard_floor) {
+                trustStatus('trust-save-status',
+                    '✗ 分数上限不能小于下限', false);
+                return;
+            }
+            if (t.device_burst_threshold < 2) {
+                trustStatus('trust-save-status',
+                    '✗ 突发阈值至少为 2（1 个场次就扣分没有意义）', false);
+                return;
+            }
+
+            try {
+                var r = await apiPost('/api/trust/save', payload);
+                trustStatus('trust-save-status',
+                    r.message || (r.ok ? '已保存' : '保存失败'), !!r.ok);
+                if (r.ok) loadTrust();
+            } catch (e) {
+                trustStatus('trust-save-status', '保存失败: ' + e, false);
+            }
+        }
+
+        function renderTrustStats() {
+            var s = trustState.stats || {};
+            var need = s.min_score == null ? 0 : s.min_score;
+            if (el('trust-stats')) {
+                el('trust-stats').textContent =
+                    '共 ' + (s.total || 0) + ' 人｜达标 ' + (s.pass || 0)
+                    + '｜未达标 ' + (s.fail || 0)
+                    + '｜降级档案 ' + (s.degraded || 0)
+                    + '（门槛 ' + need + ' 分，系统' + (s.enabled ? '已启用' : '未启用') + '）';
+            }
+        }
+
+        function renderTrustList() {
+            var box = el('trust-list-box');
+            if (!box) return;
+            var list = trustState.players || [];
+            var need = (trustState.stats && trustState.stats.min_score) || 0;
+            if (!list.length) {
+                box.innerHTML = '<p class="empty">暂无玩家档案。玩家进服后会自动建档。</p>';
+                return;
+            }
+            box.innerHTML = list.map(function (p) {
+                var cls = trustScoreClass(p.score, need);
+                var flags = '';
+                if (p.degraded) flags += '<span class="tag warn" title="该玩家没有 xuid，只能按名字/唯一ID存档。改名会重置权重。">降级档案</span>';
+                if (p.trusted_devices > 0) flags += '<span class="tag">信任设备 ' + esc(String(p.trusted_devices)) + '</span>';
+                // 「信任的人」徽标：与设备信任视觉上明确区分（后者是 tag，这里是 tag ok）
+                if (p.trusted_person) flags += '<span class="tag ok" title="该玩家永久保持满分，不受任何扣分影响">信任的人 ★</span>';
+                if (p.qq) flags += '<span class="tag ok">已绑 QQ</span>';
+                var lastChg = p.last_change || {};
+                return '<div class="list-item">'
+                    + '<div class="row">'
+                    + '<b class="w-160">' + esc(p.name || '(无名)') + '</b>'
+                    + '<span class="' + cls + ' w-80"><b>' + esc(String(p.score)) + '</b> 分</span>'
+                    + '<span class="empty w-140">设备 ' + esc(String(p.device_count))
+                    + '｜连续签到 ' + esc(String(p.streak)) + '</span>'
+                    + flags
+                    + '<span class="empty ml-auto">' + esc(p.last_seen || '') + '</span>'
+                    + '</div>'
+                    + '<div class="row mt-xs">'
+                    + '<span class="empty">最近变动：'
+                    + (lastChg.delta > 0 ? '+' : '') + esc(String(lastChg.delta == null ? 0 : lastChg.delta))
+                    + '（' + esc(trustReasonLabel(lastChg.reason, trustState.reasons)) + '）</span>'
+                    + '</div>'
+                    + '<div class="row mt-xs">'
+                    + '<button class="mini" onclick="trustAdjust(\'' + esc(p.key) + '\', 1)">＋1</button>'
+                    + '<button class="mini" onclick="trustAdjust(\'' + esc(p.key) + '\', 5)">＋5</button>'
+                    + '<button class="mini" onclick="trustAdjust(\'' + esc(p.key) + '\', -1)">－1</button>'
+                    + '<button class="mini" onclick="trustAdjust(\'' + esc(p.key) + '\', -5)">－5</button>'
+                    + '<button class="mini" onclick="trustCustomAdjust(\'' + esc(p.key) + '\')">自定义</button>'
+                    + '<button class="mini" onclick="trustShowDetail(\'' + esc(p.key) + '\')">设备与历史</button>'
+                    + '<button class="mini' + (p.trusted_person ? ' ok' : '') + '" title="标记后该玩家永久保持满分，不受断签等任何扣分影响" onclick="trustToggleTrustedPerson(\'' + esc(p.name || '') + '\',' + (p.trusted_person ? 'false' : 'true') + ')">'
+                    + (p.trusted_person ? '取消信任的人' : '设为信任的人') + '</button>'
+                    + '</div>'
+                    + '</div>';
+            }).join('');
+        }
+
+        async function trustToggleTrustedPerson(name, trusted) {
+            // ★ 这是破坏性较大的操作（永久满分），先确认一次。
+            //   取消信任同理 —— 用户点错了要能立刻改回来，但至少给个提示。
+            var tip = trusted
+                ? '确定把「' + name + '」设为信任的人吗？\n\n效果：该玩家将永久保持满分，不受断签、设备异常等任何扣分影响。'
+                : '确定取消「' + name + '」的信任吗？\n\n效果：分数会立即回落到其真实历史分，之后按正常规则计分。';
+            if (!window.confirm(tip)) return;
+            try {
+                var r = await apiPost('/api/trust/trusted_person',
+                    { name: name, trusted: !!trusted });
+                trustStatus('trust-status',
+                    r.message || (r.ok ? '已保存' : (r.error || '失败')), !!r.ok);
+                if (r.ok) loadTrust();
+            } catch (e) {
+                trustStatus('trust-status', '操作失败: ' + e, false);
+            }
+        }
+
+        async function trustAdjust(key, delta, note) {
+            try {
+                var r = await apiPost('/api/trust/adjust',
+                    { key: key, delta: delta, note: note || '' });
+                trustStatus('trust-status', r.message || (r.ok ? '已调整' : (r.error || '失败')), !!r.ok);
+                if (r.ok) loadTrust();
+            } catch (e) {
+                trustStatus('trust-status', '调整失败: ' + e, false);
+            }
+        }
+
+        function trustCustomAdjust(key) {
+            var v = window.prompt('输入要调整的分数（正数加分，负数扣分）：', '5');
+            if (v === null) return;
+            var n = parseFloat(v);
+            if (!isFinite(n) || n === 0) { alert('请输入非 0 的数字'); return; }
+            var note = window.prompt('备注（可留空，会记进历史）：', '') || '';
+            trustAdjust(key, n, note);
+        }
+
+        async function trustShowDetail(key) {
+            var box = el('trust-detail-box');
+            if (!box) return;
+            box.innerHTML = '<p class="hint">加载中…</p>';
+            try {
+                var r = await apiGet('/api/trust/detail?key=' + encodeURIComponent(key));
+                if (!r || !r.ok) throw new Error((r && r.error) || '加载失败');
+                var rec = r.record || {};
+                var devs = rec.devices || [];
+                var hist = rec.history || [];
+                var html = '<h3>设备与历史 —— ' + esc(rec.name || key) + '</h3>';
+                html += '<div class="row mb-sm"><span class="hint">可信度 <b>'
+                    + esc(String(rec.score)) + '</b>｜标识 ' + esc(key)
+                    + '｜类型 ' + esc(rec.key_type || '')
+                    + '｜首次 ' + esc(rec.first_seen || '')
+                    + '</span></div>';
+
+                html += '<h4 class="mt-sm">设备指纹（判定依据）</h4>';
+                if (!devs.length) {
+                    html += '<p class="empty">暂无设备记录</p>';
+                } else {
+                    html += '<div class="scroll-box">' + devs.map(function (d) {
+                        return '<div class="list-item">'
+                            + '<div class="row"><b class="mono">' + esc(d.device_id || '') + '</b>'
+                            + (d.trusted ? '<span class="tag ok">已信任</span>' : '')
+                            + '<span class="empty ml-auto">见到 ' + esc(String(d.seen_count || 0)) + ' 次</span></div>'
+                            + '<div class="row mt-xs"><span class="empty">'
+                            + esc(d.device_os || '') + ' / ' + esc(d.game_version || '')
+                            + ' / ' + esc(d.locale || '') + '</span></div>'
+                            + '<div class="row mt-xs"><span class="empty">'
+                            + '最近 IP（仅供查看，不参与判定）：' + esc(d.last_ip || '-')
+                            + '｜首次 ' + esc(d.first_seen || '')
+                            + '</span></div>'
+                            + '<div class="row mt-xs">'
+                            + '<button class="mini" onclick="trustToggleDevice(\'' + esc(key) + '\',\'' + esc(d.device_id || '') + '\',' + (d.trusted ? 'false' : 'true') + ')">'
+                            + (d.trusted ? '取消信任此设备' : '信任此设备（不计入突发）')
+                            + '</button></div>'
+                            + '</div>';
+                    }).join('') + '</div>';
+                }
+
+                html += '<h4 class="mt">最近变动历史</h4>';
+                if (!hist.length) {
+                    html += '<p class="empty">暂无记录</p>';
+                } else {
+                    html += '<div class="scroll-box tall">' + hist.map(function (h) {
+                        var d = h.delta == null ? 0 : h.delta;
+                        var cls = d > 0 ? 'text-ok' : (d < 0 ? 'text-bad' : 'empty');
+                        return '<div class="list-item"><span class="' + cls + '">'
+                            + (d > 0 ? '+' : '') + esc(String(d)) + '</span> '
+                            + esc(trustReasonLabel(h.reason, trustState.reasons))
+                            + ' <span class="empty">→ ' + esc(String(h.score)) + ' 分｜'
+                            + esc(h.at || '') + '｜' + esc(h.by || 'auto') + '</span></div>';
+                    }).join('') + '</div>';
+                }
+                box.innerHTML = html;
+            } catch (e) {
+                box.innerHTML = '<p class="status text-bad">加载失败: ' + esc(String(e)) + '</p>';
+            }
+        }
+
+        async function trustToggleDevice(key, deviceId, trusted) {
+            try {
+                var r = await apiPost('/api/trust/device_trust',
+                    { key: key, device_id: deviceId, trusted: trusted });
+                trustStatus('trust-status', r.message || (r.ok ? '已更新' : (r.error || '失败')), !!r.ok);
+                if (r.ok) { trustShowDetail(key); }
+            } catch (e) {
+                trustStatus('trust-status', '操作失败: ' + e, false);
+            }
+        }
+
+        async function trustExport() {
+            try {
+                var r = await apiPost('/api/trust/export', {});
+                if (!r || !r.ok) throw new Error((r && r.error) || '导出失败');
+                var text = JSON.stringify(r, null, 2);
+                var blob = new Blob([text], { type: 'application/json' });
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'greenmoon_trust_' + new Date().toISOString().slice(0, 10) + '.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+                trustStatus('trust-status', '✓ 已导出 ' + (r.count || 0) + ' 份档案', true);
+            } catch (e) {
+                trustStatus('trust-status', '导出失败: ' + e, false);
+            }
+        }
+
+        async function trustClear() {
+            var n = (trustState.stats && trustState.stats.total) || 0;
+            if (!window.confirm('确定清空全部可信度档案吗？共 ' + n + ' 份。\n\n'
+                + '系统会【先自动备份】再删除，备份保留在插件目录的 player_backup/ 下。')) {
+                return;
+            }
+            var typed = window.prompt('请输入 DELETE 确认清空（区分大小写）：', '');
+            if (typed !== 'DELETE') {
+                trustStatus('trust-status', '已取消（确认词不匹配）', false);
+                return;
+            }
+            try {
+                var r = await apiPost('/api/trust/clear', { confirm: 'DELETE' });
+                trustStatus('trust-status', r.message || (r.ok ? '已清空' : (r.error || '失败')), !!r.ok);
+                if (r.ok) { trustState.players = []; loadTrust(); }
+            } catch (e) {
+                trustStatus('trust-status', '清空失败: ' + e, false);
+            }
+        }
+
+        async function trustRecalc() {
+            try {
+                var r = await apiPost('/api/trust/recalc', {});
+                trustStatus('trust-status', r.message || (r.ok ? '已提交' : (r.error || '失败')), !!r.ok);
+            } catch (e) {
+                trustStatus('trust-status', '结算失败: ' + e, false);
+            }
+        }
+
+        // ==================== AI 自动管理 ====================
+        // 这一块的 UI 有一条硬规矩：**页面上的每一个写操作都由人点击触发**。
+        // 没有任何"模型自动执行"的按钮 —— 唯一能落地不可逆操作的地方
+        // 是「待确认提议」列表里的确认按钮。
+        var AI_STATUS_TIMER = null;
+
+        function aiStatus(id, msg, ok) {
+            var s = el(id);
+            if (!s) return;
+            s.textContent = msg || '';
+            s.className = 'status ' + (ok === true ? 'text-ok'
+                                     : (ok === false ? 'text-bad' : 'text-warn'));
+        }
+
+        // ==================== 页面自定义下拉（替代原生 <select>） ====================
+        // 为什么要自己做：部分平台/浏览器的原生 select 弹层是**系统控件**，
+        // 和页面主题割裂；国内某些套壳内核里甚至点击无响应、或样式完全
+        // 不受控。这里用 button + 自己渲染的列表，行为完全由页面决定。
+        //
+        // 用法：
+        //   gmSelect.mount('ai-autonomy', [{value:0, label:'…', sub:'…'}], onChange)
+        //   gmSelect.get('ai-autonomy')       // 取当前值（字符串）
+        //   gmSelect.set('ai-autonomy', 2)    // 设值（不触发 onChange）
+        //
+        // ★ 关键设计：真实值存在宿主元素的 data-value 上，
+        //   而不是靠"当前选中了第几项"去反推 —— 列表是重渲染的，
+        //   索引会变，data-value 不会。
+        var gmSelect = (function () {
+            var store = {};      // id -> {items, value, onChange, open}
+            var openId = null;
+
+            function labelOf(st) {
+                for (var i = 0; i < st.items.length; i++) {
+                    if (String(st.items[i].value) === String(st.value)) {
+                        return st.items[i];
+                    }
+                }
+                return null;
+            }
+
+            function render(id) {
+                var st = store[id];
+                var host = el(id);
+                if (!st || !host) return;
+                var cur = labelOf(st);
+                var html = '' +
+                    '<button type="button" class="gmselect-trigger block-input"' +
+                    '        aria-haspopup="listbox" aria-expanded="' +
+                    (st.open ? 'true' : 'false') + '">' +
+                    '<span class="gmselect-label">' +
+                    esc(cur ? cur.label : '（未选择）') + '</span>' +
+                    '<span class="gmselect-arrow">▼</span>' +
+                    '</button>' +
+                    '<ul class="gmselect-list' + (st.open ? '' : ' hidden') +
+                    '" role="listbox">';
+                for (var i = 0; i < st.items.length; i++) {
+                    var it = st.items[i];
+                    var active = String(it.value) === String(st.value);
+                    html += '<li class="gmselect-item' +
+                        (active ? ' is-active' : '') + '" role="option"' +
+                        ' data-value="' + escAttr(String(it.value)) + '">' +
+                        esc(it.label) +
+                        (it.sub ? '<span class="gmselect-sub">' +
+                                  esc(it.sub) + '</span>' : '') +
+                        '</li>';
+                }
+                html += '</ul>';
+                host.className = 'gmselect' + (st.open ? ' open' : '') +
+                    (st.disabled ? ' disabled' : '');
+                host.innerHTML = html;
+            }
+
+            function closeAll() {
+                for (var k in store) {
+                    if (store[k].open) {
+                        store[k].open = false;
+                        render(k);
+                    }
+                }
+                openId = null;
+            }
+
+            function toggle(id) {
+                var st = store[id];
+                if (!st || st.disabled) return;
+                var wasOpen = st.open;
+                closeAll();
+                if (!wasOpen) {
+                    st.open = true;
+                    openId = id;
+                    render(id);
+                    // 展开后把当前项滚进视野（选项多时很重要）
+                    var host = el(id);
+                    var act = host && host.querySelector('.gmselect-item.is-active');
+                    if (act && act.scrollIntoView) {
+                        try { act.scrollIntoView({block: 'nearest'}); } catch (e) {}
+                    }
+                }
+            }
+
+            function pick(id, value) {
+                var st = store[id];
+                if (!st) return;
+                var changed = String(st.value) !== String(value);
+                st.value = value;
+                st.open = false;
+                openId = null;
+                render(id);
+                if (changed && typeof st.onChange === 'function') {
+                    try { st.onChange(String(value)); } catch (e) {
+                        if (window.console) console.error(e);
+                    }
+                }
+            }
+
+            // 事件委托：整个 document 上挂一次，列表反复重渲染也不用重绑。
+            document.addEventListener('click', function (ev) {
+                var t = ev.target;
+                // 找最近的 .gmselect 宿主
+                var hostEl = t && t.closest ? t.closest('.gmselect') : null;
+                if (!hostEl) { closeAll(); return; }
+                var id = hostEl.id;
+                var item = t.closest ? t.closest('.gmselect-item') : null;
+                if (item) {
+                    pick(id, item.getAttribute('data-value'));
+                    ev.preventDefault();
+                    return;
+                }
+                if (t.closest('.gmselect-trigger')) {
+                    toggle(id);
+                    ev.preventDefault();
+                }
+            });
+            document.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Escape' && openId) {
+                    closeAll();
+                }
+            });
+
+            return {
+                mount: function (id, items, onChange, value) {
+                    store[id] = {
+                        items: items || [],
+                        value: (value == null ? '' : String(value)),
+                        onChange: onChange,
+                        open: false,
+                        disabled: false
+                    };
+                    // 兜底：如果宿主上已经有 data-value（比如服务端渲染过），用它
+                    var host = el(id);
+                    if (host && host.getAttribute('data-value') != null &&
+                        host.getAttribute('data-value') !== '') {
+                        store[id].value = host.getAttribute('data-value');
+                    }
+                    render(id);
+                },
+                set: function (id, value) {
+                    var st = store[id];
+                    if (!st) return;
+                    st.value = (value == null ? '' : String(value));
+                    render(id);
+                },
+                get: function (id) {
+                    var st = store[id];
+                    return st ? String(st.value) : '';
+                },
+                enable: function (id, on) {
+                    var st = store[id];
+                    if (!st) return;
+                    st.disabled = !on;
+                    if (!on) st.open = false;
+                    render(id);
+                },
+                mounted: function (id) { return !!store[id]; },
+
+                //: 把页面上所有「声明式」的自定义下拉一次性挂载。
+                //: HTML 里写：
+                //:   <div class="gmselect" id="xxx"
+                //:        data-options='[["set","设置"],["add","增加"]]'
+                //:        data-value="set"></div>
+                //: 这里扫描后自动 mount —— 加新下拉只需改 HTML，不用碰 JS。
+                //: 用 JSON 而非多个 data- 属性，是因为选项可能含中文/引号。
+                autoscan: function () {
+                    var nodes = document.querySelectorAll('[data-options]');
+                    for (var i = 0; i < nodes.length; i++) {
+                        var node = nodes[i];
+                        var id = node.id;
+                        if (!id || store[id]) continue;
+                        var items = [];
+                        try {
+                            items = JSON.parse(node.getAttribute('data-options') || '[]');
+                        } catch (e) {
+                            if (window.console) {
+                                console.error('data-options 不是合法 JSON:', id, e);
+                            }
+                            continue;
+                        }
+                        var mapped = items.map(function (p) {
+                            if (Object.prototype.toString.call(p) === '[object Array]') {
+                                return {value: p[0], label: p[1], sub: p[2]};
+                            }
+                            return p;   // 已是 {value,label,sub} 形式
+                        });
+                        var init = node.getAttribute('data-value');
+                        // 不再需要 data-options，清掉以免重复扫描时误判
+                        // （store 已经挡住重复挂载，这里只是保持 DOM 干净）
+                        store[id] = {
+                            items: mapped,
+                            value: (init == null ? '' : String(init)),
+                            onChange: null,
+                            open: false,
+                            disabled: false
+                        };
+                        render(id);
+                    }
+                }
+            };
+        })();
+
+        //: 风险等级 → 中文 + 色调。顺序很重要：越危险越靠前。
+        function aiRiskLabel(r) {
+            var v = String(r || '');
+            if (v.indexOf('irreversible') >= 0 || v.indexOf('IRREVERSIBLE') >= 0) {
+                return '<span class="badge text-bad">不可逆 · 需确认</span>';
+            }
+            if (v.indexOf('reversible') >= 0 || v.indexOf('REVERSIBLE') >= 0) {
+                return '<span class="badge text-warn">可逆</span>';
+            }
+            return '<span class="badge text-ok">只读</span>';
+        }
+
+        //: 提示词框被手动编辑 → 标记 data-touched（用户可能已改动），
+        //: 并实时刷新「内置默认 / 已自定义」标签，让用户立刻看到状态变化。
+        //: 用 input 事件（含粘贴、拖拽）而不是 change —— change 要等失焦。
+        document.addEventListener('input', function (ev) {
+            var t = ev.target;
+            if (!t || !t.id) return;
+            if (t.id !== 'ai-system-prompt-custom' &&
+                t.id !== 'ai-chat-system-prompt-custom') return;
+            t.setAttribute('data-touched', '1');
+            // 编辑后内容若恰好又等于默认原文，标签应回到"默认"——
+            // 这里不做特殊处理，aiPromptIsDefault 是按内容比的，天然支持。
+            aiPromptRenderTag(t.id);
+            t.classList.toggle('is-default', aiPromptIsDefault(t.id));
+        });
+
+        //: 最近一次的 status 快照。
+        //: 工具权限面板要用它显示"影子模式拦下了哪些已勾选的工具" ——
+        //: 那段提示在 aiLoadTools 里渲染，而工具清单是单独拉的，
+        //: 所以状态得放在外面共享。
+        window._aiLastStatus = null;
+
+        async function aiLoad() {
+            var st = el('ai-status');
+            if (st) st.textContent = '加载中…';
+            try {
+                var r = await apiGet('/api/ai/config');
+                if (!r || !r.ok) {
+                    aiStatus('ai-status', (r && r.error) || '读取失败', false);
+                    return;
+                }
+                var c = r.config || {};
+                var s = r.status || {};
+                var setV = function (id, v) { var e = el(id); if (e) e.value = (v == null ? '' : v); };
+                var setC = function (id, v) { var e = el(id); if (e) e.checked = !!v; };
+
+                setC('ai-enabled', c.enabled);
+                // ★ 接管级别（v7.9 主控）。后端已经做好旧 shadow_mode 的迁移，
+                //   这里直接用 autonomy_level；缺失时按第二级兜底（与后端
+                //   DEFAULT_AUTONOMY 一致），绝不能猜成 2 —— 那会显示成
+                //   「完全放开」，用户一看就慌。
+                var lv = (c.autonomy_level == null) ? 1 : Number(c.autonomy_level);
+                // 页面自定义下拉：首次加载时 mount，之后用 set 更新值。
+                aiMountAutonomy();
+                gmSelect.set('ai-autonomy', lv);
+                aiRenderAutonomy(lv, s);
+
+                // 高级设置：提示词 + 聊天参数
+                // ★ 提示词框改为「预填内置默认」：用户一进来就能看到 AI
+                //   收到的是什么，而不是对着空框猜。语义仍然是「空 = 默认」，
+                //   但展示上不再留空 —— 靠 aiPromptSet() 在保存时判断
+                //   「框里是否就是默认原文」，是则提交空串。
+                aiPromptSet('ai-system-prompt-custom',
+                            c.ai_system_prompt_custom, 'analysis');
+                aiPromptSet('ai-chat-system-prompt-custom',
+                            c.chat_system_prompt_custom, 'chat');
+                aiRenderPromptWarn(c);
+                setC('ai-chat-enabled', c.chat_enabled);
+                setV('ai-chat-max-tokens',
+                     c.chat_max_tokens == null ? 512 : c.chat_max_tokens);
+                setV('ai-chat-temperature',
+                     c.chat_temperature == null ? 0.7 : c.chat_temperature);
+                setV('ai-chat-max-chars',
+                     c.chat_max_chars == null ? 500 : c.chat_max_chars);
+                setV('ai-chat-min-interval',
+                     c.chat_min_interval == null ? 5 : c.chat_min_interval);
+                setV('ai-chat-daily-limit',
+                     c.chat_daily_limit == null ? 100 : c.chat_daily_limit);
+                setC('ai-chat-allow-read-tools', c.chat_allow_read_tools !== false);
+                setV('ai-chat-context-turns',
+                     c.chat_context_turns == null ? 0 : c.chat_context_turns);
+                setV('ai-chat-context-max-chars',
+                     c.chat_context_max_chars == null ? 300 : c.chat_context_max_chars);
+
+                // 「玩家行为记录」的配置已搬到「🧱 区块日志与恢复」板块，
+                // 这里不再回显 —— 它的配置也不在 ai 段了（见 behavior_record）。
+
+                setV('ai-base-url', c.base_url);
+                setV('ai-model', c.model);
+                setV('ai-timeout', c.timeout == null ? 45 : c.timeout);
+                setV('ai-max-lines', c.max_log_lines == null ? 120 : c.max_log_lines);
+                setV('ai-min-interval', c.min_interval == null ? 300 : c.min_interval);
+                setV('ai-daily-limit', c.daily_limit == null ? 200 : c.daily_limit);
+
+                setC('ai-cap-logs', c.enable_log_analysis);
+                setC('ai-cap-wl', c.enable_whitelist_review);
+                setC('ai-cap-auto', c.enable_auto_manage);
+
+                // ★ api_key 用的是"留空不修改"约定：后端只回掩码 __SET__，
+                //   这里**不填进输入框**（填进去用户会以为那是真 key，
+                //   而且原样提交时后端会把它当新 key 写进去）。
+                var keyEl = el('ai-api-key');
+                if (keyEl) {
+                    keyEl.value = '';
+                    keyEl.placeholder = c.has_key ? '已设置（留空不修改）' : 'sk-...';
+                }
+
+                aiRenderStatus(s);
+                aiRenderUsage(s);
+                aiRenderLast(s.last_result);
+                aiRenderPurpose(r.purposes);
+                aiRenderGuard(s);
+
+                // 供工具权限面板使用（它单独拉 /api/ai/tools，
+                // 需要 status 里的 shadow_blocks 才能显示拦截提示）。
+                window._aiLastStatus = s;
+                if (AI_TOOL_CACHE) aiRenderTools();
+            } catch (e) {
+                aiStatus('ai-status', '读取失败: ' + e, false);
+            }
+        }
+
+        function aiRenderStatus(s) {
+            if (!s) return;
+            var parts = [];
+            if (!s.enabled) parts.push('未启用');
+            else if (!s.configured) parts.push('配置不完整：' + (s.config_error || ''));
+            else parts.push('已就绪' + (s.model ? '（' + s.model + '）' : ''));
+
+            // ★ 接管级别要带上"当前有多少工具被拦"。
+            //   级别与工具权限是 AND 关系，用户容易误以为"勾了就该动"。
+            //   状态栏是唯一常驻可见的位置，必须在这里说清楚。
+            var lv = (s.autonomy_level == null)
+                ? (s.shadow_mode ? 0 : 1) : Number(s.autonomy_level);
+            var lvName = { 0: '纯建议', 1: '白名单自动', 2: '完全放开' }[lv] ||
+                         ('未知(' + lv + ')');
+            var blocked = (s.autonomy_blocks || s.shadow_blocks || []).length;
+            parts.push(lvName + (blocked ? '（' + blocked + ' 个工具被拦）' : ''));
+
+            // 第三级：把"还有几条能回滚"直接摆在状态栏 —— 这是最该被看见的信息。
+            if (lv === 2) {
+                var undoN = Number(s.undo_pending || 0);
+                if (undoN > 0) {
+                    parts.push('<b class="text-warn">' + undoN + ' 条可回滚</b>');
+                }
+            }
+
+            // 工具权限生效情况：未限制 / 白名单 N 个
+            var eff = Number(s.tool_effective || 0);
+            var tot = Number(s.tool_total || 0);
+            if (tot > 0) {
+                parts.push(s.tool_filter_active
+                    ? ('工具白名单 ' + eff + '/' + tot)
+                    : ('工具全部可用 ' + tot));
+            }
+
+            if (s.running) parts.push('分析中…');
+            aiStatus('ai-status', parts.join(' · '),
+                     s.enabled && s.configured ? true : null);
+        }
+
+        function aiRenderUsage(s) {
+            var box = el('ai-usage');
+            if (!box || !s) return;
+            var used = Number(s.used_today || 0);
+            var lim = Number(s.daily_limit || 0);
+            var txt = '今日已调用 ' + used + ' 次' +
+                      (lim > 0 ? ' / 上限 ' + lim + ' 次' : '（不限）');
+            if (lim > 0 && used >= lim) txt += ' —— <b class="text-bad">已达上限</b>';
+            var pend = Number(s.pending_proposals || 0);
+            if (pend > 0) {
+                txt += ' ｜ <b class="text-warn">' + pend + ' 条提议待确认</b>';
+            }
+            box.innerHTML = txt;
+        }
+
+        //: 没有播报卡时给一句可操作的话，而不是留个空列表让人困惑
+        //: ★ 渲染目标已从 AI 页的 #ai-purpose-summary 改为机器人页的
+        //:   #bots-purpose-summary。两个 id 都尝试，谁在就渲染谁，
+        //:   这样老版本页面缓存和新版页面都能正常工作。
+        function aiRenderPurpose(p) {
+            var box = el('bots-purpose-summary') || el('ai-purpose-summary');
+            if (!box) return;
+            box.classList.remove('hidden');
+            if (!p || !p.cards) { box.innerHTML = '<span class="hint">无机器人卡片</span>'; return; }
+            var counts = p.counts || {};
+            var html = '';
+            (p.options || []).forEach(function (o) {
+                var n = Number(counts[o.value] || 0);
+                html += '<span class="badge ' +
+                        (o.value === 'broadcast' && n > 0 ? 'text-ok' : '') +
+                        '">' + botsEsc(o.label) + '：' + n + ' 个</span> ';
+            });
+            if (Number(counts.broadcast || 0) === 0) {
+                html += '<div class="hint-sm text-warn mt-sm">' +
+                        '还没有「AI 播报」用途的机器人 —— 面板 AI 的播报按钮会告诉你没地方发。' +
+                        '点下面任意卡片的「编辑」，把用途改成「AI 播报」即可。</div>';
+            }
+            box.innerHTML = html;
+        }
+
+        //: 机器人页专用：单独拉一次用途汇总（进板块时调用）。
+        //: 依赖 /api/ai/status 已经返回 purposes；没有就静默跳过，
+        //: 不能让机器人页因为 AI 模块异常而报错。
+        function aiLoadPurposeSummary() {
+            fetch('/api/ai/status').then(function (r) { return r.json(); })
+                .then(function (r) { if (r && r.purposes) aiRenderPurpose(r.purposes); })
+                .catch(function () { /* 静默：机器人页主功能不受影响 */ });
+        }
+
+        //: 影子模式/执行模式的实时提示。
+        //: ★ 原实现用 box.innerHTML.split('<br><b')[0] 保留静态前缀 —— 那段
+        //: 接管级别的说明文案。键与后端 AUTONOMY_LEVELS 一一对应。
+        var AI_AUTONOMY_HINTS = {
+            0: '<b class="text-ok">第一级 · 纯建议：</b>模型的一切工具调用都不会执行，' +
+               '连「提议」也不会生成 —— 只输出分析。适合刚接入、先观察几天。',
+            1: '<b>第二级 · 白名单自动（默认）：</b>只读查询与可逆操作由 AI 直接执行并留审计；' +
+               '白名单的批准/驳回也自动完成。危险操作（删档、改服务器属性）依然只生成' +
+               '待确认提议，需要你点确认。',
+            2: '<b class="text-warn">第三级 · 完全放开：</b>包括删档、改服务器属性在内的所有工具' +
+               '都由 AI 直接执行，不等你确认。执行后会登记撤销记录，在「撤销窗口」内可一键回滚；' +
+               '窗口一过就真的不可逆了。'
+        };
+
+        //: 接管级别的选项定义（供页面自定义下拉用）。
+        //: sub 是选择器里的小字说明 —— 用户不用展开长篇 help 就能看懂差别。
+        var AI_AUTONOMY_ITEMS = [
+            {value: 0, label: '第一级 · 纯建议',
+             sub: '不做任何操作，只给分析'},
+            {value: 1, label: '第二级 · 白名单自动（默认）',
+             sub: '只读与可逆操作自动执行，危险操作仍等你确认'},
+            {value: 2, label: '第三级 · 完全放开',
+             sub: '不可逆操作也直接执行（窗口内可撤销）'}
+        ];
+
+        function aiMountAutonomy() {
+            if (gmSelect.mounted('ai-autonomy')) return;
+            gmSelect.mount('ai-autonomy', AI_AUTONOMY_ITEMS, aiSetAutonomy, 1);
+        }
+
+        //: 根据级别显示/隐藏「撤销窗口」这一行 —— 它只在第三级有意义。
+        function aiRenderAutonomy(level, status) {
+            var lv = Number(level);
+            var hint = el('ai-autonomy-hint');
+            if (hint) hint.innerHTML = AI_AUTONOMY_HINTS[lv] || '';
+            var row = el('ai-undo-window-row');
+            if (row) {
+                if (lv === 2) row.classList.remove('hidden');
+                else row.classList.add('hidden');
+            }
+            // 第三级 + 有权限问题时的额外提醒
+            if (lv === 2 && hint) {
+                hint.innerHTML += '<br><span class="text-warn">' +
+                    '★ 请确认你理解了这一点：AI 会真的动手，且只在窗口内可挽回。</span>';
+            }
+        }
+
+        //: 提示词被自定义时的醒目提醒 —— 用户选择了"真·完全交给服主"，
+        //: 那就必须让他清楚自己删掉了什么。
+        function aiRenderPromptWarn(c) {
+            var box = el('ai-prompt-warn');
+            if (!box) return;
+            var msgs = [];
+            if (c && String(c.ai_system_prompt_custom || '').trim()) {
+                msgs.push('分析任务提示词已被自定义：内置的安全约束不再生效。');
+            }
+            if (c && String(c.chat_system_prompt_custom || '').trim()) {
+                msgs.push('群聊提示词已被自定义：内置的「群友非管理员」约束不再生效' +
+                          '（但工具白名单 / 脱敏 / 限频三道代码防线不受影响）。');
+            }
+            if (msgs.length) {
+                box.innerHTML = '⚠ ' + msgs.join('<br>⚠ ');
+                box.classList.remove('hidden');
+            } else {
+                box.innerHTML = '';
+                box.classList.add('hidden');
+            }
+        }
+
+
+        function aiToggleAdvanced() {
+            var box = el('ai-advanced-box');
+            var btn = el('ai-advanced-toggle');
+            if (!box) return;
+            var hidden = box.classList.toggle('hidden');
+            if (btn) btn.textContent = hidden ? '展开' : '收起';
+        }
+
+        // ==================== 提示词预填 ====================
+        // 设计意图（用户要求）：「把默认的提示词先放在输入框里面，方便人们
+        // 了解一开始提示词是怎么写的。」
+        //
+        // ★ 三个必须同时成立的约束，缺一就会出问题：
+        //   ① 展示 = 默认原文（用户看得到内置提示词长什么样）
+        //   ② 语义 = 不变（框里没改过 → 保存空串 → 后端仍当"用默认"）
+        //   ③ 恢复 = 填回默认（不是清空 —— 清空后用户又看不到默认了）
+        //
+        //   所以不能简单地 setV(value || default)：那样用户点保存时会把
+        //   整段默认提示词当"自定义"写进配置，此后默认提示词一升级，
+        //   他的配置就永远停在旧版 —— 这是最难排查的一类问题。
+        var AI_PROMPT_DEFAULT = { analysis: '', chat: '' };
+        var AI_PROMPT_LOADED = false;
+
+        function aiPromptIsDefault(id) {
+            var e = el(id);
+            if (!e) return true;
+            var kind = (id === 'ai-chat-system-prompt-custom') ? 'chat' : 'analysis';
+            var def = String(AI_PROMPT_DEFAULT[kind] || '');
+            // 默认还没拉回来时（或后端没给），退化为"是否为空"
+            if (!def.trim()) return !e.value.trim();
+            return e.value === def;
+        }
+
+        function aiPromptRenderTag(id) {
+            var kind = (id === 'ai-chat-system-prompt-custom') ? 'chat' : 'analysis';
+            var tag = el(kind === 'chat' ? 'ai-prompt-tag-chat'
+                                        : 'ai-prompt-tag-analysis');
+            var e = el(id);
+            if (!tag || !e) return;
+            if (aiPromptIsDefault(id)) {
+                tag.className = 'hint-sm ai-prompt-tag';
+                tag.innerHTML = '内置默认（原样 = 不变）';
+            } else {
+                tag.className = 'hint-sm ai-prompt-tag text-warn';
+                tag.innerHTML = '⚠ 已自定义（将完全替换默认）';
+            }
+        }
+
+        //: 把一个提示词框设成「默认显示」或「用户自定义值」。
+        function aiPromptSet(id, customValue, kind) {
+            var e = el(id);
+            if (!e) return;
+            var isCustom = String(customValue || '').trim() !== '';
+            var def = String(AI_PROMPT_DEFAULT[kind] || '');
+            if (isCustom) {
+                e.value = String(customValue);
+                e.classList.remove('is-default');
+                e.removeAttribute('data-showing-default');
+            } else if (def) {
+                // 未自定义 → 预填默认原文，但仍标记"这是默认"
+                e.value = def;
+                e.classList.add('is-default');
+                e.setAttribute('data-showing-default', '1');
+            } else {
+                // 默认还没拉到，先留空等 aiLoadPrompts() 补
+                e.value = '';
+                e.classList.remove('is-default');
+            }
+            aiPromptRenderTag(id);
+        }
+
+        //: 拉取内置默认提示词，把所有「当前显示为默认」的框填上，并刷新标签。
+        async function aiLoadPrompts() {
+            if (AI_PROMPT_LOADED) return;
+            try {
+                var r = await apiGet('/api/ai/prompts');
+                if (r && r.ok && r.prompts) {
+                    AI_PROMPT_DEFAULT.analysis = String(r.prompts.analysis || '');
+                    AI_PROMPT_DEFAULT.chat = String(r.prompts.chat || '');
+                    AI_PROMPT_LOADED = true;
+                }
+            } catch (e) {
+                // 拉不到不是致命问题：框留空、语义仍正确（空 = 默认）
+                if (window.console) console.warn('默认提示词加载失败', e);
+            }
+            ['ai-system-prompt-custom', 'ai-chat-system-prompt-custom']
+                .forEach(function (id) {
+                    var e = el(id);
+                    if (!e) return;
+                    var kind = (id === 'ai-chat-system-prompt-custom')
+                        ? 'chat' : 'analysis';
+                    // 只补那些"看起来还没填过、且没被用户动过"的框
+                    var touched = e.getAttribute('data-touched') === '1';
+                    if (!touched && !e.value.trim()
+                        && String(AI_PROMPT_DEFAULT[kind] || '')) {
+                        e.value = AI_PROMPT_DEFAULT[kind];
+                        e.classList.add('is-default');
+                        e.setAttribute('data-showing-default', '1');
+                    }
+                    aiPromptRenderTag(id);
+                });
+        }
+
+        //: 一键恢复默认 = 把框重新填成**内置默认原文**（不是清空！）。
+        //: 清空的话用户就又看不到默认内容了，与"方便了解"的初衷相悖。
+        function aiResetPrompt(id) {
+            var e = el(id);
+            if (!e) return;
+            var kind = (id === 'ai-chat-system-prompt-custom') ? 'chat' : 'analysis';
+            var def = String(AI_PROMPT_DEFAULT[kind] || '');
+            if (!def) {
+                // 默认没拉到：退回"清空"，语义上依然等于恢复默认
+                e.value = '';
+                e.removeAttribute('data-showing-default');
+                e.classList.remove('is-default');
+                e.removeAttribute('data-touched');
+                aiStatus('ai-advanced-status',
+                         '已清空（等同默认）—— 点「保存高级设置」后生效', true);
+            } else {
+                e.value = def;
+                e.classList.add('is-default');
+                e.setAttribute('data-showing-default', '1');
+                e.removeAttribute('data-touched');
+                aiStatus('ai-advanced-status',
+                         '已恢复为内置默认 —— 点「保存高级设置」后生效', true);
+            }
+            aiPromptRenderTag(id);
+        }
+
+        //: 提交时决定这个框该发什么：
+        //:   · 内容 == 默认原文（或空）→ 发空串 → 后端当"用内置默认"
+        //:   · 其他 → 发用户内容 → 后端当"完全替换"
+        function aiPromptSubmitValue(id) {
+            var e = el(id);
+            if (!e) return '';
+            if (aiPromptIsDefault(id)) return '';
+            return String(e.value);
+        }
+
+        async function aiSaveAdvanced() {
+            aiStatus('ai-advanced-status', '保存中…');
+            var getV = function (id) { var e = el(id); return e ? String(e.value) : ''; };
+            var getB = function (id) { var e = el(id); return e ? !!e.checked : false; };
+            // ★ 提示词：框里若仍是默认原文，提交**空串**（= 用内置默认），
+            //   而不是把默认原文当成自定义内容存下来。否则默认提示词日后
+            //   一升级，服主就永远停在旧版，且面板上显示"已自定义"——误导。
+            var patch = {
+                ai_system_prompt_custom:
+                    aiPromptSubmitValue('ai-system-prompt-custom'),
+                chat_system_prompt_custom:
+                    aiPromptSubmitValue('ai-chat-system-prompt-custom'),
+                chat_enabled: getB('ai-chat-enabled'),
+                chat_max_tokens: Number(getV('ai-chat-max-tokens') || 512),
+                chat_temperature: Number(getV('ai-chat-temperature') || 0.7),
+                chat_max_chars: Number(getV('ai-chat-max-chars') || 500),
+                chat_min_interval: Number(getV('ai-chat-min-interval') || 0),
+                chat_daily_limit: Number(getV('ai-chat-daily-limit') || 0),
+                chat_allow_read_tools: getB('ai-chat-allow-read-tools'),
+                chat_context_turns: Number(getV('ai-chat-context-turns') || 0),
+                chat_context_max_chars: Number(getV('ai-chat-context-max-chars') || 300)
+            };
+            try {
+                var r = await apiPost('/api/ai/save', patch);
+                if (r && r.ok) {
+                    aiStatus('ai-advanced-status', '✓ 已保存', true);
+                    aiLoad();
+                } else {
+                    aiStatus('ai-advanced-status',
+                             '✗ ' + ((r && r.error) || '保存失败'), false);
+                }
+            } catch (e) {
+                aiStatus('ai-advanced-status', '✗ ' + e, false);
+            }
+        }
+
+        // ---- 撤销窗口 ----
+        // 第三级下 AI 执行的不可逆操作会在这里留下记录，窗口内可回滚。
+        // ★ 不可回滚的记录也要显示（并说明原因）——「做不到」必须如实说，
+        //   藏起来会让服主以为"没有这条操作"，比显示一条坏消息更糟。
+        async function aiLoadUndo() {
+            var box = el('ai-undo-box');
+            if (!box) return;
+            box.innerHTML = '<p class="hint">加载中…</p>';
+            try {
+                var r = await apiGet('/api/ai/undo');
+                if (!r || !r.ok) {
+                    box.innerHTML = '<p class="text-bad">' +
+                        botsEsc((r && r.error) || '读取失败') + '</p>';
+                    return;
+                }
+                aiRenderUndo(r.items || r.records || []);
+            } catch (e) {
+                box.innerHTML = '<p class="text-bad">读取失败: ' +
+                    botsEsc(String(e)) + '</p>';
+            }
+        }
+
+        function aiRenderUndo(records) {
+            var box = el('ai-undo-box');
+            if (!box) return;
+            if (!records.length) {
+                box.innerHTML = '<p class="hint">暂无记录。' +
+                    '只有第三级下执行不可逆操作时才会在这里留下可撤销项。</p>';
+                return;
+            }
+            var rows = records.map(function (rec) {
+                var st = String(rec.status || '');
+                var badge, extra = '';
+                if (st === 'undoable') {
+                    badge = '<span class="badge text-warn">可撤销 · 剩 ' +
+                            Number(rec.remaining || 0).toFixed(0) + ' 秒</span>';
+                    extra = '<button class="warn" onclick="aiUndo(\'' +
+                            botsEsc(rec.id) + '\')">↩ 回滚这一条</button>';
+                } else if (st === 'no_path_back') {
+                    badge = '<span class="badge text-bad">无法回滚</span>';
+                    extra = '<span class="hint-sm text-bad">' +
+                            botsEsc(rec.undo_why || '该操作没有留下回滚素材') +
+                            '</span>';
+                } else if (st === 'undone') {
+                    badge = '<span class="badge text-ok">已撤销</span>';
+                } else {
+                    badge = '<span class="badge">已过期</span>';
+                }
+                return '<div class="card">' +
+                    '<div class="hint-sm">' +
+                    '<span class="badge">' + botsEsc(rec.tool || '') + '</span> ' +
+                    badge + ' ' +
+                    '<span class="hint">' + botsEsc(rec.created_at || '') + '</span>' +
+                    '</div>' +
+                    '<div class="mt-sm">' + botsEsc(rec.summary || '') + '</div>' +
+                    (extra ? '<div class="mt-sm">' + extra + '</div>' : '') +
+                    '</div>';
+            }).join('');
+            box.innerHTML = rows;
+        }
+
+        async function aiUndo(id) {
+            if (!confirm('确认回滚这条操作？\n回滚会撤销 AI 刚才做的改动。')) return;
+            try {
+                var r = await apiPost('/api/ai/undo/rollback', { id: id });
+                if (r && r.ok) {
+                    alert('已回滚：' + (r.message || '完成'));
+                    aiLoadUndo();
+                } else {
+                    alert('回滚失败：' + ((r && r.error) || '未知错误'));
+                }
+            } catch (e) { alert('回滚失败: ' + e); }
+        }
+
+        //: 改接管级别 —— 走独立的 /api/ai/autonomy 接口（后端单独处理，
+        //: 不跟普通配置混在一起）。改完立刻重载状态。
+        async function aiSetAutonomy(level) {
+            var msg = {
+                0: '切到「第一级 · 纯建议」？模型将不再执行任何操作。',
+                1: '切到「第二级 · 白名单自动」？只读与可逆操作会由 AI 直接执行。',
+                2: '切到「第三级 · 完全放开」？\n\n' +
+                   '★ AI 将可以直接删除玩家数据、修改服务器属性，不需要你确认。\n' +
+                   '执行后有撤销窗口可以回滚，但窗口一过就真的不可逆了。\n\n确认切换？'
+            }[Number(level)] || '切换接管级别？';
+            if (!confirm(msg)) { aiLoad(); return; }
+            try {
+                var r = await apiPost('/api/ai/autonomy', { level: Number(level) });
+                if (r && r.ok) {
+                    aiStatus('ai-status', '✓ 接管级别已切换', true);
+                    aiLoad();
+                } else {
+                    aiStatus('ai-status', '✗ ' + ((r && r.error) || '切换失败'), false);
+                }
+            } catch (e) {
+                aiStatus('ai-status', '✗ ' + e, false);
+            }
+        }
+
+        //:   静态文案已收进问号浮层，这里改成独立渲染，不再依赖页面初始内容。
+        //:   元素仍在 AI 页（默认 hidden），有状态变化时自动显形。
+        function aiRenderGuard(s) {
+            var box = el('ai-guard-note');
+            if (!box || !s) return;
+            // ★ v7.9：影子模式被三级接管取代，说明文案随之更新。
+            //   优先用 autonomy_level；缺失时回退到旧 shadow_mode 判断，
+            //   保证老缓存页面也能显示合理文案。
+            var lv = (s.autonomy_level == null)
+                ? (s.shadow_mode ? 0 : 1) : Number(s.autonomy_level);
+            var extra = AI_AUTONOMY_HINTS[lv] ||
+                '<b class="text-warn">未知接管级别：</b>请刷新页面。';
+            box.innerHTML = '<b>安全边界：</b>模型只能「建议」，不能直接改服务器。' + extra;
+            box.classList.remove('hidden');
+        }
+
+        function aiRenderLast(r) {
+            var box = el('ai-last-result');
+            if (!box) return;
+            if (!r) { box.innerHTML = '<p class="hint">还没有分析结果</p>'; return; }
+            var head = '<div class="hint-sm mb-sm">' +
+                '<span class="badge">' + botsEsc(r.task || '') + '</span> ' +
+                (r.ts ? botsEsc(new Date(r.ts * 1000).toLocaleString()) : '') +
+                (r.ok ? ' <span class="text-ok">✓ 成功</span>'
+                      : ' <span class="text-bad">✗ 失败</span>') + '</div>';
+            var body = '';
+            if (r.error) body += '<div class="text-bad">' + botsEsc(r.error) + '</div>';
+            if (r.text) body += '<pre class="ai-result-pre">' + botsEsc(r.text) + '</pre>';
+            if (r.actions && r.actions.length) {
+                body += '<div class="hint-sm mt-sm">本轮工具调用：' +
+                        r.actions.map(function (a) {
+                            return '<span class="badge">' + botsEsc(a.tool || '') + '</span>';
+                        }).join(' ') + '</div>';
+            }
+            box.innerHTML = head + body;
+        }
+
+        function aiGather() {
+            var getV = function (id) { var e = el(id); return e ? String(e.value).trim() : ''; };
+            var getB = function (id) { var e = el(id); return e ? !!e.checked : false; };
+            var patch = {
+                enabled: getB('ai-enabled'),
+                // ★ shadow_mode 不再由前端提交 —— 它已被 autonomy_level 取代，
+                //   由 /api/ai/autonomy 单独管理。保留旧字段会让升级路径
+                //   出现"两个真源打架"（迁移逻辑 vs 前端布尔）。
+                base_url: getV('ai-base-url'),
+                model: getV('ai-model'),
+                timeout: Number(getV('ai-timeout') || 45),
+                max_log_lines: Number(getV('ai-max-lines') || 120),
+                min_interval: Number(getV('ai-min-interval') || 0),
+                daily_limit: Number(getV('ai-daily-limit') || 0),
+                // ★ 撤销窗口属于"普通配置"，随「保存配置」一起提交没问题
+                //   （它与提示词/聊天参数不同，没有"空串=清空"的歧义）。
+                //   接管级别**不在这里** —— 它走独立的 /api/ai/autonomy，
+                //   避免"改个超时顺带把级别也改了"。
+                undo_window_seconds: Number(getV('ai-undo-window') || 30),
+                enable_log_analysis: getB('ai-cap-logs'),
+                enable_whitelist_review: getB('ai-cap-wl'),
+                enable_auto_manage: getB('ai-cap-auto')
+            };
+            // ★ 这里**故意不包含 allowed_tools**。
+            //   工具权限有自己的保存按钮（aiToolsSave），走同一个
+            //   /api/ai/save 接口但只带 allowed_tools 一个字段。
+            //   后端是"payload 里有的字段才改"，所以：
+            //     · 点「保存配置」→ 不动工具权限；
+            //     · 点「保存工具权限」→ 不动其他配置。
+            //   如果这里把 allowed_tools 也带上，用户改个超时就会
+            //   顺带把工具权限重置掉 —— 那是个很难查的"改了别的丢了这个"。
+            //
+            // ★ 只有真的填了新 key 才提交 api_key。留空 = 不改动，
+            //   绝不能把空串或掩码当"新 key"发过去。
+            var k = getV('ai-api-key');
+            if (k) patch.api_key = k;
+            return patch;
+        }
+
+        async function aiSave() {
+            aiStatus('ai-status', '保存中…');
+            try {
+                var r = await apiPost('/api/ai/save', aiGather());
+                if (r && r.ok) {
+                    aiStatus('ai-status', '✓ 已保存', true);
+                    aiLoad();
+                } else {
+                    aiStatus('ai-status', '✗ ' + ((r && r.error) || '保存失败'), false);
+                }
+            } catch (e) {
+                aiStatus('ai-status', '✗ ' + e, false);
+            }
+        }
+
+        async function aiTest() {
+            aiStatus('ai-test-status', '测试中…（要发一次真实请求，可能要几秒）');
+            try {
+                var r = await apiPost('/api/ai/test', {});
+                if (r && r.ok) {
+                    aiStatus('ai-test-status', '✓ ' + (r.message || '连接成功'), true);
+                } else {
+                    aiStatus('ai-test-status', '✗ ' + ((r && r.error) || '连接失败'), false);
+                }
+            } catch (e) {
+                aiStatus('ai-test-status', '✗ ' + e, false);
+            }
+        }
+
+        async function aiRun(task) {
+            var label = { log_analysis: '日志分析', whitelist_review: '白名单审核',
+                          auto_manage: '自动巡查' }[task] || task;
+            aiStatus('ai-run-status', label + ' 已提交，正在后台执行…');
+            try {
+                var r = await apiPost('/api/ai/run', { task: task });
+                if (r && r.ok) {
+                    aiStatus('ai-run-status', '✓ ' + (r.message || '已开始'), true);
+                    aiWatch();
+                } else {
+                    aiStatus('ai-run-status', '✗ ' + ((r && r.error) || '启动失败'), false);
+                }
+            } catch (e) {
+                aiStatus('ai-run-status', '✗ ' + e, false);
+            }
+        }
+
+        //: 分析在后台线程跑，UI 轮询状态直到结束。
+        //: ★ 必须有结束条件（最多 5 分钟），否则一次失败的
+        //:   "running 没复位"会让定时器永远转下去。
+        function aiWatch() {
+            if (AI_STATUS_TIMER) { clearInterval(AI_STATUS_TIMER); AI_STATUS_TIMER = null; }
+            var deadline = Date.now() + 5 * 60 * 1000;
+            AI_STATUS_TIMER = setInterval(async function () {
+                if (Date.now() > deadline) {
+                    clearInterval(AI_STATUS_TIMER); AI_STATUS_TIMER = null;
+                    aiStatus('ai-run-status', '分析时间过长，已停止等待（可点刷新看结果）', false);
+                    return;
+                }
+                try {
+                    var r = await apiGet('/api/ai/status');
+                    if (!r || !r.ok) return;
+                    var s = r.status || {};
+                    if (s.running) {
+                        aiStatus('ai-run-status', '分析中…（已等待 ' +
+                                 Math.round((5 * 60 * 1000 - (deadline - Date.now())) / 1000) + ' 秒）');
+                        return;
+                    }
+                    clearInterval(AI_STATUS_TIMER); AI_STATUS_TIMER = null;
+                    aiStatus('ai-run-status', '✓ 分析完成', true);
+                    aiLoad();
+                    aiLoadAudit();
+                } catch (e) { /* 轮询失败不打断 */ }
+            }, 2000);
+        }
+
+        async function aiBroadcast() {
+            aiStatus('ai-broadcast-status', '推送中…');
+            try {
+                var r = await apiPost('/api/ai/broadcast', {});
+                if (r && r.ok) {
+                    aiStatus('ai-broadcast-status', '✓ ' + (r.message || '已播报'), true);
+                } else {
+                    aiStatus('ai-broadcast-status', '✗ ' + ((r && r.error) || '播报失败'), false);
+                }
+            } catch (e) {
+                aiStatus('ai-broadcast-status', '✗ ' + e, false);
+            }
+        }
+
+        async function aiLoadAudit() {
+            var box = el('ai-audit-box');
+            if (!box) return;
+            try {
+                var r = await apiGet('/api/ai/audit');
+                if (!r || !r.ok) {
+                    box.innerHTML = '<p class="hint text-bad">' +
+                        botsEsc((r && r.error) || '读取失败') + '</p>';
+                    return;
+                }
+                var items = r.proposals || [];
+                if (!items.length) {
+                    box.innerHTML = '<p class="hint">没有待确认的提议。' +
+                        '模型想做危险操作时会出现在这里。</p>';
+                    return;
+                }
+                box.innerHTML = items.map(function (p) {
+                    var pending = String(p.status || '') === 'pending';
+                    var btn = pending
+                        ? '<button onclick="aiConfirm(' + jsArg(p.id) + ')">✅ 确认执行</button>' +
+                          '<button class="danger" onclick="aiReject(' + jsArg(p.id) + ')">✖ 驳回</button>'
+                        : '<span class="badge">' + botsEsc(p.status || '') + '</span>';
+                    return '<div class="card">' +
+                        '<div class="row"><b class="break spacer">' + botsEsc(p.tool || '') + '</b>' +
+                        '<span class="badge">' + botsEsc(p.id || '') + '</span></div>' +
+                        '<div class="hint-sm break">' + botsEsc(p.summary || '') + '</div>' +
+                        (p.created_at ? '<div class="hint-sm">提出于 ' + botsEsc(p.created_at) + '</div>' : '') +
+                        (p.result ? '<div class="hint-sm">结果：' + botsEsc(p.result) + '</div>' : '') +
+                        '<div class="row mt">' + btn + '</div>' +
+                        '</div>';
+                }).join('');
+            } catch (e) {
+                box.innerHTML = '<p class="hint text-bad">读取失败: ' + botsEsc(String(e)) + '</p>';
+            }
+        }
+
+        async function aiConfirm(id) {
+            if (!confirm('确认执行这条提议？\n\n不可逆操作执行后无法撤销。\n提议 ' + id)) return;
+            try {
+                var r = await apiPost('/api/ai/audit/confirm', { id: id });
+                if (r && r.ok) { aiLoadAudit(); aiLoad(); }
+                else alert('执行失败：' + ((r && r.error) || '未知错误'));
+            } catch (e) { alert('执行失败: ' + e); }
+        }
+
+        async function aiReject(id) {
+            try {
+                var r = await apiPost('/api/ai/audit/reject', { id: id });
+                if (r && r.ok) aiLoadAudit();
+                else alert('驳回失败：' + ((r && r.error) || '未知错误'));
+            } catch (e) { alert('驳回失败: ' + e); }
+        }
+
+        // ---- 工具权限 ----
+        // 后端语义（务必对齐，否则前端会显示错的勾选状态）：
+        //   · allowed_tools 为空列表 = **未配置 = 不做过滤 = 全部可用**
+        //     —— 不是"一个都不允许"。所以首次进入时所有开关都该是勾上的。
+        //   · 用户一旦取消勾选任意一个，就变成"白名单模式"，
+        //     此后只有被勾上的才可用。
+        //   · 影子模式是**独立硬闸门**，与权限是 AND 关系：
+        //     勾了也不会执行。所以对"勾了但被影子挡住"的工具要显式提示，
+        //     否则用户会以为权限功能坏了。
+        var AI_TOOL_CACHE = null;      // 最近一次拉到的工具清单
+        var AI_TOOL_FILTER_ON = false; // 当前是否处于"白名单模式"
+
+        async function aiLoadTools() {
+            var box = el('ai-tools-box');
+            if (!box) return;
+            box.innerHTML = '<p class="hint">加载中…</p>';
+            try {
+                var r = await apiGet('/api/ai/tools');
+                if (!r || !r.ok) {
+                    box.innerHTML = '<p class="text-bad">' +
+                        botsEsc((r && r.error) || '读取失败') + '</p>';
+                    return;
+                }
+                AI_TOOL_CACHE = r.tools || [];
+                AI_TOOL_FILTER_ON = AI_TOOL_CACHE.some(function (t) {
+                    return t.explicit;
+                });
+                aiRenderTools();
+            } catch (e) {
+                box.innerHTML = '<p class="text-bad">读取失败: ' +
+                    botsEsc(String(e)) + '</p>';
+            }
+        }
+
+        function aiRenderTools() {
+            var box = el('ai-tools-box');
+            if (!box || !AI_TOOL_CACHE) return;
+
+            var byRisk = { read: [], reversible: [], irreversible: [] };
+            AI_TOOL_CACHE.forEach(function (t) {
+                (byRisk[t.risk] || byRisk.read).push(t);
+            });
+
+            var head = '<div class="hint-sm mb-sm">' +
+                (AI_TOOL_FILTER_ON
+                    ? '当前是<b>白名单模式</b>：只有勾选的工具模型才能用。' +
+                      '把某个工具的勾去掉，模型就完全看不到它。'
+                    : '当前<b>未限制</b>：全部工具都可用。' +
+                      '取消任意一项的勾选即可切换到白名单模式。') +
+                ' <button class="link-btn" onclick="aiToolsSelectAll(true)">全选</button>' +
+                ' <button class="link-btn" onclick="aiToolsSelectAll(false)">全不选</button>' +
+                '</div>';
+
+            // 影子模式提示：列出"勾了但动不了"的工具
+            var st = window._aiLastStatus;
+            var blocks = (st && st.shadow_blocks) || [];
+            if (blocks.length) {
+                head += '<div class="callout-warn mt-sm">' +
+                    '<b>⚠ 影子模式正在拦截 ' + blocks.length + ' 个已启用的工具</b>' +
+                    '<div class="hint-sm mt-xs">这些工具已勾选，但影子模式不会让它们执行：' +
+                    blocks.map(function (b) {
+                        return '<span class="badge">' + botsEsc(b.name) + '</span>';
+                    }).join(' ') +
+                    '<br>关掉影子模式后它们才会真正生效。</div></div>';
+            }
+
+            var html = '';
+            [['read', '只读', '直接执行，不改动任何数据'],
+             ['reversible', '可逆', '执行并留审计，可以撤回来'],
+             ['irreversible', '不可逆', '永远需要你点确认才会执行']].forEach(function (g) {
+                var key = g[0], list = byRisk[key] || [];
+                if (!list.length) return;
+                html += '<h4 class="mt">' +
+                    aiRiskLabel(key) + ' ' + botsEsc(g[1]) +
+                    ' <span class="hint-sm">' + botsEsc(g[2]) + '</span></h4>';
+                list.forEach(function (t) {
+                    var rid = 'ai-tool-' + t.name;
+                    // 白名单模式下勾选状态 = t.enabled；未限制时全勾
+                    var on = AI_TOOL_FILTER_ON ? !!t.enabled : true;
+                    html += '<div class="row row-tight">' +
+                        '<label class="ios status" title="' + botsEsc(t.desc || '') + '">' +
+                        '<input type="checkbox" id="' + rid + '"' +
+                        (on ? ' checked' : '') +
+                        ' onchange="aiToolToggle()"><i></i> ' +
+                        '<code>' + botsEsc(t.name) + '</code></label>' +
+                        '<span class="hint-sm break spacer">' + botsEsc(t.desc || '') +
+                        (t.requires_confirm
+                            ? ' <span class="badge text-warn">需人工确认</span>' : '') +
+                        '</span></div>';
+                });
+            });
+
+            html += '<div class="row mt">' +
+                '<button class="ok" onclick="aiToolsSave()">💾 保存工具权限</button>' +
+                '<span id="ai-tools-status" class="hint-sm"></span></div>';
+
+            box.innerHTML = head + html;
+        }
+
+        //: 用户动了任意开关 → 立即进入白名单模式。
+        //: 这一步很关键：如果「取消第一个勾」时不切模式，
+        //: 前端会一直按"未限制=全勾"渲染，用户的取消操作看起来无效。
+        function aiToolToggle() {
+            AI_TOOL_FILTER_ON = true;
+            var st = el('ai-tools-status');
+            if (st) {
+                st.textContent = '已修改，记得点「保存工具权限」';
+                st.className = 'hint-sm text-warn';
+            }
+        }
+
+        function aiToolsSelectAll(on) {
+            if (!AI_TOOL_CACHE) return;
+            AI_TOOL_CACHE.forEach(function (t) {
+                var e = el('ai-tool-' + t.name);
+                if (e) e.checked = !!on;
+            });
+            AI_TOOL_FILTER_ON = true;
+            aiToolToggle();
+        }
+
+        function aiToolsCollect() {
+            if (!AI_TOOL_CACHE) return [];
+            if (!AI_TOOL_FILTER_ON) return [];   // 空 = 未限制
+            var out = [];
+            AI_TOOL_CACHE.forEach(function (t) {
+                var e = el('ai-tool-' + t.name);
+                if (e && e.checked) out.push(t.name);
+            });
+            return out;
+        }
+
+        async function aiToolsSave() {
+            var st = el('ai-tools-status');
+            function set(m, bad) {
+                if (!st) return;
+                st.textContent = m;
+                st.className = 'hint-sm ' + (bad ? 'text-bad' : 'text-ok');
+            }
+            var names = aiToolsCollect();
+            try {
+                var r = await apiPost('/api/ai/save', { allowed_tools: names });
+                if (r && r.ok) {
+                    // 保存后必须重拉：后端会做规范化（丢未知名字），
+                    // 前端要按规范化后的结果重新渲染，否则界面和实际不一致。
+                    set('已保存（' + (names.length || '全部') +
+                        (names.length ? ' 个工具' : '工具，未限制') + '）', false);
+                    await aiLoadTools();
+                    aiLoad();
+                } else {
+                    set('保存失败：' + ((r && r.error) || '未知错误'), true);
+                }
+            } catch (e) { set('保存失败: ' + e, true); }
         }
 
         // ==================== 子插件（.gmmod / .gmlib） ====================
@@ -2953,18 +5419,88 @@
         }
 
         // ==================== 模组管理器 ====================
-        async function loadMods(opts) {
+        //
+        // ★ 为什么改成手动刷新
+        // --------------------
+        // 「待安装」栏要读上传库 + 实时遍历 mods/inbox/，
+        // 「存档启用状态」栏要遍历 resource_packs/、behavior_packs/，
+        // 再逐个读 manifest.json，还要读两个 world_*_packs.json。
+        // 在装了几百个包的服务器上这是一次不小的磁盘遍历 ——
+        // 每次切进这个板块都扫一遍毫无意义（内容几乎不变），
+        // 所以改成**只在点刷新时扫**，切板块时只重绘上次的结果。
+        //
+        // 分工：
+        //   scanMods()   —— 真正发请求（唯一的网络入口）
+        //   renderMods() —— 只读缓存重绘，不发请求
+        //   loadMods()   —— 兼容旧调用点，等价于 scanMods()
+
+        //: 上次扫描的结果快照。null = 从未扫过。
+        let modCache = null;
+
+        async function scanMods(opts) {
             const st = el('mods-status');
             const wantWorld = (opts && opts.world) || currentModWorld || '';
+            if (st) { st.textContent = '扫描中…'; st.className = 'status text-warn'; }
             try {
                 const qs = wantWorld ? ('?world=' + encodeURIComponent(wantWorld)) : '';
                 const r = await apiGet('/api/mods' + qs);
                 if (!r || !r.ok) throw new Error((r && r.error) || '加载失败');
+                modCache = r;
+                modCache._at = new Date();
+                renderMods();
+                if (st) { st.className = 'status text-ok'; }
+            } catch (e) {
+                if (st) { st.textContent = '✗ ' + e; st.className = 'status text-bad'; }
+            }
+        }
+
+        //: 兼容旧调用点（上传完 / 开关完 / 删除完都要重新扫一次）
+        async function loadMods(opts) {
+            return scanMods(opts);
+        }
+
+        //: 正在安装中的文件名。列表每次轮询都会**整块重建 innerHTML**，
+        //: 重建出来的按钮是全新的 DOM，disabled 自然丢了 —— 于是大包解压的
+        //: 十几秒里，用户完全可以在同一行上再点一次「🛠 安装」。两次安装会
+        //: 并发写同一个目标目录，而且和「装完即删源文件」互相打架。
+        //: 所以「谁在装」要记在函数外的变量上，由 renderMods 重建时补回禁用态。
+        var installingMods = {};
+
+        //: 只重绘，不请求。从未扫过时给出明确提示而不是空白。
+        function renderMods() {
+            const st = el('mods-status');
+
+            if (modCache === null) {
+                if (el('mod-uploaded-count')) el('mod-uploaded-count').textContent = '0';
+                const lb = el('mod-library-box');
+                if (lb) lb.innerHTML = '<p class="empty">尚未扫描。点上方「🔄 刷新」开始扫描。</p>';
+                const box = el('mod-pack-groups');
+                if (box) box.innerHTML = '<p class="empty">尚未扫描。点上方「🔄 刷新」开始扫描。</p>';
+                const metaEl = el('mod-world-meta');
+                if (metaEl) metaEl.innerHTML = '<span class="hint">点「🔄 刷新」读取该存档的模组启用状态</span>';
+                if (st) { st.textContent = '未扫描'; st.className = 'status'; }
+                return;
+            }
+            const r = modCache;
+            {
                 const worlds = r.worlds || [];
                 const meta = r.meta || {};
-                currentModWorld = meta.world || wantWorld || '';
+                currentModWorld = meta.world || currentModWorld || '';
 
                 if (el('mod-uploaded-count')) el('mod-uploaded-count').textContent = String((r.uploaded || []).length);
+
+                // 手动投放目录提示：大包走不了 HTTP 上传，这是唯一的兜底入口。
+                const inboxEl = el('mod-inbox-hint');
+                if (inboxEl) {
+                    if (r.inbox_dir) {
+                        inboxEl.innerHTML = '💡 大文件上传不了？用文件管理器把 .mcaddon / .mcpack '
+                            + '拷进下面这个目录，刷新即可见：<br><code class="break">'
+                            + esc(r.inbox_dir) + '</code><br>'
+                            + '<span class="text-mute">安装成功的包会自动从该目录移走；安装失败会原样保留，方便你修正后重试。</span>';
+                    } else {
+                        inboxEl.innerHTML = '';
+                    }
+                }
 
                 // 上传库
                 const ups = r.uploaded || [];
@@ -2983,13 +5519,26 @@
                             // 磁盘名是 ASCII 化的，界面显示登记时的原始名（可含中文）
                             const label = u.name || u.file;
                             const sub = (label !== u.file) ? ('<br><small class="text-mute">磁盘名 ' + esc(u.file) + '</small>') : '';
+                            // inbox 条目要标出来：它不受「上传」概念约束，用户
+                            // 手动放进去的东西和他自己传的要能一眼分开。
+                            const tag = (u.source === 'inbox')
+                                ? '<span class="tag-ok" title="来自手动投放目录（mods/inbox）">📁 手动投放</span> '
+                                : '';
+                            // 正在装的这一行：重建后也要保持禁用 + 「⏳ 安装中」，
+                            // 否则轮询每 800ms 就把按钮"解锁"一次。
+                            const busy = !!installingMods[raw];
+                            const btnHtml = !u.exists
+                                ? '<span class="text-bad">文件缺失</span>'
+                                : (busy
+                                    ? '<button class="ok" disabled>⏳ 安装中</button>'
+                                    : '<button class="ok" onclick="installMod(this)">🛠 安装</button>');
                             return '<div class="mod-row card card-sm" data-file="' + attr + '">'
                                 + '<div class="list-item break">'
-                                + '<span>📦 ' + esc(label) + '<br><small class="text-accent">' + fmtBytes(u.size) + '　' + esc(u.uploaded || '') + '</small>' + sub + '</span>'
-                                + '<button onclick="deleteMod(' + jsArg + ')" title="从上传库删除">🗑</button></div>'
+                                + '<span>' + tag + '📦 ' + esc(label) + '<br><small class="text-accent">' + fmtBytes(u.size) + '　' + esc(u.uploaded || '') + '</small>' + sub + '</span>'
+                                + '<button onclick="deleteMod(' + jsArg + ')" title="从待安装列表删除">🗑</button></div>'
                                 + '<div class="row mt-xs">'
                                 + '<select class="mod-target block-input">' + opts2 + '</select>'
-                                + (u.exists ? '<button class="ok" onclick="installMod(this)">🛠 安装</button>' : '<span class="text-bad">文件缺失</span>')
+                                + btnHtml
                                 + '</div></div>';
                         }).join('');
                     }
@@ -3011,14 +5560,22 @@
 
                 // 存档元信息：两个 JSON 的实际路径
                 const metaEl = el('mod-world-meta');
+                // 教育模式（化学）模组：磁盘上还在，只是不在界面里显示。
+                // 必须明确告诉用户「藏了几个」，否则他会以为包丢了。
+                const eduN = Number(meta.education_hidden || 0);
+                const eduLine = eduN > 0
+                    ? ('<br><span class="text-mute" title="' + escAttr((meta.education_names || []).join('、'))
+                       + '">🧪 已自动隐藏 ' + eduN + ' 个教育版（化学）模组，文件仍在磁盘上未被删除</span>')
+                    : '';
                 if (metaEl) {
                     if (!meta.world) {
-                        metaEl.innerHTML = '<span class="text-warn">未定位到存档，无法读取启用状态</span>';
+                        metaEl.innerHTML = '<span class="text-warn">未定位到存档，无法读取启用状态</span>' + eduLine;
                     } else {
                         const src = meta.world_source === 'given' ? '指定存档' : 'server.properties 的 level-name';
                         metaEl.innerHTML = '存档 <b>' + esc(meta.world) + '</b>（来源：' + src + '）　'
                             + '资源包 <b>' + (meta.enabled_resource || []).length + '</b> 个已启用 · '
-                            + '行为包 <b>' + (meta.enabled_behavior || []).length + '</b> 个已启用';
+                            + '行为包 <b>' + (meta.enabled_behavior || []).length + '</b> 个已启用'
+                            + eduLine;
                     }
                 }
 
@@ -3027,11 +5584,21 @@
                 const res = (r.resource_packs || []).length;
                 const beh = (r.behavior_packs || []).length;
                 if (st) {
-                    st.textContent = '✓ ' + ups.length + ' 个已上传 / 资源包 ' + res + ' · 行为包 ' + beh;
+                    st.textContent = '✓ ' + ups.length + ' 个待安装 / 资源包 ' + res + ' · 行为包 ' + beh
+                        + (eduN > 0 ? (' · 已隐藏教育版 ' + eduN) : '')
+                        + (r._at ? ('　上次扫描 ' + fmtClock(r._at)) : '');
                     st.className = 'status text-ok';
                 }
+            }
+        }
+
+        //: 「上次扫描 14:32:05」——只显示时间，同一天内够用了。
+        function fmtClock(d) {
+            try {
+                const p = function (n) { return (n < 10 ? '0' : '') + n; };
+                return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
             } catch (e) {
-                if (st) { st.textContent = '✗ ' + e; st.className = 'status text-bad'; }
+                return '';
             }
         }
 
@@ -3160,26 +5727,88 @@
             }
         }
 
+        //: 安装是**后台异步**的：接口立刻返回「已提交」，真正解压落盘要几秒。
+        //: 所以这里不能用固定的 setTimeout(…, 2500)：
+        //:   · 大包（几十 MB）解压慢，2.5 秒大概率还没装完，界面刷新出来
+        //:     仍是旧数据，「待安装」里那个包还在 —— 用户以为没装上，又点一次；
+        //:   · 小包则白等 2.5 秒。
+        //: 改成轮询：反复扫，直到该文件从「待安装」列表消失（=安装成功并清理了
+        //: 源文件），或者出现明确失败。
+        //:
+        //: ★ 为什么不能只靠「文件消失」判断成功：装失败时源文件是**故意保留**的，
+        //:   那时文件一直在列表里，光等消失会一路等到超时。所以轮询同时看两件事：
+        //:   文件没了 → 成功；超时了但文件还在 → 提示用户看服务端日志。
+        async function waitModInstall(file, btn) {
+            const st = el('mod-upload-status');
+            for (let i = 0; i < 20; i++) {
+                await new Promise(function (r) { setTimeout(r, 800); });
+                //: 每轮都刷新状态栏：大包（几十 MB）解压要十几秒，期间文案如果
+                //: 一直停在「🛠 正在后台安装」，用户分不清是在跑还是卡死了
+                //: —— 于是又点一次安装。这里显示「已等待 Ns」让他看得见进度。
+                if (st) {
+                    st.textContent = '⏳ 安装中…（已等待 ' + Math.round((i + 1) * 0.8) + 's）';
+                    st.className = 'status text-warn';
+                }
+                await loadMods();
+                const still = ((modCache && modCache.uploaded) || []).some(function (u) {
+                    return String(u.file) === String(file);
+                });
+                if (!still) return true;          // 源文件已被清理 → 装完了
+            }
+            return false;
+        }
+
         async function installMod(btn) {
             const row = btn && btn.closest ? btn.closest('.mod-row') : null;
             if (!row) return;
             const file = row.getAttribute('data-file');
+            // 双保险：即使 DOM 上的 disabled 因某次重绘丢了，这里也拦住第二次提交。
+            if (installingMods[file]) return;
             const sel = row.querySelector('.mod-target');
             const val = sel ? sel.value : 'global';
             const payload = { file: file, target: ('global' === val ? 'global' : 'world'), world: ('global' === val ? '' : val) };
             const st = el('mod-upload-status');
+
+            // 安装期间禁用按钮：同一个包并发点两次会让两次安装互相覆盖目标
+            // 目录，也和「装完即删源文件」冲突（后一次可能撞上文件已被删）。
+            // ★ 光设 btn.disabled 不够：轮询里的 loadMods() 会把整个列表
+            //   innerHTML 重建，按钮被换成新的。所以还要登记到 installingMods，
+            //   由 renderMods 在每次重建时把禁用态补回来。
+            const btnText = btn ? btn.textContent : '';
+            installingMods[file] = true;
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 安装中'; }
             if (st) { st.textContent = '安装中…'; st.className = 'status text-warn'; }
             try {
                 const r = await apiPost('/api/mod/install', payload);
-                if (st) { st.textContent = r.ok ? ('🛠 ' + (r.message || '开始安装')) : ('✗ ' + (r.error || r.message)); st.className = r.ok ? 'status text-ok' : 'status text-bad'; }
-                setTimeout(loadMods, 2500);
+                if (!r.ok) {
+                    if (st) { st.textContent = '✗ ' + (r.error || r.message || '安装失败'); st.className = 'status text-bad'; }
+                    return;
+                }
+                if (st) { st.textContent = '🛠 ' + (r.message || '开始安装'); st.className = 'status text-warn'; }
+                const done = await waitModInstall(file, btn);
+                if (st) {
+                    st.textContent = done
+                        ? '✓ 已安装，安装包已从待安装列表移除'
+                        : '⚠ 安装仍在进行或已失败，请查看服务端日志（安装包已保留以便重试）';
+                    st.className = done ? 'status text-ok' : 'status text-warn';
+                }
             } catch (e) {
                 if (st) { st.textContent = '安装失败: ' + e; st.className = 'status text-bad'; }
+            } finally {
+                delete installingMods[file];
+                // 按钮所在的 DOM 会随列表重绘被替换掉，此时 btn 已脱离文档，
+                // 改它没有意义也不会报错 —— 直接判断 isConnected。
+                if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = btnText; }
+                // 收尾必重绘一次：否则「安装中」的禁用态会一直挂在列表上
+                // （installingMods 已清空，但 DOM 还是旧的那份）。
+                if (modCache) renderMods();
             }
         }
 
         async function deleteMod(file) {
-            if (!confirm('确认从服务器删除该上传文件？')) return;
+            // inbox 里的文件是用户自己拷进去的，删掉不影响他本地的原件，
+            // 但还是要确认一次：这个目录也是「待处理」队列。
+            if (!confirm('确认从服务器删除该文件？\n（仅删除服务器上的副本，你本地的原件不受影响）')) return;
             try {
                 const r = await apiPost('/api/mod/delete', { file: String(file) });
                 const st = el('mod-upload-status');
@@ -3237,6 +5866,7 @@
                     '  <div class="row">' +
                     '    <b class="break spacer">' + botsEsc(c.name) + (isPrimary ? ' <span class="text-warn">★ 主</span>' : '') + '</b>' +
                     '    <span class="badge">' + (typeLabel[c.type] || c.type) + '</span>' +
+                    '    <span class="badge ' + botPurposeTone(c.purpose) + '" title="' + botsEsc(botPurposeHint(c.purpose)) + '">🎯 ' + botsEsc(c.purpose_label || botPurposeLabel(c.purpose)) + '</span>' +
                     '    <span class="badge ' + botsBadgeTone(c) + '">● ' + badge + '</span>' +
                     '  </div>' +
                     '  <div class="hint-sm break">' + extra + '</div>' +
@@ -3269,6 +5899,10 @@
                     '  <div><label class="field-label">AppSecret</label><input id="bots-c-secret" type="password" placeholder="机器人 AppSecret" class="block-input"></div>' +
                     '  <div><label class="field-label">环境</label><select id="bots-c-env" class="block-input"><option value="formal">正式</option><option value="sandbox">沙箱</option></select></div>' +
                     '</div>' +
+                    '<div class="mt-sm"><label class="field-label">用途</label>' +
+                    '<select id="bots-c-purpose" class="block-input">' +
+                    BOT_PURPOSES.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + ' —— ' + x[2] + '</option>'; }).join('') +
+                    '</select></div>' +
                     '<div class="row mt">' +
                     '  <button class="ok" onclick="botsCreateSubmit()">✓ 创建</button>' +
                     '  <button onclick="botsCreateClose()">取消</button>' +
@@ -3285,6 +5919,10 @@
                     '  <div><label class="field-label">AccessToken（可选）</label><input id="bots-c-token" type="password" placeholder="留空不校验" class="block-input"></div>' +
                     '  <div><label class="field-label">机器人QQ号</label><input id="bots-c-qq" type="number" placeholder="机器人 QQ" class="block-input"></div>' +
                     '</div>' +
+                    '<div class="mt-sm"><label class="field-label">用途</label>' +
+                    '<select id="bots-c-purpose" class="block-input">' +
+                    BOT_PURPOSES.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + ' —— ' + x[2] + '</option>'; }).join('') +
+                    '</select></div>' +
                     '<div class="hint-sm mt-sm">创建后请在卡片「编辑」中填写群绑定(main_group)与管理员QQ，启用后即可互通。</div>' +
                     '<div class="row mt">' +
                     '  <button class="ok" onclick="botsCreateSubmit()">✓ 创建</button>' +
@@ -3301,7 +5939,7 @@
         async function botsCreateSubmit() {
             const atype = (el('bots-new-type') || {}).value || 'qqofficial';
             const getName = function (id) { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
-            const patch = { type: atype, name: getName('bots-c-name') || undefined };
+            const patch = { type: atype, name: getName('bots-c-name') || undefined, purpose: getName('bots-c-purpose') || 'bridge' };
             const st = el('bots-c-status');
             if (atype === 'qqofficial') {
                 Object.assign(patch, { app_id: getName('bots-c-appid'), app_secret: getName('bots-c-secret'), env: getName('bots-c-env') || 'formal' });
@@ -3345,6 +5983,43 @@
         }
 
         // ============ 机器人编辑弹窗（单「编辑」按钮完整配置） ============
+        //: 机器人用途三选一。★ 这里的取值必须与后端 connections.py 的
+        //: PURPOSE_* 常量严格一致 —— 后端校验器对未知值会**直接报错**，
+        //: 用户一保存就会看到"用途只能为 bridge/broadcast/reserved"。
+        //: 所以下面这份表是硬编码的，不从接口动态拉（接口那份是给渲染用的，
+        //: 真出问题要能一眼看出前端写的是什么）。
+        var BOT_PURPOSES = [
+            ['bridge', '群服互通', '游戏与 QQ 群之间转发消息（默认）'],
+            ['broadcast', 'AI 播报', 'AI 分析结论推送到这个机器人，不转发玩家消息'],
+            ['reserved', '空着（等第三方插件）', '本插件不主动使用，留给第三方插件']
+        ];
+
+        //: 用途 → 中文短标签（列表卡片上显示的小徽章）
+        function botPurposeLabel(p) {
+            for (var i = 0; i < BOT_PURPOSES.length; i++) {
+                if (BOT_PURPOSES[i][0] === String(p || '')) return BOT_PURPOSES[i][1];
+            }
+            return '群服互通';
+        }
+
+        //: 用途 → 悬停说明（卡片徽章的 title）
+        function botPurposeHint(p) {
+            for (var i = 0; i < BOT_PURPOSES.length; i++) {
+                if (BOT_PURPOSES[i][0] === String(p || '')) return BOT_PURPOSES[i][2];
+            }
+            return '';
+        }
+
+        //: 用途 → 徽章色调。bridge 是普通功能，用默认色；
+        //: broadcast 用醒目色（它会往外发 AI 结论，属于"主动说话"）；
+        //: reserved 用灰调（明示"这个机器人现在没什么用"）。
+        function botPurposeTone(p) {
+            var v = String(p || '');
+            if (v === 'broadcast') return 'text-warn';
+            if (v === 'reserved') return 'text-dim';
+            return '';
+        }
+
         var BOT_SYNC_FIELDS = [
             {k:'qq_to_mc', t:'bool', l:'群→服 互通'},
             {k:'mc_to_qq', t:'bool', l:'服→群 互通'},
@@ -3504,6 +6179,14 @@
 
             var bodyHtml =
                 bfBool('启用网关', pf + '-enabled', !!card.enabled) +
+                '<div class="modal-section-title">🎯 用途</div>' +
+                bfSelect('这个机器人用来做什么', pf + '-purpose',
+                         card.purpose || 'bridge', BOT_PURPOSES.map(function (x) {
+                             return [x[0], x[1] + ' —— ' + x[2]];
+                         })) +
+                '<div class="hint-sm mb-sm">群服互通：游戏与群之间转发消息。' +
+                'AI 播报：只接收 AI 分析结论，<b>不转发玩家消息</b>。' +
+                '空着：本插件不主动使用，留给第三方插件调用。</div>' +
                 '<div class="modal-section-title">⚙ 连接设置</div>' +
                 bfInput('名称', pf + '-name', card.name) +
                 conn +
@@ -3536,6 +6219,9 @@
             const patch = {
                 name: getV(pf + '-name') || undefined,
                 enabled: getB(pf + '-enabled'),
+                // 用途：后端校验器只接受 bridge/broadcast/reserved，
+                // 缺省时按 bridge 处理（与 normalize_purpose 一致）。
+                purpose: getV(pf + '-purpose') || 'bridge',
                 sync: bfSyncGather(pf)
             };
             if (type === 'qqofficial') {
@@ -3594,6 +6280,9 @@
         function init() {
             gmSyncThemeBtn();
             gmCloseSidebar();               // 默认收起
+            // 页面自定义下拉：把所有声明了 data-options 的宿主一次性挂载。
+            // 放在最前面 —— 后面的 loadXxx() 读值时才问得到 gmSelect。
+            try { gmSelect.autoscan(); } catch (e) { console.error(e); }
             // 先拉取身份与权限，再决定显示哪些板块；避免无权限账户落到空白页
             gmLoadAuth().then(function () {
                 if (!gmSelectInitialSection()) return;
@@ -3606,7 +6295,9 @@
                 loadScoreboardsFull();
                 loadToolsConfig();
                 loadGameTools();
-                loadMods();
+                // 模组页首次进来也**不自动扫**：等用户点刷新。
+                // 这里只把两栏置成「未扫描」提示，避免页面空白让人以为坏了。
+                renderMods();
             });
             // 轮询改为按可见板块启停：只在对应板块显示时才拉数据。
             // 「在线玩家 / 系统状态 / 玩家详情 / 聊天日志」现已合并进 sec-players，
@@ -3616,6 +6307,9 @@
             var _m2 = pollMessages;    _m2.gmInterval = 2000; gmRegisterPoll('sec-players', _m2);
             var _c2 = pollConsole;     _c2.gmInterval = 2000; gmRegisterPoll('sec-players', _c2);
             var _c2b = pollConsole;    _c2b.gmInterval = 2000; gmRegisterPoll('sec-console', _c2b);
+            // 区块日志：回档进行中需要看进度，10s 一次足够（回档本身按批推进，
+            // 太快反而多出一堆无意义的请求）。
+            var _rg = regionRefresh;   _rg.gmInterval = 10000; gmRegisterPoll('sec-region', _rg);
             // 注：原来这里还给已删除的日志中心板块（id 与「日志」同义）注册了匿名轮询，
             // 现随板块合并一并移除（否则会对不存在的板块每 2s 空跑一次请求）。
 
@@ -3645,7 +6339,437 @@
             var _crossRoleEl = el('cross-role');
             if (_crossRoleEl) _crossRoleEl.addEventListener('change', syncCrossVisibility);
 
+            // 实验板：勾选后立刻显示风险提示，不用等保存
+            var _crossExpEl = el('cross-experimental');
+            if (_crossExpEl) _crossExpEl.addEventListener('change', syncCrossExpHint);
+
             gmStartPolls(gmActiveSection);
         }
+
+        // ================================================================
+        // QQ 官方扫码登录
+        //
+        // 流程：获取二维码 → 用内嵌的 QRCode 库把 connect.html 打印成图
+        //       → 每 2 秒轮询一次 → created 时刷新卡片列表。
+        //
+        // ⚠ 后端**不会**返回 AppSecret 明文，只给长度和掩码。所以这里的
+        //   任何提示都只显示掩码 —— 别想着"顺手把它显示出来方便用户复制"，
+        //   那等于把凭据刻在浏览器历史和截图里。
+        // ================================================================
+
+        var qrTimer = null;       // 轮询定时器
+        var qrTaskId = '';        // 当前任务 id
+        var qrDeadline = 0;       // 本任务的超时时刻（ms）
+
+        function qrOpen() {
+            var box = el('qr-box');
+            if (!box) return;
+            box.classList.remove('hidden');
+            box.style.display = 'block';
+            qrFillCards();
+        }
+
+        function qrClose() {
+            var box = el('qr-box');
+            if (box) { box.classList.add('hidden'); box.style.display = 'none'; }
+            qrStopPoll();
+            var imgBox = el('qr-img-box');
+            if (imgBox) imgBox.innerHTML = '';
+            qrSetStatus('');
+        }
+
+        function qrStopPoll() {
+            if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+            qrTaskId = '';
+        }
+
+        function qrSetStatus(text, tone) {
+            var st = el('qr-status');
+            if (!st) return;
+            st.textContent = text || '';
+            st.className = 'status' + (tone ? ' ' + tone : '');
+        }
+
+        async function qrFillCards() {
+            var sel = el('qr-card');
+            if (!sel) return;
+            try {
+                var r = await apiGet('/api/bots/list');
+                var list = (r && r.ok && r.adapters) ? r.adapters : [];
+                var official = list.filter(function (c) { return c.type === 'qqofficial'; });
+                // 没有官方卡片时不能直接空着：用户第一次用通常还没建过卡，
+                // 这时给一个「自动创建」选项，扫码后会由后端落到第一张卡上。
+                var opts = official.map(function (c) {
+                    return '<option value="' + escAttr(c.id) + '">' + botsEsc(c.name) +
+                           (c.app_id ? '（已有 AppID）' : '') + '</option>';
+                });
+                if (!opts.length) {
+                    opts = ['<option value="">（未找到官方机器人卡片，请先新建）</option>'];
+                }
+                sel.innerHTML = opts.join('');
+            } catch (e) {
+                sel.innerHTML = '<option value="">加载失败</option>';
+            }
+        }
+
+        function qrRender(code) {
+            var box = el('qr-img-box');
+            if (!box) return;
+            if (typeof qrcode !== 'function') {
+                // 兜底：qrcode 库没加载出来时至少让用户能手动复制链接
+                box.innerHTML = '<p class="hint text-warn">二维码组件未加载，请手动复制链接：<br>' +
+                                '<span class="break">' + botsEsc(code) + '</span></p>';
+                return;
+            }
+            try {
+                // typeNumber=0 让库自己选版本；纠错级别 M 在「屏幕扫」场景下足够
+                var qr = qrcode(0, 'M');
+                qr.addData(code);
+                qr.make();
+                // marginscale: 8 像素/模块，留 4 模块白边（扫码器需要静默区）
+                box.innerHTML = '<img alt="QQ 扫码绑定" style="width:220px;height:220px" src="' +
+                                qr.createDataURL(8, 4) + '">';
+            } catch (e) {
+                box.innerHTML = '<p class="hint text-bad">二维码生成失败：' + botsEsc(e) + '</p>';
+            }
+        }
+
+        async function qrCreate() {
+            var btn = el('qr-create-btn');
+            var sel = el('qr-card');
+            var cardId = sel ? sel.value : '';
+            if (btn) { btn.disabled = true; btn.textContent = '获取中…'; }
+            qrStopPoll();
+            qrSetStatus('正在向 QQ 申请二维码…', 'text-warn');
+            try {
+                var r = await apiGet('/api/qqbot/qr/create');
+                if (!r || !r.ok) {
+                    qrSetStatus('获取失败：' + ((r && r.error) || '未知错误'), 'text-bad');
+                    return;
+                }
+                qrTaskId = r.task_id;
+                qrRender(r.qrcode || '');
+                var interval = Math.max(1, parseInt(r.interval, 10) || 2) * 1000;
+                // 后端任务 TTL 600s，前端提前 20s 收手，避免最后几轮必然 404
+                qrDeadline = Date.now() + 580 * 1000;
+                qrSetStatus('请用手机 QQ 扫码并确认授权…', 'text-warn');
+                qrTimer = setInterval(qrPoll, interval);
+            } catch (e) {
+                qrSetStatus('获取失败：' + e, 'text-bad');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '重新获取'; }
+            }
+        }
+
+        async function qrPoll() {
+            if (!qrTaskId) { qrStopPoll(); return; }
+            if (Date.now() > qrDeadline) {
+                qrStopPoll();
+                qrSetStatus('二维码已过期，请重新获取', 'text-bad');
+                return;
+            }
+            var sel = el('qr-card');
+            var cardId = sel ? sel.value : '';
+            try {
+                var r = await apiGet('/api/qqbot/qr/poll?task_id=' +
+                                     encodeURIComponent(qrTaskId) +
+                                     '&card_id=' + encodeURIComponent(cardId || ''));
+                if (!r) return;
+                if (r.status === 'pending') { qrSetStatus('等待扫码中…', 'text-warn'); return; }
+                if (r.status === 'expired') {
+                    qrStopPoll();
+                    qrSetStatus('二维码已过期，请重新获取', 'text-bad');
+                    return;
+                }
+                if (r.status === 'error') {
+                    qrStopPoll();
+                    qrSetStatus('绑定失败：' + (r.error || '未知错误'), 'text-bad');
+                    return;
+                }
+                if (r.status === 'created') {
+                    qrStopPoll();
+                    var imgBox = el('qr-img-box');
+                    if (imgBox) imgBox.innerHTML = '<p class="hint text-ok">✅ 授权成功</p>';
+                    // 只显示掩码与长度 —— 明文永远不出现在页面上
+                    qrSetStatus('✅ 绑定成功！AppID ' + (r.appid || '') +
+                                '，AppSecret ' + (r.secret_mask || '') +
+                                '（' + (r.secret_len || 0) + ' 位）已写入卡片。' +
+                                (r.message ? ' ' + r.message : ''), 'text-ok');
+                    try { await loadBots(); } catch (e) {}
+                }
+            } catch (e) {
+                // 单次网络抖动不算失败，等下一轮；连续失败由超时兜底
+                console.error('[扫码] 轮询异常', e);
+            }
+        }
+
+        // ================================================================
+        // 正则触发器
+        // ================================================================
+
+        var regexRules = [];      // 本地规则副本（保存时整表提交）
+        var regexMeta = {};       // eventTypes / actionTypes 等后端给出的可选值
+
+        async function loadRegex() {
+            var box = el('regex-list');
+            try {
+                var r = await apiGet('/api/qqbot/regex/rules');
+                if (!r || !r.ok) {
+                    if (box) box.innerHTML = '<p class="hint text-bad">加载失败：' +
+                                             botsEsc((r && r.error) || '未知错误') + '</p>';
+                    regexBadge('加载失败');
+                    return;
+                }
+                regexRules = r.rules || [];
+                regexMeta = r;
+                regexBadge('共 ' + regexRules.length + ' 条规则');
+                regexRenderConfig(r.config || {});
+                regexRenderList();
+            } catch (e) {
+                if (box) box.innerHTML = '<p class="hint text-bad">加载失败：' + botsEsc(e) + '</p>';
+                regexBadge('加载失败');
+            }
+        }
+
+        function regexBadge(text, tone) {
+            var b = el('regex-status-badge');
+            if (!b) return;
+            b.textContent = text || '';
+            b.className = 'status' + (tone ? ' ' + tone : '');
+        }
+
+        function regexRenderConfig(cfg) {
+            if (el('regex-enable')) el('regex-enable').checked = cfg.enable !== false;
+            if (el('regex-only-main')) el('regex-only-main').checked = !!cfg.only_on_main;
+            if (el('regex-debug')) el('regex-debug').checked = !!cfg.admin_debug;
+            if (el('regex-timeout')) el('regex-timeout').value = (cfg.command_timeout != null ? cfg.command_timeout : 5);
+            // 日志采集：默认关（新增能力，不该升级后自己开始读文件），
+            // 只跟新行默认开（否则一接通就重放历史刷屏）。
+            if (el('regex-log-enabled')) el('regex-log-enabled').checked = !!cfg.log_enabled;
+            if (el('regex-log-start-end')) el('regex-log-start-end').checked = cfg.log_start_at_end !== false;
+        }
+
+        function regexRenderList() {
+            var box = el('regex-list');
+            if (!box) return;
+            if (!regexRules.length) {
+                box.innerHTML = '<p class="empty">暂无规则，点击「＋ 新增规则」添加。</p>';
+                return;
+            }
+            var events = regexMeta.eventTypes || [];
+            box.innerHTML = regexRules.map(function (rule, idx) {
+                var trigger = rule.triggerType || 'message';
+                var trigLabel = trigger === 'message'
+                    ? '消息 · <code>' + botsEsc(rule.pattern || '') + '</code>'
+                    : '事件 · ' + botsEsc(rule.eventType || '') +
+                      (rule.pattern ? ' · <code>' + botsEsc(rule.pattern) + '</code>' : '');
+                var acts = (rule.actions || []).map(function (a) {
+                    return '<span class="badge">' + botsEsc(a && a.type) + '</span>';
+                }).join(' ');
+                var conds = (rule.conditions || []).length
+                    ? '<div class="hint-sm">条件: ' + (rule.conditions || []).map(function (c) {
+                        return botsEsc(c && c.field) + ' ' + botsEsc(c && c.operator) + ' ' + botsEsc(c && c.value);
+                      }).join('，') + '</div>'
+                    : '';
+                return '' +
+                    '<div class="card mb">' +
+                    '  <div class="row">' +
+                    '    <b class="break spacer">' + botsEsc(rule.name || rule.id) + '</b>' +
+                    (rule.block ? '<span class="badge text-warn">阻断</span>' : '<span class="badge">继续</span>') +
+                    '    <span class="badge ' + (rule.enabled ? 'text-ok' : '') + '">' + (rule.enabled ? '启用' : '禁用') + '</span>' +
+                    '  </div>' +
+                    '  <div class="hint-sm break">' + trigLabel + '</div>' +
+                    conds +
+                    '  <div class="row mt-sm">' + acts + '</div>' +
+                    '  <div class="row mt">' +
+                    '    <button onclick="regexToggle(' + idx + ')">' + (rule.enabled ? '⏸ 禁用' : '▶ 启用') + '</button>' +
+                    '    <button onclick="regexEdit(' + idx + ')">✏️ 编辑</button>' +
+                    '    <button class="text-bad" onclick="regexDelete(' + idx + ')">🗑 删除</button>' +
+                    '  </div>' +
+                    '  <div id="regex-edit-' + idx + '" class="hidden mt"></div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function regexEdit(idx) {
+            var box = el('regex-edit-' + idx);
+            if (!box) return;
+            var rule = regexRules[idx];
+            if (!rule) return;
+            if (box.style.display === 'block') {
+                box.style.display = 'none';
+                box.classList.add('hidden');
+                return;
+            }
+            var events = regexMeta.eventTypes || [];
+            var actions = (rule.actions || []).length ? rule.actions : [{ type: 'replyText', params: '' }];
+            var conditions = (rule.conditions || []).length ? rule.conditions : [{ field: 'userId', operator: '==', value: '' }];
+            box.classList.remove('hidden');
+            box.style.display = 'block';
+            box.innerHTML = '' +
+                '<div class="modal-grid-2">' +
+                '  <div><label class="field-label">规则名</label><input id="rx-name-' + idx + '" class="block-input" value="' + escAttr(rule.name || '') + '"></div>' +
+                '  <div><label class="field-label">触发类型</label><select id="rx-trigger-' + idx + '" class="block-input">' +
+                '    <option value="message"' + ((rule.triggerType || 'message') === 'message' ? ' selected' : '') + '>群消息</option>' +
+                '    <option value="event"' + (rule.triggerType === 'event' ? ' selected' : '') + '>事件</option>' +
+                '  </select></div>' +
+                '  <div><label class="field-label">事件类型（触发类型=事件时生效）</label><select id="rx-event-' + idx + '" class="block-input">' +
+                '    <option value="">（不指定）</option>' +
+                events.map(function (e) {
+                    return '<option value="' + escAttr(e) + '"' + (rule.eventType === e ? ' selected' : '') + '>' + botsEsc(e) + '</option>';
+                }).join('') +
+                '  </select></div>' +
+                '  <div><label class="field-label">flags（i / m / s）</label><input id="rx-flags-' + idx + '" class="block-input" value="' + escAttr(rule.flags || '') + '"></div>' +
+                '</div>' +
+                '<div class="mt-sm"><label class="field-label">正则表达式（消息规则必填；事件规则留空=匹配该事件全部）</label>' +
+                '<input id="rx-pattern-' + idx + '" class="block-input" value="' + escAttr(rule.pattern || '') + '"></div>' +
+                '<div class="mt-sm"><label class="field-label">条件（每行一条：字段 操作符 值，支持 userId / groupId / nickname，操作符 == != includes matches）</label>' +
+                '<textarea id="rx-cond-' + idx + '" class="block-input" rows="2">' +
+                conditions.map(function (c) {
+                    return botsEsc((c && c.field || '') + ' ' + (c && c.operator || '==') + ' ' + (c && c.value || ''));
+                }).join('\n') +
+                '</textarea></div>' +
+                '<div class="mt-sm"><label class="field-label">动作（每行一条：类型 = 参数，变量 $1 $userId $groupId $at $nickname $result）</label>' +
+                '<textarea id="rx-act-' + idx + '" class="block-input" rows="3">' +
+                actions.map(function (a) {
+                    return botsEsc((a && a.type || '') + ' = ' + (a && a.params || ''));
+                }).join('\n') +
+                '</textarea></div>' +
+                '<label class="ios mt"><input type="checkbox" id="rx-block-' + idx + '"' + (rule.block ? ' checked' : '') + '><i></i> <span class="ios-text">命中后阻断后续处理</span></label>' +
+                '<div class="row mt"><button class="ok" onclick="regexApply(' + idx + ')">保存此条</button>' +
+                '<button onclick="regexEdit(' + idx + ')">取消</button></div>';
+        }
+
+        function regexParseLines(text, sep) {
+            var out = [];
+            String(text || '').split('\n').forEach(function (line) {
+                var s = line.trim();
+                if (!s) return;
+                var at = s.indexOf(sep);
+                if (at < 0) return;
+                out.push([s.slice(0, at).trim(), s.slice(at + sep.length).trim()]);
+            });
+            return out;
+        }
+
+        function regexApply(idx) {
+            var rule = regexRules[idx];
+            if (!rule) return;
+            rule.name = (el('rx-name-' + idx) || {}).value || rule.id;
+            rule.triggerType = (el('rx-trigger-' + idx) || {}).value || 'message';
+            rule.eventType = (el('rx-event-' + idx) || {}).value || '';
+            rule.flags = (el('rx-flags-' + idx) || {}).value || '';
+            rule.pattern = (el('rx-pattern-' + idx) || {}).value || '';
+            rule.block = !!(el('rx-block-' + idx) || {}).checked;
+
+            rule.conditions = regexParseLines((el('rx-cond-' + idx) || {}).value, ' ').map(function (pair) {
+                // 「字段 操作符 值」——操作符在中间，值可能含空格，所以只切两刀
+                var parts = pair[0].split(/\s+/);
+                var field = parts[0] || 'userId';
+                var operator = parts[1] || '==';
+                var rest = pair[0].slice(field.length).trim();
+                var value = rest.slice(operator.length).trim();
+                return { field: field, operator: operator, value: value };
+            }).filter(function (c) { return c.value || c.operator === '==' ; });
+
+            rule.actions = regexParseLines((el('rx-act-' + idx) || {}).value, '=').map(function (pair) {
+                return { type: pair[0], params: pair[1] };
+            }).filter(function (a) { return a.type; });
+
+            regexSave();
+        }
+
+        function regexAddRule() {
+            var n = 1;
+            var used = {};
+            regexRules.forEach(function (r) { used[r.id] = true; });
+            while (used['rule_custom_' + n]) n++;
+            regexRules.push({
+                id: 'rule_custom_' + n,
+                name: '新规则 ' + n,
+                enabled: true,
+                triggerType: 'message',
+                pattern: '',
+                flags: '',
+                eventType: '',
+                conditions: [],
+                actions: [{ type: 'replyText', params: '' }],
+                block: true
+            });
+            regexRenderList();
+            regexEdit(regexRules.length - 1);
+        }
+
+        function regexToggle(idx) {
+            var rule = regexRules[idx];
+            if (!rule) return;
+            rule.enabled = !rule.enabled;
+            regexSave();
+        }
+
+        function regexDelete(idx) {
+            var rule = regexRules[idx];
+            if (!rule) return;
+            if (!confirm('确定删除规则「' + (rule.name || rule.id) + '」？')) return;
+            regexRules.splice(idx, 1);
+            regexSave();
+        }
+
+        async function regexSave() {
+            regexBadge('保存中…', 'text-warn');
+            var payload = {
+                rules: regexRules,
+                config: {
+                    enable: !!(el('regex-enable') || {}).checked,
+                    only_on_main: !!(el('regex-only-main') || {}).checked,
+                    admin_debug: !!(el('regex-debug') || {}).checked,
+                    command_timeout: parseFloat((el('regex-timeout') || {}).value) || 5,
+                    // 这两个必须一起发过去，且后端 _save_regex_config 里
+                    // 有对应的白名单放行 —— 少一边就是"开关保存后自己弹回去"。
+                    log_enabled: !!(el('regex-log-enabled') || {}).checked,
+                    log_start_at_end: !!(el('regex-log-start-end') || {}).checked
+                }
+            };
+            try {
+                var r = await apiPost('/api/qqbot/regex/save', payload);
+                if (!r || !r.ok) {
+                    regexBadge('保存失败：' + ((r && r.error) || '未知错误'), 'text-bad');
+                    return;
+                }
+                regexBadge(r.message || '已保存', 'text-ok');
+                await loadRegex();
+            } catch (e) {
+                regexBadge('保存失败：' + e, 'text-bad');
+            }
+        }
+
+        function saveRegexConfig() { regexSave(); }
+
+        async function regexTest() {
+            var out = el('regex-test-result');
+            var payload = {
+                pattern: (el('regex-test-pattern') || {}).value || '',
+                flags: (el('regex-test-flags') || {}).value || '',
+                text: (el('regex-test-text') || {}).value || ''
+            };
+            if (out) out.textContent = '测试中…';
+            try {
+                var r = await apiPost('/api/qqbot/regex/test', payload);
+                if (!r) { if (out) out.textContent = '无响应'; return; }
+                if (!r.ok) { if (out) out.textContent = '❌ ' + (r.error || '测试失败'); return; }
+                if (!r.matched) { if (out) out.textContent = '未命中'; return; }
+                if (out) {
+                    out.textContent = '✅ 命中\n完整匹配: ' + (r.groups[0] || '') +
+                        (r.groups.length > 1
+                            ? '\n捕获组:\n' + r.groups.slice(1).map(function (g, i) {
+                                return '  $' + (i + 1) + ' = ' + g;
+                              }).join('\n')
+                            : '');
+                }
+            } catch (e) {
+                if (out) out.textContent = '❌ ' + e;
+            }
+        }
+
         window.addEventListener('DOMContentLoaded', init);
     </script>

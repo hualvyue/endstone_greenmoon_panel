@@ -280,7 +280,7 @@ a { color: var(--gm-accent); }
     position: fixed;
     top: calc(12px + env(safe-area-inset-top, 0px));
     left: calc(12px + env(safe-area-inset-left, 0px));
-    z-index: 50;                    /* 低于侧栏(60)与遮罩(55)，展开时被盖住 */
+    z-index: 70;                    /* 高于侧栏(60)与遮罩(55)：始终可点，展开时再点一次即收起 */
     width: 44px; height: 44px;
     display: flex; align-items: center; justify-content: center;
     border: 1px solid var(--gm-border-strong);
@@ -294,8 +294,9 @@ a { color: var(--gm-accent); }
     transition: background .2s ease, opacity .2s ease, transform .2s ease;
 }
 .side-toggle:hover { background: var(--gm-glass-hover); }
-/* 抽屉展开时把它藏掉，避免和 ✕ 重叠 */
-body.side-open .side-toggle { opacity: 0; transform: scale(.9); pointer-events: none; }
+/* ☰ 始终显示 —— 抽屉展开时也不隐藏：它浮在侧栏之上，再点一次即可收起。
+   因此把侧栏头部的品牌位右移让位，避免被 ☰ 压住。 */
+body.side-open .side-head { padding-left: 64px; }
 
 .sidebar a {
     display: flex;
@@ -359,6 +360,12 @@ body.side-open .side-toggle { opacity: 0; transform: scale(.9); pointer-events: 
 .grid-auto-lg { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: 12px; }
 .col       { min-width: 0; }
 .row       { display: flex; gap: var(--gm-gap-sm); align-items: center; flex-wrap: wrap; }
+/* 紧凑行：用于「工具权限」这类一行一个开关的密集列表。
+   与 .row 的区别是把纵向间距也收掉 —— 列表项之间靠自身 margin 控制，
+   否则 14 个工具会拉出很长的空白。 */
+.row-tight { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+             margin: 3px 0; }
+.row-tight > * { min-width: 0; }
 .row-lg    { gap: var(--gm-gap); }
 .stack     { display: flex; flex-direction: column; gap: var(--gm-gap-sm); }
 .spacer    { flex: 1; min-width: 0; }
@@ -397,16 +404,38 @@ body.side-open .side-toggle { opacity: 0; transform: scale(.9); pointer-events: 
 textarea.min-h-80 { min-height: 80px; }
 .w-60    { width: 60px; }
 .w-70    { width: 70px; }
+.w-80    { width: 80px; }
+.w-90    { width: 90px; }
 .w-110   { width: 110px; }
 .w-140   { width: 140px; }
+.w-160   { width: 160px; }
+.w-190   { width: 190px; }
+.w-230   { width: 230px; }
 .w-260   { width: 260px; }
 .w-full  { width: 100%; box-sizing: border-box; }
+.ml-auto { margin-left: auto; }
 .max-w-140 { max-width: 140px; }
 .max-w-210 { max-width: 210px; }
 .max-w-260 { max-width: 260px; }
 .scroll-box { max-height: 240px; overflow: auto; overscroll-behavior: contain; }
 .scroll-box-sm { max-height: 200px; overflow: auto; overscroll-behavior: contain; }
 .scroll-box-lg { max-height: 460px; overflow: auto; overscroll-behavior: contain; }
+/* 可信度玩家列表：名单可能很长，给一个够高的可视区 */
+.scroll-box.tall { max-height: 520px; }
+/* 小标签：用在可信度列表里标注「降级档案 / 信任设备 / 已绑 QQ」 */
+.tag {
+    display: inline-block;
+    padding: 1px 7px;
+    margin-left: 6px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 18px;
+    background: rgba(128, 128, 128, .18);
+    color: inherit;
+    white-space: nowrap;
+}
+.tag.ok   { background: rgba(46, 160, 67, .20); }
+.tag.warn { background: rgba(210, 153, 34, .22); }
 
 /* 模组包的启用列表：包数量不定，不设固定高度，交给整页滚动，
    避免默认视图只看到前几个包。用 .scroll-box-lg.mod-packs-scroll
@@ -462,6 +491,23 @@ textarea.min-h-80 { min-height: 80px; }
 .badge-ok   { background: var(--gm-ok-bg);   color: var(--gm-ok-fg); }
 .badge-bad  { background: var(--gm-bad-bg);  color: var(--gm-bad-fg); }
 .badge-warn { background: var(--gm-warn-bg); color: var(--gm-warn-fg); }
+
+/* ---------- 6.9 统计小格（云黑总览等） ---------- */
+/* 一行并排若干个「大数字 + 小标签」，数字用强调色，标签用弱化色。 */
+.stat-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 8px;
+    background: var(--gm-glass);
+    border-radius: var(--gm-r-md);
+    text-align: center;
+}
+.stat-cell b { font-size: 20px; line-height: 1.2; color: var(--gm-text); }
+.stat-cell .hint-sm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
 .list-item {
     display: flex;
@@ -561,9 +607,21 @@ textarea {
 /* 按钮语义变体 */
 .btn-ok, .ok     { background: var(--gm-ok-bg); border-color: var(--gm-ok-bg); color: var(--gm-ok-fg); }
 .btn-ok:hover, .ok:hover { filter: brightness(1.12); background: var(--gm-ok-bg); }
-.btn-danger, .kill { background: var(--gm-bad-bg); border-color: var(--gm-bad-bg); color: var(--gm-bad-fg); }
-.btn-danger:hover, .kill:hover { filter: brightness(1.12); background: var(--gm-bad-bg); }
+.btn-danger, .kill, .danger { background: var(--gm-bad-bg); border-color: var(--gm-bad-bg); color: var(--gm-bad-fg); }
+.btn-danger:hover, .kill:hover, .danger:hover { filter: brightness(1.12); background: var(--gm-bad-bg); }
 .btn-ghost { background: transparent; }
+
+/* 小号按钮：用于列表行内的行内操作（+1 / -5 / 信任此设备 …）。
+   面板里早就在用 class="mini" 了，但一直没有对应样式，
+   导致那些按钮跟正文一样大、挤在一行里放不下。这里补上。 */
+.mini {
+    padding: 2px 9px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 20px;
+    border-radius: 6px;
+    margin: 0 4px 0 0;
+}
 
 /* ---------- 9. 开关（iOS 液态玻璃） ---------- */
 .ios { display: inline-flex; align-items: center; gap: var(--gm-gap-sm); cursor: pointer; vertical-align: middle; margin: var(--gm-gap-xs); user-select: none; }
@@ -658,6 +716,152 @@ td { color: var(--gm-text); }
     overflow: auto;
 }
 
+/* ---------- 11b. 提示块 / 内联按钮 ---------- */
+
+/* 提示色块。admin.html 与 admin.js 里都在用，但此前**没有定义** ——
+   浏览器会按 inline 元素渲染，背景/边框全丢，看起来像普通文字。
+   这里补齐（含 .callout-ok，它在账户页的临时账户创建结果里用）。 */
+.callout-warn {
+    background: var(--gm-warn-bg);
+    color: var(--gm-warn-fg);
+    border: 1px solid var(--gm-warn-fg);
+    border-radius: var(--gm-r-md);
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.7;
+}
+.callout-ok {
+    background: var(--gm-ok-bg);
+    color: var(--gm-ok-fg);
+    border: 1px solid var(--gm-ok-fg);
+    border-radius: var(--gm-r-md);
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+/* 文字按钮：用于「全选 / 全不选」这类不需要按钮外观的操作。
+   刻意与 .row 里的实心按钮区分，避免一排按钮抢视觉焦点。 */
+.link-btn {
+    background: none;
+    border: 0;
+    padding: 0 2px;
+    margin: 0;
+    color: var(--gm-accent-fg);
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.link-btn:hover, .link-btn:focus-visible { filter: brightness(1.2); }
+
+/* AI 分析结果正文。模型返回的是纯文本，用等宽字体保留换行格式。 */
+.ai-result-pre {
+    background: var(--gm-code-bg);
+    border: 1px solid var(--gm-border-subtle);
+    border-radius: var(--gm-r-sm);
+    padding: 10px 12px;
+    margin: 6px 0 0;
+    font-family: var(--gm-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 46vh;
+    overflow: auto;
+}
+
+/* AI 提示词编辑框（高级设置）。用等宽字体，方便对齐缩进与换行。 */
+.ai-prompt-area {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 4px;
+    font-family: var(--gm-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    resize: vertical;
+}
+/* 默认提示词是预填的（不是灰色 placeholder），用淡淡的底色区分
+   「这是内置默认」与「这是服主自己写的」——值本身仍然可编辑、可清空。 */
+.ai-prompt-area.is-default {
+    background: var(--gm-inset);
+    color: var(--gm-text-dim);
+}
+.ai-prompt-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    background: var(--gm-inset);
+    color: var(--gm-text-dim);
+}
+
+/* ---------- 11b. 页面自定义下拉（替代浏览器原生 select） ----------
+   为什么不用原生 <select>：某些平台/浏览器（尤其国内套壳内核）对原生
+   下拉的样式和弹层控制极差，弹出来是系统控件、和页面主题割裂，甚至
+   在部分环境里点击无响应。这里用 button + 绝对定位的列表自己实现。 */
+.gmselect {
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+}
+.gmselect-trigger {
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: left;
+    cursor: pointer;
+}
+.gmselect-arrow {
+    flex: 0 0 auto;
+    transition: transform .18s ease;
+    font-size: 10px;
+    opacity: .75;
+}
+.gmselect.open .gmselect-arrow { transform: rotate(180deg); }
+
+.gmselect-list {
+    position: absolute;
+    z-index: 60;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    max-height: 260px;
+    overflow: auto;
+    background: var(--gm-surface-solid);
+    border: 1px solid var(--gm-border-strong);
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .38);
+}
+.gmselect-list.hidden { display: none; }
+.gmselect-item {
+    padding: 7px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.gmselect-item:hover { background: var(--gm-inset); }
+.gmselect-item.is-active { background: var(--gm-inset); font-weight: 600; }
+.gmselect-item .gmselect-sub {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    opacity: .7;
+    margin-top: 2px;
+}
+.gmselect.disabled .gmselect-trigger { opacity: .55; cursor: not-allowed; }
+/* 自定义下拉所在的 label 行不要被 truncate 掉 */
+.gmselect + .hint-sm { display: block; }
+
+
 /* ---------- 12. 仪表盘 ---------- */
 .metrics { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; padding: 6px 2px 18px; }
 .metric { text-align: center; }
@@ -667,6 +871,45 @@ td { color: var(--gm-text); }
 .gauge-txt { fill: var(--gm-text); font-size: 19px; font-weight: 700; font-family: var(--gm-font); letter-spacing: -.5px; }
 .metric-label { color: var(--gm-text); font-size: 13px; margin-top: 6px; letter-spacing: .4px; font-weight: 600; }
 .metric-uptime { text-align: center; color: var(--gm-text); font-size: 14px; padding-bottom: 4px; }
+
+/* ---------- 12b. 运行环境（服务器信息页） ---------- */
+.env-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: var(--gm-gap-sm); margin-top: var(--gm-gap-sm);
+}
+.env-item {
+    display: flex; flex-direction: column; gap: 4px;
+    background: var(--gm-surface-2); border: 1px solid var(--gm-border);
+    border-radius: var(--gm-r-md); padding: 10px 12px;
+}
+/* 变量名拼错了（--gm-text-muted 不存在，正确的是 --gm-text-mute）：
+   走了 fallback 到 --gm-text，于是这块本该"淡一点"的说明文字
+   一直和正文同色 —— 视觉层级丢了。 */
+.env-k { color: var(--gm-text-mute, var(--gm-text)); font-size: 12px; letter-spacing: .4px; opacity: .75; }
+.env-v { color: var(--gm-text); font-size: 14px; font-weight: 600; word-break: break-all; }
+
+.env-dl {
+    margin-top: var(--gm-gap-sm); padding: 12px;
+    background: var(--gm-inset); border: 1px dashed var(--gm-border);
+    border-radius: var(--gm-r-md);
+}
+.env-dl-label { color: var(--gm-text); font-size: 13px; margin-bottom: 8px; opacity: .85; }
+.env-dl-row { display: flex; align-items: center; gap: var(--gm-gap-sm); flex-wrap: wrap; }
+.env-tag {
+    flex: 1 1 240px; min-width: 0;
+    background: var(--gm-surface-2); border: 1px solid var(--gm-border);
+    border-radius: var(--gm-r-sm); padding: 8px 10px;
+    color: var(--gm-success); font-size: 13px; font-family: var(--gm-mono, monospace);
+    word-break: break-all; user-select: all; cursor: text;
+}
+.env-copy {
+    flex: 0 0 auto; cursor: pointer;
+    background: var(--gm-surface-2); color: var(--gm-text);
+    border: 1px solid var(--gm-border); border-radius: var(--gm-r-sm);
+    padding: 8px 12px; font-size: 13px;
+}
+.env-copy:hover { border-color: var(--gm-success); color: var(--gm-success); }
+.env-dl-hint { margin-top: 8px; color: var(--gm-text); font-size: 12px; opacity: .8; line-height: 1.7; }
 
 /* ---------- 13. 业务块 ---------- */
 .player-detail, .world-card {
@@ -709,6 +952,43 @@ td { color: var(--gm-text); }
 .modal-foot { display: flex; gap: 10px; margin-top: var(--gm-gap); align-items: center; flex-wrap: wrap; }
 .modal-section-title { font-size: 14px; font-weight: 700; color: var(--gm-warn); margin: 12px 0 10px; }
 .modal-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 16px; }
+
+/* ---------- 内置文档弹窗（账户与安全 → 📖 文档与条款）---------- */
+/* 文档比普通弹窗长得多：给它更宽的容器 + 独立滚动的正文区，
+   否则整页会跟着一起滚，看起来像"网页卡住了"。 */
+.doc-modal { max-width: 940px; }
+.doc-body {
+    max-height: 74vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-right: 6px;
+    font-size: 14px;
+    line-height: 1.75;
+}
+.doc-body h1 { font-size: 20px; margin: 0 0 10px; }
+.doc-body h2 { font-size: 16px; margin: 22px 0 8px; padding-bottom: 6px;
+               border-bottom: 1px solid var(--gm-border); }
+.doc-body h3 { font-size: 14.5px; margin: 16px 0 6px; }
+.doc-body p  { margin: 8px 0; }
+.doc-body ul, .doc-body ol { margin: 8px 0; padding-left: 22px; }
+.doc-body li { margin: 4px 0; }
+.doc-body pre {
+    background: var(--gm-inset); padding: 10px 12px;
+    border-radius: var(--gm-r-sm); overflow-x: auto;
+    font-size: 12.5px; line-height: 1.6;
+}
+.doc-body pre.doc-plain { white-space: pre-wrap; word-break: break-word; }
+.doc-body blockquote {
+    border-left: 3px solid var(--gm-accent); padding-left: 12px;
+    color: var(--gm-text-mute); margin: 10px 0;
+}
+.doc-body table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+.doc-body th, .doc-body td {
+    border: 1px solid var(--gm-border); padding: 6px 8px;
+    text-align: left; vertical-align: top; word-break: break-word;
+}
+.doc-body th { background: var(--gm-surface-2); }
+.doc-body hr { border: none; border-top: 1px solid var(--gm-border); margin: 18px 0; }
 
 /* 子插件设置页的「高级选项」折叠区。默认收起 —— 设置项多的子插件
    一展开就是几十行，把常用的几项挤到看不见的地方去了。 */
@@ -958,4 +1238,116 @@ h2 .help-q, h3 .help-q { font-size: 11px; }
     font-weight: 600;
 }
 .btn-xs:hover { background: var(--gm-glass-hover); }
+
+/* 玩家行为记录档位滑杆 */
+.behavior-slider { flex: 1; min-width: 180px; max-width: 340px; }
+.behavior-slider input[type="range"] {
+    width: 100%;
+    margin: 0;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--gm-inset);
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+.behavior-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--gm-accent);
+    border: 2px solid #fff;
+    box-shadow: 0 0 6px rgba(78, 168, 255, 0.7);
+}
+.behavior-slider input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--gm-accent);
+    border: 2px solid #fff;
+}
+.behavior-slider input[type="range"]:focus { outline: none; }
+.behavior-slider-ticks {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-size: 11.5px;
+    color: var(--gm-text-mute);
+}
+
+/* ==========================================================================
+   区块日志与恢复（sec-region）
+   ========================================================================== */
+
+/* 键值行：状态面板里的「标签: 值」一行一条，等宽对齐便于扫读 */
+.kv-list { display: flex; flex-direction: column; gap: var(--gm-gap-xs); }
+.kv      { display: flex; justify-content: space-between; gap: var(--gm-gap-sm);
+           padding: 5px 10px; border-radius: var(--gm-r-sm);
+           background: var(--gm-surface-2); }
+/* ★ 这里的变量名曾经写成 --gm-fg-dim —— 那个变量**从未定义过**，
+   于是永远走 fallback 的 rgba(255,255,255,.62)（半透明白）。
+   深色主题下勉强能看，浅色主题下白字白底直接"消失"：
+   「运行状态」那一列标签全成空白，只剩右边的数字，用户根本不知道
+   每个 0 代表什么。改用设计令牌里真实存在的 --gm-text-dim。 */
+.kv-k    { color: var(--gm-text-dim); flex: 0 0 auto; }
+.kv-v    { text-align: right; min-width: 0; word-break: break-all; }
+
+/* 结果卡片：预览 / 回档的回执。成功与失败用不同底色，一眼分辨 */
+#region-result .card.ok { border-left: 3px solid var(--gm-ok-bg); }
+#region-result .card.err { border-left: 3px solid var(--gm-danger); }
+.status.err { color: var(--gm-danger); }
+
+/* 数字输入收窄，避免「60」旁边空一大片 */
+.num-input { width: 88px; }
+.flex-input { flex: 1 1 120px; min-width: 0; }
+.spacer { flex: 1 1 auto; }
+.nowrap { white-space: nowrap; }
+
+/* ==========================================================================
+   第三方插件面板（sec-ext）
+   ========================================================================== */
+
+/* 左列插件列表 + 右列设置表单。窄屏时上下堆叠。 */
+.ext-layout { display: grid; grid-template-columns: minmax(180px, 260px) 1fr;
+              gap: var(--gm-gap); align-items: start; }
+.ext-list   { display: flex; flex-direction: column; gap: var(--gm-gap-xs); }
+
+.ext-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; text-align: left; width: 100%;
+    border-radius: var(--gm-r-md);
+    background: var(--gm-surface-2); border: 1px solid transparent;
+    color: inherit; cursor: pointer; transition: background .15s, border-color .15s;
+}
+.ext-item:hover { background: var(--gm-glass-hover); }
+.ext-item.active { border-color: var(--gm-border-strong); background: var(--gm-glass-active); }
+
+.ext-icon { font-size: 20px; flex: 0 0 auto; }
+.ext-meta { display: flex; flex-direction: column; min-width: 0; }
+.ext-meta b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ext-head { display: flex; align-items: center; gap: var(--gm-gap-sm); flex-wrap: wrap; }
+.ext-head h3 { margin: 0; }
+
+/* 表单：标签在上、输入在下，纵向排列比横排更好读 */
+.ext-form { display: flex; flex-direction: column; gap: var(--gm-gap); }
+.ext-field { display: flex; flex-direction: column; gap: 4px; }
+.ext-field > label { font-weight: 600; font-size: 13px; }
+.ext-field input[type="text"],
+.ext-field input[type="password"],
+.ext-field input[type="number"],
+.ext-field select,
+.ext-field textarea { width: 100%; }
+
+/* 分组标题（type=group / note）：只是一条分隔，不是输入项 */
+.ext-group { padding: 8px 0 2px; border-top: 1px solid var(--gm-border); }
+.ext-group:first-child { border-top: none; }
+
+@media (max-width: 720px) {
+    .ext-layout { grid-template-columns: 1fr; }
+    .ext-list { flex-direction: row; flex-wrap: wrap; }
+    .ext-item { width: auto; }
+}
 </style>

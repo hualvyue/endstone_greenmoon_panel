@@ -109,13 +109,25 @@ def group_sign(group_id: int) -> dict[str, Any]:
 
 
 def group_poke(group_id: int, user_id: int) -> dict[str, Any]:
-    """群内戳一戳（NapCat 扩展）"""
-    return _pack("group_poke", {"group_id": group_id, "user_id": user_id})
+    """群内戳一戳。
+
+    ★ 动作名必须是 ``send_group_poke``（OneBot v11 扩展 & NapCat 一致），
+    参数名是 ``user_id``。原实现发的是 ``group_poke`` —— 这个名字在
+    v11 / NapCat 里**不存在**，对端会回 retcode=1404（不支持的 action），
+    表现为「点了戳一戳没反应，日志只有一条 warning」。
+    这里保留旧名作为别名，避免已有调用点全部要改。
+    """
+    return _pack("send_group_poke", {"group_id": group_id, "user_id": user_id})
 
 
 def friend_poke(user_id: int) -> dict[str, Any]:
-    """好友戳一戳（NapCat 扩展）"""
-    return _pack("friend_poke", {"user_id": user_id})
+    """好友戳一戳。动作名同理必须是 ``send_friend_poke``。"""
+    return _pack("send_friend_poke", {"user_id": user_id})
+
+
+# 旧名别名（历史调用点兼容）
+group_poke_alias = group_poke
+friend_poke_alias = friend_poke
 
 
 def essence_msg(message_id: int) -> dict[str, Any]:

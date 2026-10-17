@@ -38,6 +38,73 @@ except ImportError:  # 允许该模块被单独 import（测试/脚本场景）
 # 支持的机器人类型
 ADAPTER_TYPES = ("qqofficial", "websocket")
 
+# ---------------------------------------------------------------------------
+# 机器人「用途」
+#
+# 一台服务器上可以挂多个机器人，但它们**不一定都用来做群服互通**。
+# 典型的三种用法：
+#
+#   bridge     群服互通 —— 群消息进游戏、游戏消息进群、进服/退服播报。
+#   broadcast  AI 播报 —— 只接收插件主动推送的内容（AI 分析结论、
+#              服务器报错、定时播报），**不**参与玩家聊天转发。
+#   reserved   空着 —— 卡片照常建连、保持在线，但**不接入任何内置管线**，
+#              留给第三方子插件通过 card_id 自行接管。
+#
+# ★ 为什么这必须是一个显式字段，而不能靠"开哪些开关"推断
+# -------------------------------------------------------
+# 一张卡的 sync 里 qq_to_mc=False / mc_to_qq=False 看起来就像"不互通"，
+# 但那是**互通内部**的两个方向开关，语义是「互通开着，只是暂时关掉某方向」。
+# 把它当成"这张卡不干互通"来推断，一旦用户只是临时关掉群→服，
+# 这张卡就会从互通链路里彻底消失，回头打开开关也不生效（因为路由
+# 判定发生在更外层）。用途必须由用户显式声明，不与任何开关互相推导。
+#
+# ★ 默认值取 bridge 是为了**升级不掉线**：老配置里没有这个键，
+#   而这些卡当初就是按群服互通配的。默认成 reserved 会让升级后
+#   所有群消息忽然不通 —— 那是最糟的默认。
+PURPOSE_BRIDGE = "bridge"
+PURPOSE_BROADCAST = "broadcast"
+PURPOSE_RESERVED = "reserved"
+
+PURPOSES = (PURPOSE_BRIDGE, PURPOSE_BROADCAST, PURPOSE_RESERVED)
+
+#: 用途 → 人话（前端下拉、日志、面板徽章共用一份，避免两处漂移）
+PURPOSE_LABELS: dict[str, str] = {
+    PURPOSE_BRIDGE: "群服互通",
+    PURPOSE_BROADCAST: "AI 播报",
+    PURPOSE_RESERVED: "空着（等第三方插件）",
+}
+
+#: 用途 → 一句话说明（前端 tooltip / 帮助文案）
+PURPOSE_HINTS: dict[str, str] = {
+    PURPOSE_BRIDGE: (
+        "群消息转发到游戏、游戏消息转发到群、进服退服播报。"
+        "★ 服务器上线的播报只由这一种用途的机器人发。"
+    ),
+    PURPOSE_BROADCAST: (
+        "AI 专用：只在 AI 主动调用时发消息（分析结论、服务器报错、"
+        "撤销告警），也可以 @ 它跟它对话。"
+        "★ 不转发玩家聊天、不发上线/下线播报 —— "
+        "所以它不会和「群服互通」的机器人重复说一遍「服务器已上线」。"
+    ),
+    PURPOSE_RESERVED: "保持连接但不接入内置功能，留给第三方子插件按 card_id 接管。",
+}
+
+DEFAULT_PURPOSE = PURPOSE_BRIDGE
+
+
+def normalize_purpose(value: Any) -> str:
+    """把任意输入归一化成合法用途值。
+
+    ★ **静默回落**而不是抛异常。理由：这个函数会在 ``_normalize()`` 里
+      对**每一张从磁盘读出来的卡**调用。如果历史配置文件里存了
+      一个我们已经不再支持的值（比如将来收窄枚举），抛异常会让
+      整张卡被 ``_normalize`` 判为非法而**丢弃** —— 用户升级后
+      机器人直接消失了。回落到默认值最多是"用途不对"，用户改一下就行；
+      丢卡是不可恢复的。
+    """
+    v = str(value or "").strip().lower()
+    return v if v in PURPOSES else DEFAULT_PURPOSE
+
 
 def _default_sync() -> dict[str, Any]:
     """单个适配器的群服互通默认配置（与旧 qqbot.json 扁平键一一对应）。"""
@@ -67,6 +134,8 @@ DEFAULT_ADAPTERS: list[dict[str, Any]] = [
         "type": "qqofficial",
         "name": "QQ 官方机器人",
         "enabled": False,
+        # 用途：群服互通（老配置默认值，见 PURPOSE_BRIDGE 的注释）
+        "purpose": PURPOSE_BRIDGE,
         # —— qqofficial 专属字段（网关鉴权）——
         "app_id": "",
         "app_secret": "",
@@ -98,6 +167,8 @@ DEFAULT_ADAPTERS: list[dict[str, Any]] = [
         "type": "websocket",
         "name": "WebSocket (OneBot v11)",
         "enabled": False,
+        # 用途：群服互通（与官方卡保持一致）
+        "purpose": PURPOSE_BRIDGE,
         # —— websocket 专属字段 ——
         "ws_type": 0,            # 0 正向(连接 Go-CQHTTP) / 1 反向(搭建监听服务)
         "target": "",            # 正向时必填 ws:// 或 wss://
@@ -171,6 +242,16 @@ def _validate_adapter(adapter: dict[str, Any]) -> None:
         raise ConnectionValidationError("adapter.name 必须是 1 至 64 个字符")
     if type(_get("enabled", False)) is not bool:
         raise ConnectionValidationError("adapter.enabled 必须是布尔值")
+
+    # 用途：三选一。这里**严格校验**（不像 normalize_purpose 那样静默回落）
+    # —— 走到这一步的是用户刚在面板上提交的值，写错就该当场报错，
+    # 而不是悄悄存成别的用途让用户以为改成功了。
+    purpose = _get("purpose", DEFAULT_PURPOSE)
+    if str(purpose) not in PURPOSES:
+        raise ConnectionValidationError(
+            "adapter.purpose 只能为 bridge（群服互通）/ broadcast（AI 播报）/ "
+            "reserved（空着等第三方插件）"
+        )
 
     if atype == "qqofficial":
         app_id = str(_get("app_id", "")).strip()
@@ -376,6 +457,10 @@ class ConnectionManager:
                 dropped.add(source) if source else None
                 continue
             merged = _merge_adapter(self._blank(item.get("type", "qqofficial")), item)
+            # 用途归一化放在**校验之前**：老配置里没有这个键（或存了将来
+            # 可能被移除的值）时静默回落到默认，而不是让整张卡因校验
+            # 不过被丢弃。丢卡是不可恢复的，用途错只是改一下的事。
+            merged["purpose"] = normalize_purpose(merged.get("purpose"))
             if merged.get("type") == "qqofficial":
                 for key in _WS_ONLY_FIELDS:
                     merged.pop(key, None)
@@ -406,6 +491,9 @@ class ConnectionManager:
         result = copy.deepcopy(template)
         result["id"] = self._gen_id(atype)
         result["name"] = {"qqofficial": "QQ 官方机器人", "websocket": "WebSocket"}.get(atype, atype)
+        # 新建卡片默认「群服互通」—— 这是绝大多数用户的用途，
+        # 让默认值直接可用，用户想改成播报/空着再去下拉里选。
+        result["purpose"] = normalize_purpose(result.get("purpose"))
         return result
 
     @staticmethod
@@ -434,9 +522,24 @@ class ConnectionManager:
             self._legacy_layout = False
 
     # ------------------------------------------------------------------ CRUD
+    # 掩码的长度上限：真·密钥远比这个长，用长度把「纯星号的真密码」
+    # 和「我们生成的掩码」区分开。掩码一定等于原文长度，
+    # 而真实 token/secret 极不可能刚好是 1~64 个星号。
+    MASK_MAX_LEN = 64
+
     @staticmethod
     def is_masked(value: Any) -> bool:
-        return isinstance(value, str) and len(value) > 0 and set(value) == {"*"}
+        if not isinstance(value, str) or not value:
+            return False
+        if set(value) != {"*"}:
+            return False
+        # ★ 只认「合理长度的纯星号」为掩码。
+        # 原实现是 ``set(value) == {"*"}`` —— 一个**真实**的
+        # access_token 如果恰好全是星号（虽然罕见，但这是用户自己
+        # 粘贴进来的值，我们不能假定它的内容），就会被误判成
+        # 「用户没改」，提交后被静默丢弃 → 表现为「token 怎么改都保存不上」。
+        # 加长度上限后，超长纯星号按真实值处理。
+        return len(value) <= ConnectionManager.MASK_MAX_LEN
 
     def snapshot(self, *, mask: bool = True) -> list[dict[str, Any]]:
         with self._lock:
@@ -557,6 +660,48 @@ class ConnectionManager:
         with self._lock:
             return [a for a in self.adapters if a.get("type") == atype]
 
+    def adapters_of_purpose(self, purpose: str) -> list[dict[str, Any]]:
+        """按用途筛卡片（只返回**已启用**的）。
+
+        路由方（hub 出站、AI 播报、正则回复）**只关心启用的卡** ——
+        把「是否启用」也在这里一并过滤掉，避免每个调用点各写一遍
+        ``if card.get("enabled")``，漏一处就是"禁用的卡还在收发消息"。
+        """
+        want = normalize_purpose(purpose)
+        with self._lock:
+            return [
+                a for a in self.adapters
+                if a.get("enabled") and normalize_purpose(a.get("purpose")) == want
+            ]
+
+    def purpose_of(self, adapter_id: str) -> str:
+        """取某张卡的用途；卡不存在时返回默认值。
+
+        返回默认值而不是空串：调用方（比如 hub 出站）会拿它做 ``in`` 判断，
+        空串会滑过所有分支落进"谁都不认"的境地 —— 那张卡就彻底哑了。
+        """
+        cid = str(adapter_id or "").strip()
+        if not cid:
+            return DEFAULT_PURPOSE
+        with self._lock:
+            for a in self.adapters:
+                if str(a.get("id")) == cid:
+                    return normalize_purpose(a.get("purpose"))
+        return DEFAULT_PURPOSE
+
+    def purpose_map(self) -> dict[str, str]:
+        """``{card_id: purpose}`` 快照。
+
+        出站链路每次发消息都要查用途，逐张 ``purpose_of()`` 就要反复
+        拿锁。这里一次拿完锁返回一个 dict，调用方在本地查表 ——
+        热路径（每次玩家聊天都走）值得这么写。
+        """
+        with self._lock:
+            return {
+                str(a.get("id") or ""): normalize_purpose(a.get("purpose"))
+                for a in self.adapters
+            }
+
     @staticmethod
     def is_configured(adapter: dict[str, Any]) -> bool:
         """卡片是否已填有效连接信息（决定 Hub 是否为其建连）。"""
@@ -630,10 +775,17 @@ class ConnectionManager:
         return copy.deepcopy(candidates[0])
 
     def to_flat_config(self, adapter: dict[str, Any]) -> dict[str, Any]:
-        """把一张 qqofficial 卡片展开成网关消费的扁平配置（兼容旧键）。"""
+        """把一张 qqofficial 卡片展开成网关消费的扁平配置（兼容旧键）。
+
+        ★ ``purpose`` 必须在这里剔除。它是**路由元数据**，只有 hub / 插件
+          侧的路由判定需要它；网关拿到它没有任何用途，反而会因为
+          ``QQBotGateway`` 把 config 原样存进 ``self.config`` 而消失在
+          一堆网关配置里 —— 以后想找"这张卡是干嘛的"就得翻网关内部状态。
+          插件侧要读用途一律走 ``conn_mgr.purpose_of(card_id)``。
+        """
         flat: dict[str, Any] = {}
         for key, value in adapter.items():
-            if key in ("type", "id", "name", "enabled", "sync"):
+            if key in ("type", "id", "name", "enabled", "sync", "purpose"):
                 continue
             if key in ("suppress_connection_log", "connect_interval", "extra_intents"):
                 continue

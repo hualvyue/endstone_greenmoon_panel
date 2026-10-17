@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>白名单申请</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!--__GM_CSS__-->
+</head>
+<body>
+    <div class="card">
+        <h1>📝 申请加入白名单</h1>
+        <p style="color:#888; font-size:14px;">填写你的游戏内名字，提交后等待管理员审核。</p>
+        <label for="apply-name">游戏名（游戏内 ID）</label>
+        <input type="text" id="apply-name" placeholder="例如 Steve">
+        <label for="apply-xuid">XUID <span style="color:#888;">（选填，可加快审核）</span></label>
+        <input type="text" id="apply-xuid" placeholder="选填">
+        <label for="apply-note">备注 <span style="color:#888;">（选填）</span></label>
+        <textarea id="apply-note" rows="3" placeholder="例如：朋友介绍 / 申请原因"></textarea>
+        <button onclick="submitApply()">提交申请</button>
+        <div id="status"></div>
+        <div id="check-area" style="margin-top:16px;">
+            <label for="check-name">查询申请状态</label>
+            <div style="display:flex; gap:6px;">
+                <input type="text" id="check-name" placeholder="输入游戏名">
+                <button onclick="checkStatus()" style="width:auto; margin-top:0;">查询</button>
+            </div>
+            <div id="check-result" style="margin-top:8px; font-size:13px;"></div>
+        </div>
+        <p class="hint">审核通过后管理员会把你的名字加入白名单；未开启白名单的服务器无需申请。</p>
+    </div>
+    <!--__GM_JS__-->
+</body>
+</html>

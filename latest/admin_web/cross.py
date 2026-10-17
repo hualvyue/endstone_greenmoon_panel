@@ -160,6 +160,17 @@ class CrossManager(object):
     def enabled(self):
         return bool(self.cfg.get("enabled")) and self.role() in ("master", "slave")
 
+    def experimental(self):
+        """实验性玩家状态同步是否启用（疾跑/状态、buff、收纳袋诊断、掉线保护）。
+
+        默认 **False** —— 即原版跨服行为。缺失该键（老 cross.json）时
+        同样按 False 处理，保证升级后行为不变。
+        """
+        try:
+            return bool(self.cfg.get("experimental", False))
+        except Exception:
+            return False
+
     def start(self):
         if self.started or not self.enabled():
             return

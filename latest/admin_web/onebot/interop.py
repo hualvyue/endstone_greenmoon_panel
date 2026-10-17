@@ -22,10 +22,57 @@ from typing import Any, Callable
 _QQ_TO_MC_HINTS = ("查状态", "服务器状态", "状态", "在线", "tps")
 _CMD_PREFIX = "/"
 
+# 常见 CQ 码。拼接成一条正则一次扫完，比逐个 replace 快且不会误伤。
+# 形如 [CQ:at,qq=123]、[CQ:image,file=xxx.jpg,url=http://...]
+_CQ_RE = re.compile(r"\[CQ:([a-zA-Z_]+)((?:,[^\]]*)?)\]")
+# CQ 码里各字段的 key=value（value 允许含逗号，所以按 key 名切分）
+_CQ_KV_RE = re.compile(r"(?:^|,)([a-zA-Z_]+)=([^,]*)")
+
+
+def _parse_cq(raw: str) -> list[dict[str, Any]]:
+    """把 raw_message 里的 CQ 码解析成 OneBot 的 message 段数组。
+
+    为什么需要它：很多实现（含老版本 go-cqhttp / 部分 NapCat 配置）
+    只下发 ``raw_message`` 而**不**下发结构化的 ``message`` 数组。
+    原实现遇到这种情况直接把整串 raw 文本返回，于是
+    ``[CQ:at,qq=123] 你好`` 会原样进游戏、进关键词匹配 ——
+    用户看到的是「聊天里混着 [CQ:at,qq=...] 这种奇怪东西」，
+    而真正有用的文本被 CQ 码污染，关键词匹配自然全部失效。
+    """
+    out: list[dict[str, Any]] = []
+    pos = 0
+    for m in _CQ_RE.finditer(raw):
+        if m.start() > pos:
+            plain = raw[pos:m.start()]
+            if plain:
+                out.append({"type": "text", "data": {"text": plain}})
+        ctype = m.group(1)
+        data: dict[str, Any] = {}
+        for k, v in _CQ_KV_RE.findall(m.group(2) or ""):
+            # CQ 码里实体是 HTML 转义的，这里做一次反转义
+            data[k] = (v.replace("&#44;", ",").replace("&#91;", "[")
+                        .replace("&#93;", "]").replace("&amp;", "&"))
+        out.append({"type": ctype, "data": data})
+        pos = m.end()
+    if pos < len(raw):
+        tail = raw[pos:]
+        if tail:
+            out.append({"type": "text", "data": {"text": tail}})
+    return out
+
 
 def _extract_text(data: dict[str, Any]) -> str:
     """从 OneBot message 段或 raw_message 抽取纯文本。"""
     segments = data.get("message")
+    if not isinstance(segments, list):
+        # ★ 没有结构化 message 时，别直接把 raw_message 当纯文本用，
+        # 先尝试解析出 CQ 码再走同一套抽取逻辑。
+        raw = data.get("raw_message")
+        if isinstance(raw, str) and "[CQ:" in raw:
+            segments = _parse_cq(raw)
+            if segments:
+                data = dict(data)
+                data["message"] = segments
     if isinstance(segments, list):
         chunks: list[str] = []
         for seg in segments:
@@ -37,17 +84,25 @@ def _extract_text(data: dict[str, Any]) -> str:
                 chunks.append(str(sdata.get("text", "")))
             elif stype == "at" and sdata.get("qq") not in (None, ""):
                 chunks.append(f"@{sdata.get('qq')}")
+            elif stype == "image":
+                # 图片要有占位符，否则「发图配字」的消息在游戏里
+                # 会变成一段看不出有图的纯文字，用户以为图丢了
+                chunks.append("[图片]")
         text = "".join(chunks).strip()
         if text:
             return text
     raw = data.get("raw_message")
     if isinstance(raw, str):
-        return raw.strip()
+        # 兜底路径也要把 CQ 码清掉，绝不把 [CQ:xxx] 原样送进游戏
+        return _CQ_RE.sub("", raw).strip()
     return ""
 
 
 class OneBotInterop:
     """把 OneBot 群/私聊消息路由到互通链路，并按来源适配器回复。"""
+
+    # 同一个未绑定群多久之内只提示一次（秒）
+    _UNBOUND_HINT_COOLDOWN = 600.0
 
     def __init__(self, plugin, event_bus, hub, *, register: bool = True) -> None:
         self.plugin = plugin
@@ -55,6 +110,8 @@ class OneBotInterop:
         self.hub = hub
         self._log = plugin.logger
         self._registered = False
+        # 未绑定群提示冷却表：key = "card_id:group_id" → 上次提示时间
+        self._unbound_hint: dict[str, float] = {}
         if register:
             self.register()
 
@@ -79,7 +136,19 @@ class OneBotInterop:
         try:
             if not isinstance(data, dict):
                 return
-            if data.get("post_type") != "message":
+            post_type = str(data.get("post_type") or "")
+            # ★ 不再把非 message 的包直接扔掉。
+            # 原实现开头就是 ``if post_type != "message": return``，
+            # 于是 notice（群成员增减、撤回、戳一戳）和 request（加群/加好友申请）
+            # 这两类事件**永远到不了任何订阅者**，子插件里注册的
+            # ``gm.bot.on_notice`` / ``on_request`` 形同虚设。
+            # 现在把它们派发到总线，由订阅者按需处理；message 仍走原路径。
+            if post_type in ("notice", "request", "meta_event"):
+                self._dispatch_event(post_type, data)
+                return
+            if post_type != "message":
+                # 未知 post_type：也派发出去，别静默吞掉
+                self._dispatch_event(post_type or "unknown", data)
                 return
             adapter = self._resolve_adapter(data)
             if adapter is None:
@@ -94,6 +163,24 @@ class OneBotInterop:
                 self._handle_private(card, adapter, data)
         except Exception as e:
             self._log.warning(f"[OneBot互通] 处理入站消息失败: {e}")
+
+    def _dispatch_event(self, kind: str, data: dict[str, Any]) -> None:
+        """把 notice / request / meta_event 派发给总线订阅者。"""
+        try:
+            adapter = self._resolve_adapter(data)
+            card = self._card_of(adapter) if adapter is not None else None
+            try:
+                self.bus.emit(f"onebot.{kind}", {"event": data, "adapter": adapter, "card": card})
+            except Exception:
+                pass
+            # 再走一次统一事件名，方便只订阅一处就能收全部
+            try:
+                self.bus.emit("onebot.event", {"kind": kind, "event": data,
+                                               "adapter": adapter, "card": card})
+            except Exception:
+                pass
+        except Exception as e:
+            self._log.warning(f"[OneBot互通] 派发 {kind} 事件失败: {e}")
 
     def _resolve_adapter(self, data: dict[str, Any]):
         adapter_id = data.get("_lumen_adapter_id")
@@ -185,8 +272,23 @@ class OneBotInterop:
 
         bound = self._is_bound_group(card, group_id)
         if not bound:
-            # 未绑定群：仅提示一次，不做互通
-            self._reply_group(adapter, group_id, "本群尚未绑定服务器，无法使用互通功能。")
+            # 未绑定群：不互通。
+            #
+            # ⚠ 注释里一直写着「仅提示一次」，但代码里**没有任何去重**，
+            # 于是群里每来一条消息就回一遍「本群尚未绑定服务器」——
+            # 一个活跃群几分钟内就能把机器人刷成复读机，
+            # 而且这些回复是**主动消息**，直接消耗官方「单群 1000 条/天」的额度。
+            # 现在按 (卡片, 群) 做一个冷却窗口，窗口内只提示一次。
+            gkey = f"{card.get('id') or ''}:{group_id}"
+            now = time.time()
+            if now - self._unbound_hint.get(gkey, 0.0) >= self._UNBOUND_HINT_COOLDOWN:
+                self._unbound_hint[gkey] = now
+                # 顺手清理过期项，避免长期运行下无界增长
+                if len(self._unbound_hint) > 512:
+                    for k, ts in list(self._unbound_hint.items()):
+                        if now - ts > self._UNBOUND_HINT_COOLDOWN:
+                            self._unbound_hint.pop(k, None)
+                self._reply_group(adapter, group_id, "本群尚未绑定服务器，无法使用互通功能。")
             return
 
         # 管理指令：/cmd
@@ -199,6 +301,67 @@ class OneBotInterop:
                 self._log.info(f"[OneBot互通] 管理员 {sender_name} 执行指令：{cmd}")
                 self._dispatch_cmd(cmd)
                 self._reply_group(adapter, group_id, f"✅ 已执行指令：{cmd}")
+            return
+
+        # ---- 正则触发引擎（普通消息）----
+        #
+        # ⚠ 与 qqbot.py 同一个道理：位置必须晚于「已绑定群判定」和
+        #    `/cmd` 管理员校验，否则规则里的 executeCommand 会变成
+        #    任何群成员都能用的提权入口，未绑定群也能白嫖指令执行。
+        #    放在这里则只能匹配「过完权限校验、还没当普通聊天转发」的内容。
+        #
+        #    block=True 的规则返回 True → 这条消息到此为止。
+        #
+        # ★ 用途闸门（与 qqbot.py 严格对齐）。
+        #   ``/cmd`` 及以上属于"管理机器人本身"，任何用途的卡都该能用
+        #   （否则一张「空着」的卡连管理员指令都不通，第三方插件没法调试）。
+        #   而正则 / 关键词 / 状态查询 / QQ→MC 属于**群服互通业务**，
+        #   只有 purpose == bridge 的卡才做。
+        #   ⚠ 这个判断必须两处一致：官方卡和 OneBot 卡各走一条代码路径，
+        #     只改一处的典型症状是"官方机器人听话了，个人号还在乱转发"。
+        _relay_ok = True
+        try:
+            # ``_card_of`` 用的是 ``conn_mgr.get_view()``，返回的就是配置真源，
+            # 所以直接读 card["purpose"] 即可 —— 不必再经 conn_mgr 拿一次锁。
+            # 只有字段缺失（老配置刚升级、还没走 _normalize）时才回查一次。
+            _raw = card.get("purpose")
+            if isinstance(_raw, str) and _raw:
+                _relay_ok = _raw == "bridge"
+            else:
+                _cid = str(card.get("id") or "")
+                _mgr = getattr(self.plugin, "conn_mgr", None)
+                if _cid and _mgr is not None:
+                    _relay_ok = str(_mgr.purpose_of(_cid) or "bridge") == "bridge"
+        except Exception:
+            # 取不到用途时按"可以互通"处理 —— 与 hub._gateway_purpose 的
+            # 兜底策略一致：静默停止转发比多发一条消息严重得多。
+            _relay_ok = True
+
+        if _relay_ok:
+          try:
+            engine = getattr(self.plugin, "regex_engine", None)
+            if engine is not None:
+                pack = {
+                    "card_id": str(card.get("id") or ""),
+                    "group_id": group_id,
+                    "user_id": user_id,
+                    "message_id": msg_id,
+                    "message": data.get("message"),
+                    "raw_message": content,
+                    "time": data.get("time") or int(time.time()),
+                    "self_id": str(data.get("self_id", "") or ""),
+                    "domain": "qq",
+                    "sender": {
+                        "nickname": sender_name,
+                        "role": "admin" if self._is_admin(card, user_id) else "member",
+                    },
+                }
+                if engine.handle_message(content, pack):
+                    return
+          except Exception as e:
+            self._log.warning(f"[OneBot互通] 正则引擎处理失败: {e}")
+
+        if not _relay_ok:
             return
 
         # 自定义关键词
@@ -279,11 +442,21 @@ class OneBotInterop:
 
         def _look(groups):
             for g in (groups or []):
-                if isinstance(g, dict) and str(g.get("openid", "") or "") == gid:
-                    nm = str(g.get("name") or "").strip()
-                    # 名字等于标识本身 → 当初就没填名字，不算有效群名。
-                    if nm and nm != gid:
-                        return nm
+                if not isinstance(g, dict):
+                    continue
+                # ★ 群标识的字段名在不同卡片类型里不一样：
+                #   * 官方 QQ 卡 → ``openid``（群 openid）
+                #   * OneBot / websocket 卡 → ``group_id``（数字群号）
+                # 原实现只看 ``openid``，于是 websocket 卡片永远查不到群名，
+                # 游戏里一直显示兜底占位。这里两个都认，并且和 gid 做
+                # 字符串比较（一方可能是 int）。
+                ids = [str(g.get("openid", "") or ""), str(g.get("group_id", "") or "")]
+                if gid not in ids:
+                    continue
+                nm = str(g.get("name") or "").strip()
+                # 名字等于标识本身 → 当初就没填名字，不算有效群名。
+                if nm and nm not in ids:
+                    return nm
             return ""
 
         try:

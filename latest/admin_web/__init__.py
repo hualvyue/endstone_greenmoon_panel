@@ -1,4 +1,4 @@
-__version__ = "4.2.0"
+__version__ = "10.2.3"
 PLUGIN_NAME = "GreenMoon面板"
 
 from .core import GreenMoonPlugin

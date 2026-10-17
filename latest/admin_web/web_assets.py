@@ -1,10 +1,15 @@
 """网页前端资源（服务器管理面板）。
 
 前端源码以独立文件存放于本包 static/ 目录：
-  - *.html     页面结构
-  - *.css      样式（每页一份）
-  - *.js       脚本（每页一份）
-  - brand/     品牌位图形（gm.svg），由 /__gm/brand.svg 对外提供
+  - *.html       页面结构
+  - *.css        样式（每页一份）
+  - *.js         脚本（每页一份）
+  - *.extra.js   附带脚本（可选），会被拼到 *.js **之后**
+  - brand/       品牌位图形（gm.svg），由 /__gm/brand.svg 对外提供
+
+``*.extra.js`` 是给「体积大、单独成库、不参与业务逻辑」的第三方脚本准备的
+（目前只有 admin.extra.js = QRCode 生成库）。页面里只有一个空 ``<script>``
+标签、脚本全靠本模块回填，**写不进 <script src=...>**，所以只能拼接。
 
 html 中用原位标记 <!--__GM_CSS__--> / <!--__GM_JS__--> 占位，
 本模块读取后原位回填，得到与内嵌时代完全一致的 HTML 字符串。
@@ -139,12 +144,27 @@ def _build(key: str) -> str:
     html = _read(key + ".html")
     css_path = _STATIC / (key + ".css")
     js_path = _STATIC / (key + ".js")
+    extra_path = _STATIC / (key + ".extra.js")
     if _BRAND_PREFIX in html:
         html = _fill_brand(html)
     if _CSS_MARK in html and css_path.exists():
         html = html.replace(_CSS_MARK, css_path.read_text(encoding="utf-8"))
     if _JS_MARK in html and js_path.exists():
         js_text = js_path.read_text(encoding="utf-8")
+        # 附带脚本拼在业务脚本**之前**：QRCode 库要先定义好全局对象，
+        # 后面的 admin.js 才能在函数体里直接引用。
+        #
+        # ⚠ 每个源码文件都自带 <script>/<style> 包裹（这是本仓库的约定，
+        #   见 static/*.js 首尾行），因此 extra 文件**也必须自带**
+        #   <script> 标签。曾经漏了，结果整段 QRCode 库以裸文本落进
+        #   <body>，其中 '<svg ...'、'<path d="' 这类字符串被 HTML 解析器
+        #   当成真标签开始解析 —— 后面的代码全被吞掉，浏览器里
+        #   `typeof qrcode === 'undefined'`，二维码永远渲染不出来。
+        #
+        # 整段 JS（含 extra）拼好之后再算哈希 —— 只对 js_text 取哈希的话，
+        # 改 extra 不会刷新版本戳，浏览器会捧着旧缓存跑新后端。
+        if extra_path.exists():
+            js_text = extra_path.read_text(encoding="utf-8") + "\n" + js_text
         html = html.replace(_JS_MARK, js_text)
         if _JS_REV_MARK in html:
             digest = hashlib.sha1(js_text.encode("utf-8")).hexdigest()[:12]

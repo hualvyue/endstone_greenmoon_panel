@@ -1,0 +1,2 @@
+[endstone]
+greenmoon-panel = admin_web.plugin:GreenMoonPlugin

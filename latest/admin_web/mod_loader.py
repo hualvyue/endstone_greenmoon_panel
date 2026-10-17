@@ -114,9 +114,57 @@ KNOWN_PERMISSIONS = (
     "players", "logs", "console", "detail", "bots", "bindings",
     "cross", "mods", "backup", "cloud", "gamerules", "worlds",
     "perm", "scoreboard", "gametools", "files", "diag", "account",
+    # 玩家可信度（加权安全系统）
+    "trust",
     # 读写**自己包内**的 config.json（gm.config）。注意它不含「读别人的」——
     # gm.config 的 uuid 只能由 current_owner() 反查，不接受调用方传入。
     "config",
+    # ★ 白名单 / 封禁。
+    #
+    # 这两个 scope 原先只出现在 web.py 的 _scope_gate 里（面板前端用），
+    # **不在本清单中** —— 于是子插件即使在 manifest 里写了 "whitelist"，
+    # 安装期校验也会直接报「permissions 含未知权限」而装不上。
+    # 现在补齐：gm.whitelist / gm.ban 都按这两个 scope 自校验。
+    #
+    # ⚠ 它们是**高危**权限：白名单决定谁能进服、封禁决定谁进不来。
+    #   子插件申请时请想清楚，不要图省事写 "*"。
+    "whitelist", "bans",
+    # ★ AI（gm.ai）。三个 scope 分开，是因为影响面差得很远：
+    #
+    #   "ai"               —— 探测 AI 状态、问一句答一句、注册自己的工具。
+    #                         消耗服主额度，但不改任何全局策略。
+    #   "ai:control"       —— 改接管级别。这等于决定"AI 能不能不等确认
+    #                         就删玩家的存档"，影响**所有**子插件与
+    #                         所有内置工具。必须单独申请。
+    #   "ai:irreversible"  —— 注册不可逆等级的工具。这类工具在级别 2 下
+    #                         会被 AI 直接执行，影响面与内置的
+    #                         delete_player_data 同级。
+    #
+    #   分三级而不是一个 "*" 就够：一个只想"问 AI 几个问题"的子插件
+    #   不该顺手获得"把服务器推进完全放开模式"的能力。
+    "ai", "ai:control", "ai:irreversible",
+
+    # ★ 区块日志与区域回档（gm.region）。
+    #
+    # ⚠ 高危：``region`` 里的回档接口能**直接改写世界里的方块**，
+    #   而且能拉出"谁在什么时候动了哪里"的完整流水（属于玩家隐私）。
+    #   申请前请想清楚 —— 一个只想"读一下最近有什么破坏"的子插件，
+    #   不该顺手获得"把整片区域恢复掉"的能力。
+    #
+    #   特别提醒：回档是**异步分批**执行的，函数返回只代表"已受理"，
+    #   不代表"已完成"。想知道结果请订阅 ``region.subscribe()``。
+    "region",
+
+    # ★ 第三方插件面板（gm.panel / admin_web.panel）。
+    #
+    # 拿到它，子插件就能把自己的一组设置项挂进主面板的「🧩 插件面板」
+    # 板块，由用户集中配置。
+    #
+    # 为什么这也要单独授权：面板里的输入最终会喂给**注册者的 saver 回调**，
+    # 而那个回调在主插件主线程里执行。等于给了子插件一个"让用户在
+    # 高权限界面里帮我填参数"的通道 —— 面板本身会做校验（字段白名单、
+    # 类型归一化、面罩密码），但不该默认开启。
+    "panel",
 )
 
 #: 子插件包内**声明**设置字段的文件（随包分发，只读，定义"有哪些设置项"）。
@@ -1304,6 +1352,31 @@ class ModLoader(object):
                 gm.bot._drop_owner(self.plugin, uuid)
             except Exception as e:
                 self._log("warning", f"清理子插件 {uuid} 图片钩子失败: {e}")
+            # ★ AI 工具同理，而且后果更重：不注销的话，工具仍然留在
+            #   TOOL_REGISTRY 里（AI 看得见、会去调），但 handler 指向
+            #   已经不在 sys.modules 里的模块方法 —— 一调就抛
+            #   ModuleNotFoundError，日志里全是"工具执行失败"，
+            #   而真正的原因（那个子插件早没了）一句都看不到。
+            try:
+                gm.ai.unregister_all(uuid)
+            except Exception as e:
+                self._log("warning", f"清理子插件 {uuid} 的 AI 工具失败: {e}")
+
+        # ★ 第三方插件面板同理，而且这里必须是**按来源整批清**，
+        #   不能依赖插件自己记得调 unregister：
+        #   · 它在 teardown 里可能压根没写（很多作者会忘）；
+        #   · 它可能中途改过 plugin_id，按 pid 逐个删会漏；
+        #   · teardown 抛异常时后面的清理根本不会执行。
+        #   留下孤儿面板的后果很具体：主面板上挂着一个点进去必然报错的
+        #   入口（loader/saver 指向已经卸载的模块），用户只会觉得"面板坏了"。
+        try:
+            reg = getattr(self.plugin, "panel_registry", None)
+            if reg is not None:
+                n = reg.purge_by_source(uuid)
+                if n:
+                    self._log("info", f"已一并摘除子插件 {uuid} 的 {n} 个面板")
+        except Exception as e:
+            self._log("warning", f"清理子插件 {uuid} 的面板失败: {e}")
 
         if mod_name is None and uuid not in self._owned_modules:
             self._log("warning", f"子插件 {uuid} 未处于加载状态")

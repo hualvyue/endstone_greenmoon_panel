@@ -19,7 +19,9 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from .connections import ConnectionManager
+from .connections import (
+    ConnectionManager, PURPOSE_BRIDGE, normalize_purpose,
+)
 
 
 def _render(template, **values):
@@ -138,6 +140,11 @@ class AdapterHub(object):
                 # 现在两个都设，并且读取侧也做了防御（双保险）。
                 gw._card_id = str(card.get("id") or "")
                 gw._card_name = str(card.get("name") or "")
+                # 用途也挂到实例上。出站链路拿的是 gw 而不是 card，
+                # 每次都回去查 conn_mgr 要拿锁；挂一份在实例上是 O(1)。
+                # ⚠ 用途变更后必须重启网关才会刷新这个副本 ——
+                # ``_bots_update`` 本来就是「改完就重启」，所以是自洽的。
+                gw._card_purpose = normalize_purpose(card.get("purpose"))
                 gw.start()
                 self.logger.info(f"[机器人] 官方网关已启动：{card.get('name')}")
                 return gw
@@ -179,6 +186,7 @@ class AdapterHub(object):
                     on_state_change=_on_state,
                 )
                 gw._connected = conn_event
+                gw._card_purpose = normalize_purpose(card.get("purpose"))
                 gw.start()
                 self.logger.info(f"[机器人] WebSocket 网关已启动：{card.get('name')}（{'正向' if int(card.get('ws_type', 0) or 0) == 0 else '反向'}）")
                 return gw
@@ -200,6 +208,34 @@ class AdapterHub(object):
     def restart(self, libs=None) -> None:
         self.stop_all()
         self._boot(libs)
+
+    def reset_circuits(self, reason: str = "配置重新加载") -> int:
+        """复位所有网关的熔断/限流状态，返回被复位的网关数量。
+
+        ★ 为什么需要这个入口
+        -------------------
+        熔断态的**唯一**自动复位点是 QQ 网关收到 READY（即真的连上了）。
+        除此之外只能人工复位。原先这条路径靠在 ``QQBotGateway.start()``
+        里无条件清标志实现 —— 那是个致命设计：``start()`` 会被监督线程
+        间接反复走到，于是熔断标志每 5 秒被清一次，熔断从未生效过
+        （实测 38 秒重连 7 次，还撞出官方限流 code 100017）。
+
+        现在复位改为显式动作：面板「重新保存机器人配置」时经
+        ``_restart_qq_gateway`` 调用本方法。注意 ``restart()`` 本身走的是
+        ``stop_all()`` + ``_boot()`` 重建实例，新实例天然是干净状态，
+        所以这里主要覆盖的是「同一实例、只按了保存」的场景。
+        """
+        n = 0
+        for gw in list(self._gateways.values()):
+            fn = getattr(gw, "reset_circuit", None)
+            if not callable(fn):
+                continue
+            try:
+                fn(reason)
+                n += 1
+            except Exception as e:
+                self.logger.warning(f"[机器人] 复位熔断状态失败: {e}")
+        return n
 
     # -------------------------------------------------------------- queries
     @staticmethod
@@ -241,6 +277,23 @@ class AdapterHub(object):
             pass
         return False
 
+    @staticmethod
+    def _gw_circuit_tripped(gw) -> bool:
+        """网关是否处于「已熔断」状态（不再自动重连）。
+
+        ★ 为什么面板要区分「熔断」和「离线」
+        ----------------------------------
+        intents 配置错误时（4013/4914/4915），网关会主动停止重连。
+        如果面板只显示「离线」，服主的第一反应是「网络又抖了，等等就好」，
+        然后一直等下去 —— 而实际上必须去 QQ 开放平台改后台配置，
+        干等永远不会恢复。把熔断状态单独暴露出来，前端才能给出
+        「去检查事件订阅」这种可执行的指引。
+        """
+        try:
+            return bool(getattr(gw, "_intent_circuit_open", False))
+        except Exception:
+            return False
+
     def status(self) -> list[dict[str, Any]]:
         result = []
         for card in self.manager.adapters_view():
@@ -257,6 +310,7 @@ class AdapterHub(object):
                 "configured": self.manager.is_configured(card),
                 "running": gw is not None,
                 "connected": connected if gw is not None else False,
+                "circuit_tripped": self._gw_circuit_tripped(gw) if gw is not None else False,
             })
         return result
 
@@ -265,6 +319,55 @@ class AdapterHub(object):
 
     def gateway_by_id(self, gid: str):
         return self._gateways.get(gid)
+
+    # ------------------------------------------------------------- 用途查询
+    def _gateway_purpose(self, gid: str, gw: Any = None) -> str:
+        """取网关对应卡片的用途，带两层兜底。
+
+        优先级：
+          1. 实例上挂的 ``_card_purpose``（出站热路径用，O(1)）；
+          2. ``conn_mgr.purpose_of(card_id)``（配置真源。用在网关是
+             旧实例、没被本轮 ``_spawn`` 挂过属性的情况）；
+          3. 默认值 ``bridge``。
+
+        ★ 为什么兜底不是 ``reserved``
+        ---------------------------
+        ``reserved`` 的语义是"不接任何内置管线"。如果某个网关因为
+        属性缺失被误判成 reserved，它就会**静默停止转发** ——
+        群消息进不来、游戏消息出不去，而面板上一切正常（连着、绿灯）。
+        这种静默失效比"多发了一条消息"严重得多。所以兜底取
+        ``bridge``：最坏情况是回到了升级前的行为，而不是功能凭空消失。
+        """
+        if gw is None:
+            gw = self._gateways.get(str(gid))
+        if gw is None:
+            return PURPOSE_BRIDGE
+        inst = getattr(gw, "_card_purpose", None)
+        if isinstance(inst, str) and inst:
+            return normalize_purpose(inst)
+        try:
+            return self.manager.purpose_of(str(gid))
+        except Exception:
+            return PURPOSE_BRIDGE
+
+    def gateways_by_purpose(self, purpose: str, *, adapter_type: str = "") -> list:
+        """按用途列出**在跑的**网关实例，可选再按适配器类型过滤。
+
+        与 ``ConnectionManager.adapters_of_purpose`` 的区别：那个查的是
+        **配置**（配置说启用 ≠ 实际起来了，缺 AppID 的卡会被跳过），
+        这个查的是**正在跑的实例**。发消息必须用这个 —— 配置里启用、
+        但网关没起来的卡，往它发消息只会抛异常。
+        """
+        want = normalize_purpose(purpose)
+        out = []
+        for gid, gw in list(self._gateways.items()):
+            if gw is None:
+                continue
+            if adapter_type and getattr(gw, "adapter_type", None) != adapter_type:
+                continue
+            if self._gateway_purpose(str(gid), gw) == want:
+                out.append(gw)
+        return out
 
     def primary_gateway(self):
         """主网关：第一个官方网关实例，否则 None。"""
@@ -278,9 +381,17 @@ class AdapterHub(object):
         """把游戏事件（聊天 / 加入 / 离开）按各自卡片配置转发给 WebSocket 机器人。
 
         kind: ``chat`` / ``join`` / ``leave``
+
+        ★ 只发给用途为 ``bridge`` 的卡。
+        用途 ``broadcast`` 的卡是给插件主动播报用的（AI 结论、报错提示），
+        让玩家聊天也灌进去会让那个群变成一个"什么都有的聊天群"，用户
+        选播报用途的意图就落空了；``reserved`` 的卡更是明确要求不接
+        内置管线 —— 第三方插件要自己接管，我们多嘴发一条就是干扰。
         """
         for gid, gw in list(self._gateways.items()):
             if getattr(gw, "adapter_type", None) != "websocket":
+                continue
+            if self._gateway_purpose(gid, gw) != PURPOSE_BRIDGE:
                 continue
             try:
                 card = self.manager.get_view(str(gid)) or {}

@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: endstone-greenmoon-panel
+Version: 9.3.5
+Summary: GreenMoon面板：一个用来高效管理服务器的面板
+Requires-Python: >=3.11
+Requires-Dist: endstone

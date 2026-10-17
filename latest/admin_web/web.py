@@ -36,6 +36,13 @@ from typing import Optional, Dict, Any, Callable, List, Tuple
 
 import asyncio
 
+from .atomic_io import (
+    atomic_write_bytes,
+    atomic_write_text,
+    retry_on_lock,
+    atomic_replace_dir,
+)
+
 from endstone.plugin import Plugin
 from endstone import Player
 from endstone.inventory import ItemType, MapMeta, ItemStack
@@ -50,6 +57,8 @@ from endstone.event import (
 
 from .mod_loader import mime_for as _gmod_mime_for
 from .mod_loader import SETTINGS_MASK as MASKED_SECRET
+from . import qqofficial_bind as _qqofficial_bind
+from .trust import TRUST_DEFAULTS, REASON_LABELS
 
 from .core import (
     DEFAULT_CROSS_CONFIG,
@@ -84,6 +93,45 @@ _BRAND_FILE = Path(__file__).resolve().parent / "static" / "brand" / "gm.svg"
 #: 磁盘上的 SVG 只在首次请求时读一次，之后走内存缓存。
 _brand_cache: Optional[bytes] = None
 _brand_lock = threading.Lock()
+
+
+def _json_sanitize(obj: Any) -> Any:
+    """把结构里**无法用 UTF-8 编码**的字符转成可读转义，保证 JSON 一定能编码。
+
+    ★ 为什么需要它（这是一次真实的线上故障）：
+      Linux 允许文件名是任意字节序列。Python 用 ``surrogateescape`` 把它们
+      映射成 U+DC80~U+DCFF 区间的"代理字符" —— 例如 GBK 编码的「中」
+      （字节 0xD6 0xD0）会被读成 ``'\\udcd6\\udcd0'``。这种字符
+      **不能** ``encode('utf-8')``，会直接抛 ``UnicodeEncodeError``。
+
+      后果非常隐蔽：只要服务器根目录里躺着**一个**从 Windows/FTP 传上来的
+      乱码文件名，``/api/files/list`` 就会 500，整个「🗂️ 文件管理」板块
+      打不开，而前端只显示一句 "HTTP 500" —— 用户完全看不出跟文件名有关。
+
+      这里把它们还原成 ``\\xd6\\xd0`` 这样的可见转义：信息不丢（用户一眼
+      能看出是编码问题，可以据此手动重命名），而且一定能编码。
+
+    递归处理 dict / list / tuple / set；其它类型原样返回。
+    """
+    if isinstance(obj, str):
+        # 绝大多数情况没有代理字符，直接放行（这段是热路径，别做多余的事）
+        if not any(0xDC80 <= ord(c) <= 0xDCFF for c in obj):
+            return obj
+        out = []
+        for ch in obj:
+            o = ord(ch)
+            if 0xDC80 <= o <= 0xDCFF:
+                out.append("\\x%02x" % (o - 0xDC00))     # 还原成原始字节
+            elif 0xD800 <= o <= 0xDFFF:
+                out.append("\\u%04x" % o)               # 其它代理字符，保底
+            else:
+                out.append(ch)
+        return "".join(out)
+    if isinstance(obj, dict):
+        return {_json_sanitize(k): _json_sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return [_json_sanitize(v) for v in obj]
+    return obj
 
 
 def _brand_svg_bytes() -> Optional[bytes]:
@@ -537,159 +585,6 @@ def has_mapart_renderer(view, renderer_cls):
         pass
     return False
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-def _strip_ansi(s: str) -> str:
-
-    return _ANSI_RE.sub("", s)
-
-class _ConsoleStreamCapture:
-                                                                                                        
-
-                                                                                               
-                                                                                                             
-                                                                            
-       
-
-    def __init__(self, plugin: "GreenMoonPlugin"):
-        self.plugin = plugin
-        self._orig_stdout = None
-        self._orig_stderr = None
-        self._reader_thread = None
-        self._pipe_read = None
-        self._stop = False
-
-    def start(self) -> bool:
-        # ★ 幂等保护：已在采集时先停掉上一次。
-        #
-        # 旧实现直接 os.dup(1)/os.dup(2) 再 dup2 覆盖，如果 start()
-        # 被调用两次而中间没有 stop()（插件热重载时很常见：disable
-        # 没走完就 enable 了），上一次 dup 出来的 fd 立刻失去引用 →
-        # 永久泄漏；而且 stdout 被套了两层管道，同一条日志会被采集
-        # 两次，面板里就出现重复行。
-        if self._reader_thread is not None and self._reader_thread.is_alive():
-            try:
-                self.stop()
-            except Exception:
-                pass
-        else:
-            # 线程已死但 fd 还在（异常退出路径）也要清干净
-            self._restore()
-            try:
-                if getattr(self, "_pipe_read", None) is not None:
-                    os.close(self._pipe_read)
-                    self._pipe_read = None
-            except Exception:
-                pass
-        try:
-
-            try:
-                sys.stdout.flush()
-            except Exception:
-                pass
-            try:
-                sys.stderr.flush()
-            except Exception:
-                pass
-            self._orig_stdout = os.dup(1)
-            self._orig_stderr = os.dup(2)
-            r, w = os.pipe()
-            os.dup2(w, 1)
-            os.dup2(w, 2)
-            os.close(w)
-            self._pipe_read = r
-            self._stop = False
-            self._reader_thread = threading.Thread(
-                target=self._read_loop, args=(r,), daemon=True, name="console-capture"
-            )
-            self._reader_thread.start()
-            return True
-        except Exception as e:
-            self.plugin.logger.warning(f"控制台日志采集启动失败: {e}")
-            self._restore()
-            return False
-
-    def stop(self):
-        self._stop = True
-        # 先唤醒/收拢读线程，再关读端 —— 直接关会让阻塞在 os.read 的
-        # 线程抛 OSError 退出（已有 except OSError 兜着），但显式 join
-        # 一下能保证不会再往日志缓冲区写。
-        try:
-            if self._reader_thread is not None and self._reader_thread.is_alive() \
-                    and self._reader_thread is not threading.current_thread():
-                self._reader_thread.join(timeout=2)
-        except Exception:
-            pass
-        try:
-            if getattr(self, "_pipe_read", None) is not None:
-                os.close(self._pipe_read)
-                self._pipe_read = None
-        except Exception:
-            pass
-        self._restore()
-
-    def _restore(self):
-        try:
-            if self._orig_stdout is not None:
-                os.dup2(self._orig_stdout, 1)
-                os.close(self._orig_stdout)
-                self._orig_stdout = None
-        except Exception:
-            pass
-        try:
-            if self._orig_stderr is not None:
-                os.dup2(self._orig_stderr, 2)
-                os.close(self._orig_stderr)
-                self._orig_stderr = None
-        except Exception:
-            pass
-
-    def _read_loop(self, r):
-        buf = b""
-        while not self._stop:
-            try:
-                data = os.read(r, 4096)
-            except OSError:
-                break
-            if not data:
-                break
-
-            try:
-                if self._orig_stdout is not None:
-                    os.write(self._orig_stdout, data)
-            except Exception:
-                pass
-            buf += data
-            while True:
-                idx = buf.find(b"\n")
-                if idx < 0:
-                    break
-                line = buf[:idx]
-                buf = buf[idx + 1:]
-                self._emit_line(line)
-
-    def _emit_line(self, line: bytes):
-        try:
-            text = _strip_ansi(line.decode("utf-8", errors="replace")).rstrip("\r")
-            if not text.strip():
-                return
-            level = self._guess_level(text)
-            self.plugin._append_console_log(level, text)
-        except Exception:
-            pass
-
-    @staticmethod
-    def _guess_level(text: str) -> str:
-        t = text.upper()
-        if "ERROR" in t or "FATAL" in t or "[ERR" in t:
-            return "ERROR"
-        if "WARN" in t:
-            return "WARNING"
-        if "DEBUG" in t:
-            return "DEBUG"
-        if "TRACE" in t:
-            return "TRACE"
-        return "INFO"
 
 class RateLimiter:
 
@@ -786,6 +681,22 @@ def _is_conn_error(exc) -> bool:
 #: 需要任意一个权限即可（登录用户都能访问）
 _SCOPE_ANY = {"__any__"}
 
+# ---------------------------------------------------------- QQ 扫码绑定任务表
+#
+# ⚠ 只存内存、绝不落盘：``bind_key`` 是解密 AppSecret 的密钥，
+#   落盘就等于把密钥留在磁盘上，任何能读插件目录的人都能解出凭据。
+#   进程重启后任务失效，用户重新扫一次即可。
+_QR_LOCK = threading.RLock()
+_QR_TASKS: "dict[str, dict]" = {}      # task_id -> {bind_key, created_at, ip}
+_QR_IP_LAST: "dict[str, float]" = {}   # ip -> 上次创建时间
+_QR_TASK_MAX = 1024                    # 任务表上限（超出逐出最旧）
+_QR_TASK_TTL = 600.0                   # 任务存活时长（秒）
+_QR_IP_COOLDOWN = 30.0                 # 同 IP 创建冷却（秒）
+
+#: 规则库允许的最大条数。规则是逐条线性扫描的，跑在主线程热路径上，
+#: 放开数量等于给主线程埋一个 O(n) 的雷。
+_MAX_RULES = 200
+
 #: 精确路径 → scope 集合
 _SCOPE_EXACT: "dict[str, set]" = {
     "/admin": _SCOPE_ANY,
@@ -801,18 +712,26 @@ _SCOPE_EXACT: "dict[str, set]" = {
     "/api/system/stats": {"players", "detail", "logs"},
     "/api/messages": {"logs", "players", "detail"},
     "/api/console": {"console", "logs"},
-    "/api/scoreboards": {"scoreboard", "console"},
-    "/api/objective": {"scoreboard", "console"},
-    "/api/score": {"scoreboard", "console"},
+    # ★ 记分板 / 权限管理已并入「操作控制台」板块，授权 scope 也随之并入
+    #   console。这里保留 scoreboard / perm 作为**兼容备用键**是危险的 ——
+    #   它们已不在 _ALL_SCOPES 里，任何临时账户都不可能被授予，
+    #   留着只会让人误以为"给了 scoreboard 也能用"。
+    "/api/scoreboards": {"console"},
+    "/api/objective": {"console"},
+    "/api/score": {"console"},
     "/api/gamerules": {"gamerules"},
     "/api/gamerule": {"gamerules"},
     "/api/bans": {"bans"},
     "/api/ban": {"bans"},
     "/api/unban": {"bans"},
-    "/api/permission": {"perm", "worlds", "gamerules"},
-    "/api/properties": {"perm", "worlds", "gamerules"},
-    "/api/properties/save": {"perm", "worlds", "gamerules"},
-    "/api/properties/set": {"perm", "worlds", "gamerules"},
+    # 权限节点管理：原属 perm，perm 并入 console 后改归 console。
+    "/api/permission": {"console", "worlds", "gamerules"},
+    # ↓ 以下三个是 server.properties 页面的接口，**与权限管理无关**。
+    #   原实现借用了 perm 这个 scope，perm 摘除后必须换成 worlds ——
+    #   它们本来就同时被 worlds / gamerules 覆盖，语义上是"改配置文件"。
+    "/api/properties": {"worlds", "gamerules"},
+    "/api/properties/save": {"worlds", "gamerules"},
+    "/api/properties/set": {"worlds", "gamerules"},
     "/api/worlds": {"worlds"},
     "/api/world/switch": {"worlds"},
     "/api/restart": {"account"},
@@ -841,12 +760,35 @@ _SCOPE_PREFIX: "list[tuple[str, set]]" = [
     ("/api/tools/config", {"backup", "cloud"}),
     ("/api/cloud/", {"cloud"}),
     ("/api/gametools", {"gametools"}),
+    ("/api/trust", {"trust"}),
+    # AI 自动管理。**独立 scope**，不并进 gametools 或 tools/config ——
+    # 这个板块能配置外部网络请求目标（base_url），且能看到全服日志分析
+    # 结果，权限级别和"绑定/签到"那种日常功能不该混在一起。
+    ("/api/ai", {"ai"}),
     ("/api/mod/", {"mods"}),
     ("/api/gmods", {"mods"}),
-    ("/api/diag", {"diag"}),
+    # ★ 诊断已并入「账户与安全」板块，scope 随之改归 account。
+    #   diag 已不在 _ALL_SCOPES 中，保留旧键会让该端点永远无法授权。
+    ("/api/diag", {"account"}),
     ("/api/account/", {"account"}),
     ("/api/security/", {"account"}),
     ("/api/files/", {"files"}),
+    # ---- 区块日志与恢复 ----
+    #
+    # ★ 为什么单独开一个 ``region`` scope 而不并进 ``worlds``：
+    #   它能**改写世界里的方块**，也能翻出"谁在什么时候动了哪里"的
+    #   完整流水 —— 后者属于玩家隐私数据。这两件事叠加起来，比单纯
+    #   "切换存档"的敏感度高一档，不该跟着 worlds 一起被授出去。
+    ("/api/region/", {"region"}),
+    # ---- 第三方插件面板 ----
+    #
+    # 「查看有哪些插件接进来了」和「去改它们的配置」用同一个 scope，
+    # 差异在 handler 内部：``/api/ext/panel/save`` 还过了
+    # ``_require_admin_role``，临时账号一律进不去。
+    ("/api/ext/", {"ext"}),
+    # ---- 内置文档 ----
+    # 入口在「🔑 账户与安全 → 📖 文档与条款」，按同板块的权限对待。
+    ("/api/docs/", {"account"}),
 ]
 
 
@@ -864,6 +806,75 @@ def _scopes_for_path(path: str) -> set:
         if p.startswith(prefix):
             return set(scopes)
     return set()
+
+
+def _validate_regex_rules(rules) -> str:
+    """校验正则规则库，返回错误描述（空串表示通过）。
+
+    为什么要在**服务端**再校验一遍：规则里的 ``pattern`` 会被逐条
+    compile 到服务器主线程热路径上，一个 ``(a+)+`` 就能把服务器卡死。
+    前端校验只是体验，后端校验才是护栏。
+    """
+    from .regex_engine import (
+        EVENT_TYPES, ACTION_TYPES, _is_risky_pattern, _MAX_PATTERN_LEN,
+    )
+    if len(rules) > _MAX_RULES:
+        return f"规则条数超过上限（{_MAX_RULES}）"
+    seen_ids = set()
+    for idx, rule in enumerate(rules):
+        where = f"第 {idx + 1} 条规则"
+        if not isinstance(rule, dict):
+            return f"{where}不是对象"
+        rid = str(rule.get("id") or "").strip()
+        if not rid:
+            return f"{where}缺少 id"
+        if rid in seen_ids:
+            return f"{where}的 id 重复：{rid}"
+        seen_ids.add(rid)
+        trigger = str(rule.get("triggerType") or "message")
+        if trigger not in ("message", "event"):
+            return f"{where}的 triggerType 只能是 message 或 event"
+        event_type = str(rule.get("eventType") or "")
+        if trigger == "event" and event_type and event_type not in EVENT_TYPES:
+            return f"{where}的 eventType 不受支持：{event_type}"
+        pattern = str(rule.get("pattern") or "")
+        if len(pattern) > _MAX_PATTERN_LEN:
+            return f"{where}的 pattern 超过 {_MAX_PATTERN_LEN} 字符"
+        if pattern and _is_risky_pattern(pattern):
+            return (f"{where}的 pattern 含嵌套量词或超大重复限定"
+                    f"（ReDoS 风险，如 (a+)+ / a{{100000}}）")
+        if pattern:
+            flags = str(rule.get("flags") or "")
+            if any(ch not in "ims" for ch in flags):
+                return f"{where}的 flags 只支持 i / m / s"
+            try:
+                compile_pattern_checked(pattern, flags)
+            except Exception as e:
+                return f"{where}的 pattern 语法错误：{e}"
+        conditions = rule.get("conditions")
+        if conditions is not None and not isinstance(conditions, list):
+            return f"{where}的 conditions 必须是数组"
+        for cond in conditions or []:
+            if not isinstance(cond, dict):
+                return f"{where}的 conditions 含非对象元素"
+            if str(cond.get("operator") or "==") not in ("==", "!=", "includes", "matches"):
+                return f"{where}的条件操作符不受支持：{cond.get('operator')}"
+        actions = rule.get("actions")
+        if actions is not None and not isinstance(actions, list):
+            return f"{where}的 actions 必须是数组"
+        for act in actions or []:
+            if not isinstance(act, dict):
+                return f"{where}的 actions 含非对象元素"
+            atype = str(act.get("type") or "")
+            if atype not in ACTION_TYPES:
+                return f"{where}的动作类型不受支持：{atype}"
+    return ""
+
+
+def compile_pattern_checked(pattern: str, flags: str):
+    """把校验用的 compile 单独包一层，避免在 web.py 顶部多引一个名字。"""
+    from .regex_engine import compile_pattern
+    return compile_pattern(pattern, flags)
 
 
 def check_scope_coverage(known_paths) -> "list[str]":
@@ -989,8 +1000,15 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     if self._ip_in_cidr(ip, str(item)):
                         return True
             return False
-        except Exception:
-            return True
+        except Exception as e:
+            # ★ 原来是 fail-open（异常即放行）。IP 白名单是唯一挡在控制台接口
+            # 前面的闸门，读配置出错时放行等于白名单形同虚设；
+            # 这里改成 fail-closed，并明确记一条日志方便定位。
+            try:
+                self.plugin.logger.error(f"[安全] IP 白名单校验异常，已按拒绝处理: {e}")
+            except Exception:
+                pass
+            return False
 
     _SESSIONS = {}
     _SESSIONS_LOCK = threading.Lock()
@@ -1127,12 +1145,25 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             # 账号或密码为空 —— 绝不能放行！
             # 原来这里直接 `return ("admin", None, "")`，等于未配置密码时
             # 任何人都以管理员身份进入（可执行控制台指令、删文件、封禁玩家）。
-            # 现在 _load_config 会在启动时自动生成随机密码，正常不会走到这里；
-            # 万一走到了（比如用户手工清空了配置），一律拒绝并说明原因。
-            self.plugin.logger.error(
-                "[面板] 管理员账号或密码为空，已拒绝所有管理请求。"
-                "请检查 data/config.json 的 admin_user / admin_pass。"
-            )
+            #
+            # ★ v7.7.7：自动生成随机密码的功能已按要求**删除**。
+            #   所以"账号或密码为空"是一个**真实可达**的状态（首次启动
+            #   未配置时就是如此），这里必须稳稳拒绝。
+            #   提示语走 _ensure_admin_credentials()：它给出的是
+            #   "用 /gm 指令怎么配"的可执行指引，而不是让用户对着
+            #   "用户名或密码错误"发懵 —— 他根本还没设过密码。
+            #
+            # ⚠ 节流：_resolve_auth 是**每个请求**都会走的路径。未配置时
+            #   若每次都打一条 error，面板一被扫就会刷满日志、还拖慢响应。
+            #   这里 60 秒最多报一次，足够用户看到，也不会淹掉别的日志。
+            now = time.time()
+            last = getattr(self.plugin, "_no_cred_warn_at", 0.0)
+            if now - last >= 60:
+                self.plugin._no_cred_warn_at = now
+                self.plugin.logger.error(
+                    "[面板] 管理员账号或密码未配置，已拒绝所有管理请求。"
+                    + self.plugin._ensure_admin_credentials()
+                )
             return (None, set(), "")
         # 用 compare_digest 而非 == ：== 在首个不同字符处就会返回，
         # 理论上可被逐字节计时探测出正确凭证。
@@ -1369,22 +1400,50 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_qqbot_status(parsed.query)
             elif path == '/api/qqbot/group/new':
                 self._handle_api_qqbot_group_new(parsed.query)
+            elif path == '/api/qqbot/qr/create':
+                self._handle_api_qqbot_qr_create()
+            elif path == '/api/qqbot/qr/poll':
+                self._handle_api_qqbot_qr_poll(parsed.query)
+            elif path == '/api/qqbot/regex/rules':
+                self._handle_api_regex_rules()
             elif path == '/api/bots/list':
                 self._handle_api_bots_list()
             elif path == '/api/tools/config':
                 self._handle_api_tools_config()
+            elif path == '/api/cloud/list':
+                self._handle_api_cloud_list(parsed.query)
+            elif path == '/api/cloud/stats':
+                self._handle_api_cloud_stats()
             elif path == '/api/diag':
                 self._handle_api_diag()
             elif path == '/api/diag/stacks':
                 self._handle_api_diag_stacks()
+            # ★ /api/diag/toggle 已挪到 do_POST（写操作不应挂在 GET 上），
+            # 这里保留一个明确的 405 而不是 404，方便旧前端/运维排查。
             elif path.startswith('/api/diag/toggle'):
-                self._handle_api_diag_toggle(parsed.query)
+                self._send_json({"error": "诊断开关已改为 POST /api/diag/toggle"}, 405)
             elif path == '/api/cross/config':
                 self._handle_cross_config()
             elif path == '/api/cross/status':
                 self._handle_cross_status()
             elif path == '/api/gametools':
                 self._handle_api_gametools()
+            elif path == '/api/trust':
+                self._handle_api_trust(parsed.query)
+            elif path == '/api/trust/detail':
+                self._handle_api_trust_detail(parsed.query)
+            elif path == '/api/ai/config':
+                self._handle_api_ai_config()
+            elif path == '/api/ai/status':
+                self._handle_api_ai_status()
+            elif path == '/api/ai/audit':
+                self._handle_api_ai_audit(parsed.query)
+            elif path == '/api/ai/tools':
+                self._handle_api_ai_tools()
+            elif path == '/api/ai/undo':
+                self._handle_api_ai_undo_list(parsed.query)
+            elif path == '/api/ai/prompts':
+                self._handle_api_ai_prompts()
             elif path == '/api/gmods/list':
                 self._handle_api_gmods_list()
             elif path == '/api/gmods/files':
@@ -1403,8 +1462,29 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_account_temps()
             elif path == '/api/security/info':
                 self._handle_api_security_info()
+            # ---- 内置文档（账户与安全 → 📖 文档与条款）----
+            elif path == '/api/docs':
+                self._handle_api_docs(parsed.query)
+            elif path == '/api/docs/list':
+                self._handle_api_docs_list()
             elif path == '/api/files/list':
                 self._handle_api_files_list(parsed.query)
+            # ---- 区块日志与恢复（WebUI）----
+            elif path == '/api/region/status':
+                self._handle_api_region_status()
+            elif path == '/api/region/log':
+                self._handle_api_region_log(parsed.query)
+            elif path == '/api/region/events':
+                self._handle_api_region_events(parsed.query)
+            elif path == '/api/region/at':
+                self._handle_api_region_at(parsed.query)
+            elif path == '/api/region/sessions':
+                self._handle_api_region_sessions(parsed.query)
+            # ---- 第三方插件面板 ----
+            elif path == '/api/ext/panels':
+                self._handle_api_ext_panels()
+            elif path == '/api/ext/panel':
+                self._handle_api_ext_panel(parsed.query)
             elif path == '/api/files/read':
                 self._handle_api_files_read(parsed.query)
             elif path == '/api/files/download':
@@ -1536,6 +1616,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_qqbot_config_save(data)
             elif path == '/api/qqbot/group/rename':
                 self._handle_api_qqbot_group_rename(data)
+            elif path == '/api/qqbot/regex/save':
+                self._handle_api_regex_save(data)
+            elif path == '/api/qqbot/regex/toggle':
+                self._handle_api_regex_toggle(data)
+            elif path == '/api/qqbot/regex/delete':
+                self._handle_api_regex_delete(data)
+            elif path == '/api/qqbot/regex/test':
+                self._handle_api_regex_test(data)
             elif path == '/api/bots/create':
                 self._handle_api_bots_create(data)
             elif path == '/api/bots/update':
@@ -1554,8 +1642,40 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_backup_restore(data)
             elif path == '/api/cloud/test':
                 self._handle_api_cloud_test(data)
+            elif path == '/api/cloud/lookup':
+                self._handle_api_cloud_lookup(data)
             elif path == '/api/gametools/save':
                 self._handle_api_gametools_save(data)
+            elif path == '/api/trust/save':
+                self._handle_api_trust_save(data)
+            elif path == '/api/trust/adjust':
+                self._handle_api_trust_adjust(data)
+            elif path == '/api/trust/device_trust':
+                self._handle_api_trust_device_trust(data)
+            elif path == '/api/trust/trusted_person':
+                self._handle_api_trust_trusted_person(data)
+            elif path == '/api/trust/export':
+                self._handle_api_trust_export(data)
+            elif path == '/api/trust/clear':
+                self._handle_api_trust_clear(data)
+            elif path == '/api/trust/recalc':
+                self._handle_api_trust_recalc(data)
+            elif path == '/api/ai/save':
+                self._handle_api_ai_save(data)
+            elif path == '/api/ai/test':
+                self._handle_api_ai_test(data)
+            elif path == '/api/ai/run':
+                self._handle_api_ai_run(data)
+            elif path == '/api/ai/broadcast':
+                self._handle_api_ai_broadcast(data)
+            elif path == '/api/ai/audit/confirm':
+                self._handle_api_ai_audit_confirm(data)
+            elif path == '/api/ai/audit/reject':
+                self._handle_api_ai_audit_reject(data)
+            elif path == '/api/ai/undo/rollback':
+                self._handle_api_ai_undo_rollback(data)
+            elif path == '/api/ai/autonomy':
+                self._handle_api_ai_autonomy(data)
             elif path == '/api/mod/install':
                 self._handle_api_mod_install(data)
             elif path == '/api/mod/delete':
@@ -1592,6 +1712,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_account_test_mode(data)
             elif path == '/api/security/save':
                 self._handle_api_security_save(data)
+            elif path == '/api/diag/toggle':
+                self._handle_api_diag_toggle(data)
             elif path == '/api/files/mkdir':
                 self._handle_api_files_mkdir(data)
             elif path == '/api/files/delete':
@@ -1604,6 +1726,24 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_files_write(data)
             elif path == '/api/files/copy':
                 self._handle_api_files_copy(data)
+            # ---- 区块日志与恢复（WebUI）----
+            elif path == '/api/region/preview':
+                self._handle_api_region_preview(data)
+            elif path == '/api/region/rollback':
+                self._handle_api_region_rollback(data)
+            elif path == '/api/region/undo':
+                self._handle_api_region_undo(data)
+            elif path == '/api/region/purge':
+                self._handle_api_region_purge(data)
+            elif path == '/api/region/settings':
+                self._handle_api_region_settings(data)
+            # ---- 第三方插件面板 ----
+            elif path == '/api/ext/panel/save':
+                self._handle_api_ext_panel_save(data)
+            elif path == '/api/ext/register':
+                self._handle_api_ext_register(data)
+            elif path == '/api/ext/unregister':
+                self._handle_api_ext_unregister(data)
             else:
                 # 路由未命中：body 已由上面的 _read_post_data 读掉，
                 # 这里直接回 404 即可，不会再污染连接。
@@ -1674,7 +1814,16 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         # 客户端复用连接发下一个请求时会读到本次响应的残留字节，
         # 表现为「偶发 JSON 解析失败 / 面板卡住 / 请求错乱」。
         try:
-            body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            try:
+                body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            except UnicodeEncodeError:
+                # ★ 见 _json_sanitize 的说明：非 UTF-8 文件名会变成代理字符，
+                #   直接 encode 会抛 UnicodeEncodeError，而它**不在**下面的
+                #   网络异常元组里 —— 于是整个响应 500，前端只看到一句
+                #   "HTTP 500"，完全看不出是文件名惹的祸。
+                #   这里退一步净化后再序列化；净化后一定能编码。
+                body = json.dumps(_json_sanitize(data),
+                                  ensure_ascii=False).encode('utf-8')
             self.send_response(status)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(body)))
@@ -1682,6 +1831,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
             pass
+        except Exception as e:
+            # 兜底：任何其它异常都要留痕。静默冒泡成 500 会让"哪一步炸了"
+            # 彻底失传，排查只能靠猜。
+            try:
+                self.plugin.logger.error(
+                    f"发送 JSON 响应失败: {type(e).__name__}: {e}")
+            except Exception:
+                pass
 
     def _serve_brand_asset(self):
         """送出品牌位 SVG。文件缺失时返回一个透明占位图，避免前端裂图。
@@ -1706,16 +1863,42 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
             pass
 
-    def _serve_html(self, html_content):
+    def _serve_html(self, html_content, status=200):
+        # ★ Content-Length 必须具备，理由同 _send_json 的长注释：
+        #   HTTP/1.1 keep-alive 下浏览器靠它判断响应体边界。缺了只能等
+        #   连接关闭，表现为「面板打开慢 / 偶发白屏 / 响应串了」。
+        #   页面是 utf-8，长度必须按**编码后的字节数**算，不能用字符数。
         try:
-            self.send_response(200)
+            raw = str(html_content).encode('utf-8')
+            self.send_response(status)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
-
+            self.send_header('Content-Length', str(len(raw)))
             self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
             self.end_headers()
-            self.wfile.write(html_content.encode('utf-8'))
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
+            pass
+
+    def _serve_bytes(self, raw: bytes, content_type: str, status=200,
+                     extra_headers: "dict" = None):
+        """带 Content-Length 地送出一段字节。
+
+        ★ 抽出这个通用出口是为了杜绝"忘记写 Content-Length"：
+          原先 _serve_html / _serve_file 都是裸 write，靠关闭连接来
+          标识结束。那在 keep-alive 下是错的 —— 上一个响应体的尾巴
+          会被当成下一个响应的开头解析。
+        """
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(raw)))
+            self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            for k, v in (extra_headers or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(raw)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
             pass
 
@@ -1727,11 +1910,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 content_type = 'text/html; charset=utf-8'
             else:
                 content_type = 'application/octet-stream'
-            self.send_response(200)
-            self.send_header('Content-Type', content_type)
-            self.end_headers()
-            self.wfile.write(content)
+            self._serve_bytes(content, content_type)
         except FileNotFoundError:
+            self.send_error(404, "File not found")
+        except IsADirectoryError:
             self.send_error(404, "File not found")
         except Exception as e:
             self.plugin.logger.error(f"读取文件失败: {e}")
@@ -2044,17 +2226,47 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True, "message": "已打印到服务端控制台",
                          "len": len(stacks), "stacks": stacks})
 
-    def _handle_api_diag_toggle(self, query):
+    def _handle_api_diag_toggle(self, data):
+        """切换诊断开关。
+
+        ★ 从 GET 挪到 POST：它是一次**有副作用的写操作**（落盘 _diag_save_cfg）。
+        GET 在浏览器/代理语义里必须幂等可预取、可被 <img>/<link> 触发，
+        放在 GET 上意味着链接一旦被爬或被预取就会改配置。改成 POST + JSON body。
+        为了兼容旧前端，body 缺字段时回落到 query string。
+        """
         try:
-            params = urllib.parse.parse_qs(query or "")
-            key = (params.get("key") or [""])[0]
-            v = (params.get("v") or ["1"])[0]
-            if key not in ("enabled", "detailed"):
+            if not self._require_admin_role("切换诊断开关"):
+                return
+            d = data if isinstance(data, dict) else {}
+            if not d:
+                qs = urllib.parse.urlparse(getattr(self, "path", "")).query
+                params = urllib.parse.parse_qs(qs or "")
+                d = {"key": (params.get("key") or [""])[0],
+                     "v": (params.get("v") or ["1"])[0]}
+            key = str(d.get("key", "") or "")
+            v = d.get("v", 1)
+            if key not in ("enabled", "detailed", "min_level"):
                 self._send_json({"error": "无效的开关项"}, 400)
                 return
-            self.plugin._diag_cfg[key] = str(v).lower() in ("1", "true", "on", "yes")
+            if key == "min_level":
+                # ★ 级别用**字符串白名单**校验，不能像布尔项那样强转。
+                #   非法值直接 400，避免把脏值写进 diag.json 后前端回填出
+                #   一个不存在的选项。空串是合法值 —— 表示「跟随详细日志」。
+                lv = str(v if v is not None else "").strip().lower()
+                if lv and lv not in self.plugin._PANEL_LEVEL_RANK:
+                    self._send_json({"error": f"无效的日志级别: {v!r}"}, 400)
+                    return
+                self.plugin._diag_cfg["min_level"] = lv
+            else:
+                if isinstance(v, str):
+                    v = v.strip().lower() in ("1", "true", "on", "yes")
+                self.plugin._diag_cfg[key] = bool(v)
             self.plugin._diag_save_cfg()
-            self._send_json({"ok": True, "enabled": self.plugin._diag_on(), "detailed": self.plugin._diag_verbose()})
+            self._send_json({"ok": True,
+                             "enabled": self.plugin._diag_on(),
+                             "detailed": self.plugin._diag_verbose(),
+                             "min_level": self.plugin._diag_cfg.get("min_level", ""),
+                             "effective": self.plugin._panel_min_level()})
         except Exception as e:
             self.plugin.logger.error(f"切换诊断设置失败: {e}")
             self._send_json({"error": f"切换诊断设置失败: {e}"}, 500)
@@ -2250,6 +2462,15 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         try:
             cross = getattr(self.plugin, "cross", None)
             cfg = dict(cross.cfg) if cross is not None else dict(DEFAULT_CROSS_CONFIG)
+            # ★ 跨服密码绝不能明文回前端。原实现直接 dict(cross.cfg) 全量下发，
+            # password 跟着进 JSON、再被 static/admin.js 写进 DOM——
+            # 任何能打开面板的人（含只勾了 cross 板块的临时账号）都能读到
+            # 并据此伪装成其它节点加入集群，进而伪造玩家数据/白名单/封禁同步。
+            # 这里改成等长掩码：前端看到「已设置」，留空即代表不修改。
+            secret = str(cfg.get("password", "") or "")
+            if secret:
+                cfg["password"] = "*" * len(secret)
+            cfg["password_set"] = bool(secret)
             self._send_json({"config": cfg})
         except Exception as e:
             self._send_json({"error": f"读取跨服配置失败: {e}"}, 500)
@@ -2266,6 +2487,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 "role": cross.role(),
                 "enabled": cross.enabled(),
                 "started": cross.started,
+                "experimental": bool(getattr(cross, "experimental", lambda: False)()),
                 "server_name": cross.cfg.get("server_name", ""),
                 "master_url": cross.cfg.get("master_url", ""),
                 "last_ping": cross.last_ping,
@@ -2291,7 +2513,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     role = "none"
                 cfg["role"] = role
                 cfg["server_name"] = str(data.get("server_name", cfg.get("server_name", "本服")) or "").strip() or cfg.get("server_name", "本服")
-                cfg["password"] = str(data.get("password", cfg.get("password", "")) or "")
+                # ★ 掩码语义：前端拿到的是 "*"*len，用户不动这个框就必须保留原密码。
+                # 只认「全星号」为掩码；真·密码恰好全是星号这种极端情况按掩码处理
+                # （跨服密码是机器生成的共享密钥，实际不会长这样）。
+                new_pass = str(data.get("password", "") or "")
+                if new_pass and not (set(new_pass) == {"*"}):
+                    cfg["password"] = new_pass
                 cfg["master_url"] = str(data.get("master_url", cfg.get("master_url", "")) or "").strip()
                 cfg["self_url"] = str(data.get("self_url", cfg.get("self_url", "")) or "").strip()
                 try:
@@ -2304,6 +2531,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                     for k in ("chat", "player_data", "whitelist", "ban"):
                         interop[k] = bool(received.get(k, interop.get(k, True)))
                 cfg["interop"] = interop
+                # 实验板开关。★ 用「键是否存在」判断而不是 data.get("experimental", False)：
+                # 老前端的 payload 里压根没有这个键，若用默认值兜底，
+                # 每次从旧页面保存配置都会把开着的实验板**静默关掉**。
+                if "experimental" in data:
+                    cfg["experimental"] = bool(data.get("experimental"))
+                else:
+                    cfg.setdefault("experimental", False)
                 cross.save()
                 cross.stop()
                 cross.start()
@@ -2341,17 +2575,27 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": f"测试失败: {e}"}, 500)
 
-    _ALL_SCOPES = ["players", "logs", "gamerules", "bans", "whitelist", "worlds", "perm",
-                   "scoreboard", "detail", "console", "qqbot", "cross", "backup", "cloud",
-                   "gametools", "mods", "diag", "files"]
+    # ★ 这里必须与前端 admin.html 的实际导航项一一对应。
+    #   perm / scoreboard 已并入「操作控制台」，diag 已并入「账户与安全」，
+    #   若继续留在列表里，临时账户授权界面会冒出**页面上已不存在**的板块，
+    #   授权后点进去是空白 —— 比少给权限更让人困惑。
+    _ALL_SCOPES = ["players", "logs", "gamerules", "bans", "whitelist", "worlds",
+                   "detail", "console", "qqbot", "cross", "backup", "cloud",
+                   "gametools", "mods", "files", "trust", "ai",
+                   # ↓ v9.2 新增
+                   #   region：区块日志与恢复（查方块变更 / 执行区域回档）
+                   #   ext   ：第三方插件面板（查看与配置别的插件）
+                   "region", "ext"]
 
     def _scope_label(self, s: str) -> str:
         labels = {
             "players": "在线玩家", "logs": "日志中心", "gamerules": "游戏规则", "bans": "封禁管理",
-            "whitelist": "白名单审核", "worlds": "多存档", "perm": "权限管理", "scoreboard": "记分板",
-            "detail": "玩家详情", "console": "操作控制台", "qqbot": "QQ机器人", "cross": "跨服互联",
+            "whitelist": "白名单审核", "worlds": "多存档",
+            "detail": "玩家详情", "console": "操作控制台（含权限与记分板）",
+            "qqbot": "QQ机器人", "cross": "跨服互联",
             "backup": "自动备份", "cloud": "云黑名单", "gametools": "签到绑定", "mods": "模组管理",
-            "diag": "诊断", "files": "文件管理",
+            "files": "文件管理", "trust": "玩家可信度", "ai": "AI 自动管理",
+            "region": "区块日志与恢复", "ext": "第三方插件面板",
         }
         return labels.get(s, s)
 
@@ -2378,6 +2622,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                          "all_scopes": self._ALL_SCOPES})
 
     def _handle_api_account_test_mode(self, data):
+        if not self._require_admin_role("修改测试模式"):
+            return
         try:
             # 缺字段时按「关闭」处理：保全默认关闭语义，
             # 不给「请求体里省略 test_mode」留下误开启的口子。
@@ -2391,6 +2637,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": f"保存测试模式失败: {e}"}, 500)
 
     def _handle_api_account_password(self, data):
+        if not self._require_admin_role("修改面板登录账号"):
+            return
         cfg = dict(getattr(self.plugin, "web_config", {}) or {})
         new_user = str((data or {}).get("admin_user", "") or "").strip()
         new_pass = str((data or {}).get("admin_pass", "") or "").strip()
@@ -2407,6 +2655,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True, "message": "账号/密码已更新"})
 
     def _handle_api_account_temp_create(self, data):
+        if not self._require_admin_role("创建临时账号"):
+            return
         scope_keys = set((data or {}).get("scopes") or []) & set(self._ALL_SCOPES)
         try:
             expires = int(float((data or {}).get("expires", 0)) or 0)
@@ -2438,6 +2688,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                          "expires": exp, "scopes": sorted(scope_keys)})
 
     def _handle_api_account_temp_revoke(self, data):
+        if not self._require_admin_role("撤销临时账号"):
+            return
         tid = str((data or {}).get("id", "") or "").strip()
         if not tid:
             self._send_json({"error": "缺少账户 id"}, 400)
@@ -2474,7 +2726,53 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         sw = dict((getattr(self.plugin, "web_config", {}) or {}).get("security_whitelist") or {})
         self._send_json({"ok": True, "enabled": bool(sw.get("enabled")), "ips": list(sw.get("ips") or [])})
 
+    # ==================================================================
+    # 内置文档（/api/docs）
+    #
+    # ★ 为什么把文档做成接口而不是写死进 HTML：
+    #   HTML 是内联进 admin.html 的，塞三篇长文档进去会把它撑到几百 KB，
+    #   每次开面板都要重新传一遍。改成按需拉取，只有服主真的点开才读盘。
+    #
+    # ★ 为什么归到 ``account`` scope 而不是谁都能看：
+    #   入口在「🔑 账户与安全」里，而条款里写明了本插件的风险与免责 ——
+    #   这类内容应当和"谁能改服务器密码"同级对待，不该给一个只有
+    #   ``players`` 权限的临时账号看到。
+    # ==================================================================
+
+    def _handle_api_docs_list(self):
+        """GET /api/docs/list —— 文档清单（不含正文）。"""
+        try:
+            from . import docs as _docs
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"文档模块不可用: {e}"}, 503)
+            return
+        try:
+            self._send_json({"ok": True, "docs": _docs.list_docs()})
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_docs(self, query):
+        """GET /api/docs?id=xxx —— 取一篇文档的正文（已渲染成 HTML）。"""
+        try:
+            from . import docs as _docs
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"文档模块不可用: {e}"}, 503)
+            return
+        qs = urllib.parse.parse_qs(query or "")
+        doc_id = str((qs.get("id") or [""])[0] or "").strip()
+        if not doc_id:
+            self._send_json({"ok": False, "error": "缺少 id"}, 400)
+            return
+        try:
+            r = _docs.render_doc(doc_id)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"文档渲染失败: {e}"}, 500)
+            return
+        self._send_json(r, 200 if r.get("ok") else 404)
+
     def _handle_api_security_save(self, data):
+        if not self._require_admin_role("保存安全白名单"):
+            return
         enabled = bool((data or {}).get("enabled"))
         raw = str((data or {}).get("ips", "") or "")
         ips = []
@@ -2510,9 +2808,12 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         self.plugin._log_admin_action(f"向控制台发送指令: {command}")
         self._send_json({"ok": True, "success": True, "message": f"已发送指令: {command}"})
 
+    # /api/tools/config 的 scope 是 backup+cloud_blacklist，就只能写这两块。
+    _TOOLS_CONFIG_SECTIONS = {"backup", "cloud_blacklist"}
+
     def _handle_api_tools_config_save(self, data):
         try:
-            ok, msg = self.plugin._save_tools_config(data)
+            ok, msg = self.plugin._save_tools_config(data, sections=self._TOOLS_CONFIG_SECTIONS)
             self._send_json({"ok": ok, "message": msg}) if ok else self._send_json({"error": msg})
         except Exception as e:
             self._send_json({"error": f"保存失败: {e}"}, 500)
@@ -2552,9 +2853,42 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
     def _handle_api_cloud_test(self, data):
         try:
             ok, msg, res = self.plugin._cloud_test()
-            self._send_json({"ok": ok, "message": msg, "data": res})
+            # 顺带把协商出的协议告诉前端，设置页要显示「新版 REST / 旧版 PHP」。
+            try:
+                style = self.plugin._cloud_api_style_name()
+            except Exception:
+                style = ""
+            self._send_json({"ok": ok, "message": msg, "data": res, "api_style": style})
         except Exception as e:
             self._send_json({"error": f"测试失败: {e}"}, 500)
+
+    def _handle_api_cloud_list(self, query=""):
+        """云黑明细（新版接口才有）。旧版返回 ok=False + 说明，前端优雅降级。"""
+        try:
+            qs = urllib.parse.parse_qs(query or "")
+            edition = (qs.get("edition") or [""])[0] or None
+            ok, msg, bans = self.plugin._cloud_list_bans(edition)
+            self._send_json({"ok": ok, "message": msg, "bans": bans or []})
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/cloud/list 异常: {e}")
+            self._send_json({"ok": False, "message": f"查询失败: {e}", "bans": []})
+
+    def _handle_api_cloud_stats(self):
+        try:
+            ok, msg, st = self.plugin._cloud_stats()
+            self._send_json({"ok": ok, "message": msg, "stats": st or {}})
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/cloud/stats 异常: {e}")
+            self._send_json({"ok": False, "message": f"查询失败: {e}", "stats": {}})
+
+    def _handle_api_cloud_lookup(self, data):
+        """手动查黑：排障用，按 XUID / IP 直接问云端。"""
+        try:
+            ok, msg, ban = self.plugin._cloud_lookup(data or {})
+            self._send_json({"ok": ok, "message": msg, "ban": ban})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/cloud/lookup 异常: {e}")
+            self._send_json({"ok": False, "message": f"查询失败: {e}"}, 500)
 
     def _handle_api_gametools(self):
         try:
@@ -2583,12 +2917,431 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.plugin.logger.error(f"GET /api/gametools 异常: {e}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
+    # /api/gametools/save 的 scope 是 gametools，但 _save_tools_config 一张表里有
+    # 6 个板块。只允许写「gametools 板块自己管得着」的那些，其余由各自的
+    # 专用接口负责（/api/tools/config 对应 backup+cloud_blacklist）。
+    _GAMETOOLS_SECTIONS = {"binding", "signin", "mods"}
+
     def _handle_api_gametools_save(self, data):
         try:
-            ok, msg = self.plugin._save_tools_config(data or {})
+            ok, msg = self.plugin._save_tools_config(data or {}, sections=self._GAMETOOLS_SECTIONS)
             self._send_json({"ok": bool(ok), "message": msg})
         except Exception as e:
             self.plugin.logger.error(f"POST /api/gametools/save 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    # ------------------------------------------------------------ 玩家可信度
+    # /api/trust* 的 scope 是 trust。_save_tools_config 那张表里有多个板块，
+    # 这里只允许写 trust 自己那一个，其余板块各有专用接口。
+    _TRUST_SECTIONS = {"trust"}
+
+    def _trust_mgr(self):
+        mgr = getattr(self.plugin, "trust", None)
+        if mgr is None:
+            raise RuntimeError("可信度模块未初始化")
+        return mgr
+
+    def _handle_api_trust(self, query=""):
+        """GET /api/trust —— 配置 + 玩家列表 + 统计。"""
+        try:
+            pl = self.plugin
+            mgr = self._trust_mgr()
+            cfg = mgr.cfg(force=True)
+            qs = urllib.parse.parse_qs(query or "")
+            keyword = (qs.get("q") or [""])[0]
+            limit = (qs.get("limit") or ["500"])[0]
+            try:
+                limit = int(limit)
+            except (TypeError, ValueError):
+                limit = 500
+
+            data = mgr.public_list(keyword=keyword, limit=limit)
+            data["config"] = cfg
+            data["defaults"] = json.loads(json.dumps(TRUST_DEFAULTS))
+            data["player_dir"] = str(mgr._player_dir)
+            data["backup_dir"] = str(mgr._backup_dir)
+            data["reasons"] = dict(REASON_LABELS)
+            data["ok"] = True
+            self._send_json(data)
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/trust 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_save(self, data):
+        """POST /api/trust/save —— 保存配置。"""
+        try:
+            mgr = self._trust_mgr()
+            ok, msg = self.plugin._save_tools_config(data or {}, sections=self._TRUST_SECTIONS)
+            if ok:
+                # 配置改了要立刻生效，不能等 5 秒 TTL 过期
+                mgr.invalidate_cfg()
+            self._send_json({"ok": bool(ok), "message": msg})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/trust/save 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_adjust(self, data):
+        """POST /api/trust/adjust —— 服主手动加减权。"""
+        try:
+            mgr = self._trust_mgr()
+            d = data or {}
+            key = str(d.get("key") or "").strip()
+            if not key:
+                return self._send_json({"ok": False, "error": "缺少玩家标识"}, 400)
+            try:
+                delta = float(d.get("delta"))
+            except (TypeError, ValueError):
+                return self._send_json({"ok": False, "error": "加减分值不是数字"}, 400)
+            note = str(d.get("note") or "")
+            by = str(getattr(self, "_auth_user", "") or "admin")
+            ok, msg, score = mgr.manual_adjust(key, delta, note, by)
+            self._send_json({"ok": bool(ok), "message": msg, "score": score,
+                             "error": "" if ok else msg}, 200 if ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/trust/adjust 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_device_trust(self, data):
+        """POST /api/trust/device_trust —— 标记/取消「信任此设备」。"""
+        try:
+            mgr = self._trust_mgr()
+            d = data or {}
+            key = str(d.get("key") or "").strip()
+            device_id = str(d.get("device_id") or "").strip()
+            if not key or not device_id:
+                return self._send_json({"ok": False, "error": "缺少玩家标识或设备 ID"}, 400)
+            on = bool(d.get("trusted", True))
+            by = str(getattr(self, "_auth_user", "") or "admin")
+            ok, msg = mgr.trust_device(key, device_id, on, by)
+            self._send_json({"ok": bool(ok), "message": msg,
+                             "error": "" if ok else msg}, 200 if ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/trust/device_trust 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_trusted_person(self, data):
+        """POST /api/trust/trusted_person —— 标记/取消「信任的人」。
+
+        ★ 与「信任此设备」的区别（两者很容易搞混，这里写清楚）
+        -----------------------------------------------------
+        * ``trusted_person``（本接口）= **玩家级**，永久保持满分，
+          绕过全部扣分逻辑（含断签惩罚）；
+        * ``trust_device``（另一个接口）= **设备级**，只是让该设备
+          不再被判定为"陌生设备"，玩家分数照常受其它规则影响。
+
+        所以本接口的影响面比设备信任**大得多**，是有意设计成需要
+        显式调用的独立入口，而不是混在设备信任里。
+        """
+        try:
+            mgr = self._trust_mgr()
+            d = data or {}
+            name = str(d.get("name") or d.get("key") or "").strip()
+            if not name:
+                return self._send_json({"ok": False, "error": "缺少玩家名/标识"}, 400)
+            on = bool(d.get("trusted", True))
+            ok = bool(mgr.set_trusted_person(name, on))
+            if not ok:
+                # 找不到档案是**预期内的业务结果**（只标记已有档案的玩家），
+                # 用 400 + 明确文案，而不是 500 —— 后者会让用户以为插件坏了。
+                return self._send_json({
+                    "ok": False,
+                    "error": f"未找到玩家「{name}」的可信度档案；"
+                             f"该玩家需先进入过服务器，或名字拼写有误。",
+                }, 400)
+            self._send_json({
+                "ok": True,
+                "trusted_person": on,
+                "message": f"已{'标记' if on else '取消'}「信任的人」：{name}",
+            })
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/trust/trusted_person 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_detail(self, query=""):
+        """GET /api/trust/detail?key=... —— 单个玩家完整档案。"""
+        try:
+            mgr = self._trust_mgr()
+            qs = urllib.parse.parse_qs(query or "")
+            key = (qs.get("key") or [""])[0]
+            rec = mgr.detail(key)
+            if rec is None:
+                return self._send_json({"ok": False, "error": "档案不存在"}, 404)
+            self._send_json({"ok": True, "record": rec})
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/trust/detail 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_export(self, data):
+        """POST /api/trust/export —— 导出全量档案。"""
+        try:
+            mgr = self._trust_mgr()
+            payload = mgr.export_all()
+            payload["ok"] = True
+            self._send_json(payload)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/trust/export 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_clear(self, data):
+        """POST /api/trust/clear —— 清空全部档案（需 confirm=DELETE，且先备份）。"""
+        try:
+            mgr = self._trust_mgr()
+            d = data or {}
+            confirm = str(d.get("confirm") or "").strip()
+            if confirm != "DELETE":
+                return self._send_json(
+                    {"ok": False, "error": "需要输入 DELETE 确认清空"}, 400)
+            if not bool(d.get("backup", True)):
+                # 用户明确选择不备份 —— 但仍然必须显式二次确认
+                if confirm != "DELETE":
+                    return self._send_json({"ok": False, "error": "确认无效"}, 400)
+            ok, msg = mgr.clear_all()
+            self._send_json({"ok": bool(ok), "message": msg,
+                             "error": "" if ok else msg}, 200 if ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/trust/clear 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_trust_recalc(self, data):
+        """POST /api/trust/recalc —— 手动触发一次结算（调试用）。"""
+        try:
+            mgr = self._trust_mgr()
+            import time as _t
+            mgr._last_settle_day = ""
+            mgr.tick()
+            self._send_json({"ok": True, "message": "结算任务已提交（后台执行）",
+                             "at": _t.strftime("%Y-%m-%d %H:%M:%S")})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/trust/recalc 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    # ------------------------------------------------------------------ AI 自动管理
+    # 这一组端点的共同前提：**模型只能提议，代码才能决定**。
+    # 所以这里没有任何"让模型直接执行"的路由 ——
+    # 写操作只有「保存配置 / 跑一次分析 / 播报 / 确认或驳回提议」这四类，
+    # 全都由人触发。分析本身也只是提交后台任务，不在请求线程里等 LLM。
+
+    def _handle_api_ai_config(self):
+        """GET /api/ai/config —— AI 配置（api_key 只回掩码）。"""
+        try:
+            pl = self.plugin
+            self._send_json({
+                "ok": True,
+                "config": pl._ai_config_public(),
+                "status": pl._ai_status(),
+                # 当前已配置的机器人用途分布 —— 前端据此提示
+                # 「你有 2 个 AI 播报机器人 / 0 个群服互通机器人」这类信息。
+                "purposes": pl._ai_purpose_summary(),
+            })
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/ai/config 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_status(self):
+        """GET /api/ai/status —— 轻量状态轮询（前端分析中每 2 秒拉一次）。"""
+        try:
+            pl = self.plugin
+            self._send_json({
+                "ok": True,
+                "status": pl._ai_status(),
+                "pending_proposals": len(pl._ai_proposals()),
+            })
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/ai/status 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_save(self, data):
+        """POST /api/ai/save —— 保存 AI 配置。"""
+        try:
+            ok, msg = self.plugin._save_ai_config(data or {})
+            if not ok:
+                self._send_json({"ok": False, "error": msg}, 400)
+                return
+            self._send_json({"ok": True, "message": msg,
+                             "config": self.plugin._ai_config_public(),
+                             "status": self.plugin._ai_status()})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/save 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_test(self, data):
+        """POST /api/ai/test —— 测试连接。**不消耗每日额度**。
+
+        为什么要单独一个端点而不是让前端"跑一次分析看看"：
+        测试连接会真的发一次网络请求，但用的是极短的探针提示词、
+        且不计入 daily_limit —— 否则用户点几次"测试"就把额度用完了，
+        体验上完全说不通。
+        """
+        try:
+            ok, msg = self.plugin._ai_test_connection()
+            self._send_json({"ok": bool(ok)} if ok else {"ok": False, "error": msg})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/test 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_run(self, data):
+        """POST /api/ai/run —— 手动触发一次分析（异步，立即返回）。"""
+        try:
+            task = str((data or {}).get("task") or "log_analysis").strip()
+            extra = str((data or {}).get("extra") or "")
+            res = self.plugin._ai_run(task, manual=True, extra=extra)
+            code = 200 if res.get("ok") else 400
+            self._send_json(res, code)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/run 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_broadcast(self, data):
+        """POST /api/ai/broadcast —— 把最近一次结论推给「AI 播报」机器人。"""
+        try:
+            n = self.plugin._ai_broadcast_last()
+            if n <= 0:
+                self._send_json({"ok": False, "error":
+                                 "没有可播报的内容，或尚未配置「AI 播报」用途的机器人。"
+                                 "可在「QQ机器人」页把某个机器人的用途改成「AI 播报」。"}, 400)
+                return
+            self._send_json({"ok": True, "message": f"已播报给 {n} 个机器人", "count": n})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/broadcast 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_audit(self, query):
+        """GET /api/ai/audit —— 待确认提议列表（不可逆操作的唯一入口）。"""
+        try:
+            qs = urllib.parse.parse_qs(query or "")
+            include_done = (qs.get("include_done") or ["0"])[0] in ("1", "true", "yes")
+            try:
+                limit = int((qs.get("limit") or ["50"])[0])
+            except ValueError:
+                limit = 50
+            items = self.plugin._ai_proposals(include_done=include_done, limit=limit)
+            self._send_json({"ok": True, "proposals": items, "count": len(items)})
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/ai/audit 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_audit_confirm(self, data):
+        """POST /api/ai/audit/confirm —— 人工确认执行一条提议。
+
+        ★ 这是**唯一**能让不可逆操作真正落地的路径。
+          发起人是人（服主点了确认），不是模型。审计里会区分这两者。
+        """
+        try:
+            pid = str((data or {}).get("id") or "").strip()
+            if not pid:
+                self._send_json({"ok": False, "error": "缺少提议 id"}, 400)
+                return
+            ok, msg = self.plugin._ai_confirm_proposal(
+                pid, actor=str(getattr(self, "_auth_user", "") or "admin"))
+            self._send_json({"ok": True, "message": msg} if ok
+                             else {"ok": False, "error": msg},
+                            200 if ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/audit/confirm 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_audit_reject(self, data):
+        """POST /api/ai/audit/reject —— 驳回一条提议（永不会执行）。"""
+        try:
+            pid = str((data or {}).get("id") or "").strip()
+            if not pid:
+                self._send_json({"ok": False, "error": "缺少提议 id"}, 400)
+                return
+            ok, msg = self.plugin._ai_reject_proposal(
+                pid, actor=str(getattr(self, "_auth_user", "") or "admin"))
+            self._send_json({"ok": True, "message": msg} if ok
+                             else {"ok": False, "error": msg},
+                            200 if ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/audit/reject 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_undo_list(self, query):
+        """GET /api/ai/undo —— 撤销窗口里的记录。
+
+        这些是**已经执行了**的不可逆操作，在窗口内还能一键回滚。
+        与「待确认提议」是互补的两件事：
+          · 提议 = 还没做，等服主点头（级别 0/1）
+          · 撤销 = 已经做了，服主可以反悔（级别 2）
+        """
+        try:
+            qs = urllib.parse.parse_qs(query or "")
+            include_done = (qs.get("include_done") or ["0"])[0] in ("1", "true", "yes")
+            try:
+                limit = int((qs.get("limit") or ["50"])[0])
+            except ValueError:
+                limit = 50
+            items = self.plugin._ai_undo_list(include_done=include_done,
+                                              limit=limit)
+            self._send_json({"ok": True, "items": items, "count": len(items)})
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/ai/undo 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_undo_rollback(self, data):
+        """POST /api/ai/undo/rollback —— 回滚一条已执行的不可逆操作。
+
+        ★ 与 confirm 一样，这是**人触发**的动作。AI 自己不会调它
+          （``runner.undo`` 只在 web 层与管理面板里被调用）。
+        """
+        try:
+            rid = str((data or {}).get("id") or "").strip()
+            if not rid:
+                self._send_json({"ok": False, "error": "缺少撤销 id"}, 400)
+                return
+            res = self.plugin._ai_undo(
+                rid, actor=str(getattr(self, "_auth_user", "") or "admin"))
+            self._send_json(res, 200 if res.get("ok") else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/undo/rollback 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_autonomy(self, data):
+        """POST /api/ai/autonomy —— 切换接管级别。
+
+        ★ 走**独立端点**而不是混在 /api/ai/save 里：切换级别是一个
+          需要被明确审计的动作（"谁在什么时候把 AI 放开了"），
+          与"改个超时时间"不同级。独立端点也便于前端做二次确认。
+        """
+        try:
+            lv = (data or {}).get("level")
+            ok, msg = self.plugin._ai_set_autonomy(
+                lv, actor=str(getattr(self, "_auth_user", "") or "admin"))
+            self._send_json({"ok": True, "message": msg,
+                             "status": self.plugin._ai_status()} if ok
+                            else {"ok": False, "error": msg},
+                            200 if ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/autonomy 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_prompts(self):
+        """GET /api/ai/prompts —— 内置默认提示词全文。
+
+        面板用它在「查看默认提示词」里展示参考文本，
+        以及「一键恢复默认」时确认要恢复成什么。
+        **不返回任何凭据**，只有提示词模板。
+        """
+        try:
+            self._send_json({"ok": True,
+                             "prompts": self.plugin._ai_default_prompts()})
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/ai/prompts 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ai_tools(self):
+        """GET /api/ai/tools —— 工具清单（面板展示能力边界 + 权限勾选状态）。
+
+        ★ 这里曾经因为 ``list_tools()`` 不收 ``include_irreversible``
+          而整个接口 500（面板显示"加载失败"）。现在改走
+          ``_ai_tools_public()`` —— 它内部已经处理好了参数，
+          并且顺手带上工具权限的启用状态，前端一次请求就能渲染完整列表。
+        """
+        try:
+            tools = self.plugin._ai_tools_public()
+            self._send_json({"ok": True, "tools": tools, "count": len(tools)})
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/ai/tools 异常: {e}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
     def _handle_api_mods(self):
@@ -2619,6 +3372,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 "worlds": worlds,
                 "current_world": current_world,
                 "meta": meta,
+                # 手动投放目录：前端直接展示这个绝对路径，用户拿文件管理器
+                # 拷进去即可（大文件走不了 HTTP 上传，这是唯一的入口）。
+                "inbox_dir": str(pl._mods_inbox_dir()),
+                # 教育模式模组的隐藏数量由 meta 带上，前端显示为一行提示。
             })
         except Exception as e:
             self.plugin.logger.error(f"GET /api/mods 异常: {e}")
@@ -2689,7 +3446,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         try:
             uname, display = _safe_upload_name(fname, prefix=_uuid.uuid4().hex[:12] + "_")
             dest = self.plugin._mods_dir() / uname
-            dest.write_bytes(fdata)
+            # 原子写：大包（几十 MB）写到一半崩溃会留下残缺 zip，
+            # 用户点安装才报「File is not a zip file」，很难定位。
+            if not atomic_write_bytes(str(dest), fdata):
+                raise RuntimeError("写入磁盘失败（空间不足或被占用）")
             self.plugin._register_mod_file(uname, len(fdata), display)
             self._send_json({
                 "ok": True,
@@ -2709,13 +3469,33 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "缺少文件名"}, 400)
             return
         pl = self.plugin
-        src = pl._mods_dir() / os.path.basename(str(fname))
-        if not src.is_file():
-            self._send_json({"ok": False, "error": "上传的文件已不存在"}, 400)
+        # ★ 不能写死 _mods_dir()：手动投放到 mods/inbox/ 的文件也在库里，
+        #   写死的话界面上能看到、点安装却报「文件已不存在」。
+        src, source = pl._find_mod_source(fname)
+        if src is None:
+            self._send_json({"ok": False, "error": "文件已不存在（上传库与本目录都没有）"}, 400)
             return
         def _worker():
             ok, msg = pl._install_mod_pack(src, target_type, world_name or None)
             pl.logger.info(f"[模组] 安装{'成功' if ok else '失败'}: {msg}")
+            # 装完把源文件清掉，让它从「待安装」列表里消失。
+            #
+            # ★ 这里必须**两种来源一视同仁**。老代码只清 inbox：
+            #       inbox_file = src if source == "inbox" else None
+            #       if ok and inbox_file is not None: ...
+            #   而网页上传（source == "upload"）是主路径，拿到的永远是 None，
+            #   清理整段被跳过 —— 用户装完刷新，「待安装」里还是同一个包，
+            #   分不清到底装没装过。这就是本轮修复的 bug。
+            #
+            # 失败时**保留**源文件：用户修正后可以直接重试，不用重新上传。
+            # 部分成功也按失败处理（ok=False），因为还有包没装进去，
+            # 保留源文件让用户重试更安全。
+            if ok:
+                removed, note = pl._cleanup_installed_source(fname)
+                pl.logger.info(
+                    f"[模组] 清理源文件 {fname}: {'已移除' if removed else '未移除'}"
+                    f"（{note}）"
+                )
         try:
             pl._executor.submit(_worker)
         except Exception as e:
@@ -2747,6 +3527,29 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "子插件加载器未初始化"}, 500)
             return None
         return ld
+
+    def _require_admin_role(self, what: str = "", action: str = "操作") -> bool:
+        """要求当前会话是主管理员（``role == "admin"``），否则回 403。
+
+        为什么不能只靠 ``_scope_gate``：``_SCOPE_EXACT`` 里
+        ``/api/account/*``、``/api/security/*`` 一律映射到 ``account`` 板块。
+        于是「新建临时账号」时只要顺手勾上 ``account`` 板块，那个临时账号
+        就能回头调用本组接口给自己续命、建新号、改管理员密码、把 IP 白名单
+        关掉——而 IP 白名单恰恰是唯一能挡住「绕过面板直连控制台」的闸门。
+        这是一条完整的提权链，必须在业务层再钉一道角色门。
+
+        主管理员的权限不受影响：``_resolve_auth`` 对 Basic 主账号返回
+        ``("admin", None, user)``，这里直接放行，行为与修复前完全一致。
+        """
+        if getattr(self, "_auth_role", "admin") != "admin":
+            try:
+                u = getattr(self, "_auth_user", "") or "(未知)"
+                self.plugin.logger.warning(f"[权限] 拒绝非管理员{u}执行：{what or action}")
+            except Exception:
+                pass
+            self._send_json({"ok": False, "error": f"仅主管理员可{action}"}, 403)
+            return False
+        return True
 
     def _gmod_admin_only(self) -> bool:
         """子插件可携带任意代码，只允许管理员操作，临时账号一律拒绝。"""
@@ -3025,7 +3828,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         base, _ = _safe_upload_name(fname, prefix=_uuid.uuid4().hex[:12] + "_")
         tmp = self._gmod_upload_dir() / base
         try:
-            tmp.write_bytes(fdata)
+            # 原子写：子插件包可达数十 MB，写一半失败会留下残包
+            # 进而让 install() 解压时报「不是有效 zip」。
+            if not atomic_write_bytes(str(tmp), fdata):
+                raise RuntimeError("写入磁盘失败（空间不足或被占用）")
             result = ld.install(str(tmp), force=True)
         except Exception as e:
             self.plugin.logger.error(f"[子插件] 导入异常: {e}")
@@ -3177,6 +3983,536 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             "running": uuid in set(ld.loaded_uuids()),
             "root": str(rec.get("path") or ""),
         })
+
+    # ==================================================================
+    # 区块日志与恢复（人用的 Web 接口）
+    #
+    # ★ 这里所有 handler 只是**薄薄一层**：鉴权（由 _scope_gate 与
+    #   _require_admin_role 承担）+ 参数整形 + 转发到 regionlog.RegionAPI。
+    #   AI 走的是**同一个** RegionAPI，只是入口不同。
+    #   任何业务规则都不许写在 HTTP 层 —— 写在这里就等于"只有网页
+    #   用户受约束"，AI 一绕就过去了。
+    # ==================================================================
+
+    def _region_api(self):
+        api = getattr(self.plugin, "region_api", None)
+        if api is None:
+            self._send_json({"ok": False, "error": "区块日志系统未就绪"}, 503)
+            return None
+        return api
+
+    def _region_actor(self) -> str:
+        """当前操作者：临时账号用其用户名，管理员用 admin。"""
+        try:
+            u = str(getattr(self, "_auth_user", "") or "").strip()
+        except Exception:
+            u = ""
+        return u or "admin"
+
+    def _handle_api_region_status(self):
+        api = self._region_api()
+        if api is None:
+            return
+        try:
+            out = api.status(caller="human").to_dict()
+            # ★ 顺带把「玩家行为记录」的配置一并给出。
+            #   它已经搬到本板块（与方块日志并列），但它的配置不在
+            #   RegionAPI 手里（那边只管 block_record 段）。
+            #   在这里补上而不是让前端再调一个接口，理由与 status 里
+            #   带上 settings 一样：**一个板块的配置只该要这一个板块的权限**。
+            try:
+                d = out.get("data")
+                if isinstance(d, dict):
+                    cfg = self.plugin._load_tools_config() or {}
+                    br = cfg.get("behavior_record")
+                    ai = cfg.get("ai") or {}
+                    if not isinstance(br, dict):
+                        br = {}
+                    # 兼容旧位置（这几个键原先在 ai 段，带 behavior_ 前缀）
+                    def _pick(new_key, old_key, dflt):
+                        v = br.get(new_key)
+                        if v in (None, ""):
+                            v = ai.get(old_key)
+                        return dflt if v in (None, "") else v
+                    try:
+                        d["behavior_settings"] = {
+                            "level": max(0, min(int(_pick("level", "behavior_record_level", 0)), 3)),
+                            "keep_days": max(1, int(_pick("keep_days", "behavior_keep_days", 7))),
+                            "max_records": max(1, int(_pick("max_records", "behavior_max_records", 50000))),
+                            "query_limit": max(1, min(int(_pick("query_limit", "behavior_query_limit", 200)), 500)),
+                        }
+                    except (TypeError, ValueError):
+                        d["behavior_settings"] = {
+                            "level": 0, "keep_days": 7,
+                            "max_records": 50000, "query_limit": 200,
+                        }
+            except Exception:
+                pass
+            self._send_json(out)
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/region/status 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_region_log(self, query):
+        """GET /api/region/log —— 最近的方块变更流水。"""
+        api = self._region_api()
+        if api is None:
+            return
+        try:
+            qs = urllib.parse.parse_qs(query or "")
+            limit = int((qs.get("limit") or ["50"])[0])
+        except Exception:
+            limit = 50
+        try:
+            r = api.query_recent(
+                limit=limit,
+                actor=str((qs.get("actor") or [""])[0] or ""),
+                action=str((qs.get("action") or [""])[0] or ""),
+                dimension=str((qs.get("dimension") or [""])[0] or ""),
+                caller="human",
+            )
+            self._send_json(r.to_dict())
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/region/log 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_region_events(self, query):
+        api = self._region_api()
+        if api is None:
+            return
+        try:
+            qs = urllib.parse.parse_qs(query or "")
+            limit = int((qs.get("limit") or ["50"])[0])
+        except Exception:
+            limit = 50
+        try:
+            rows = api.store.recent_events(limit=max(1, min(limit, 200)))
+            self._send_json({"ok": True, "rows": rows, "count": len(rows)})
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_region_at(self, query):
+        """GET /api/region/at —— 某个坐标的变更历史。"""
+        api = self._region_api()
+        if api is None:
+            return
+        qs = urllib.parse.parse_qs(query or "")
+        try:
+            x = int(float((qs.get("x") or [""])[0]))
+            y = int(float((qs.get("y") or [""])[0]))
+            z = int(float((qs.get("z") or [""])[0]))
+        except (TypeError, ValueError, IndexError):
+            self._send_json({"ok": False, "error": "缺少或非法的 x / y / z"}, 400)
+            return
+        try:
+            r = api.query_position(
+                x=x, y=y, z=z,
+                dimension=str((qs.get("dimension") or [""])[0] or ""),
+                limit=int((qs.get("limit") or ["20"])[0]))
+            self._send_json(r.to_dict())
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_region_sessions(self, query):
+        api = self._region_api()
+        if api is None:
+            return
+        try:
+            qs = urllib.parse.parse_qs(query or "")
+            r = api.list_sessions(
+                limit=int((qs.get("limit") or ["20"])[0]),
+                actor=str((qs.get("actor") or [""])[0] or ""))
+            self._send_json(r.to_dict())
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_region_preview(self, data):
+        """POST /api/region/preview —— 回档影响面预览（只读）。"""
+        api = self._region_api()
+        if api is None:
+            return
+        d = data or {}
+        try:
+            r = api.preview(region=d.get("region") or d,
+                            dimension=str(d.get("dimension") or ""),
+                            caller="human", **self._region_timekw(d))
+            self._send_json(r.to_dict(), 200 if r.ok else 400)
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_region_rollback(self, data):
+        """POST /api/region/rollback —— 执行回档。"""
+        api = self._region_api()
+        if api is None:
+            return
+        d = data or {}
+        try:
+            r = api.rollback(region=d.get("region") or d,
+                             dimension=str(d.get("dimension") or ""),
+                             actor=self._region_actor(),
+                             notify=str(d.get("notify") or ""),
+                             dry_run=bool(d.get("dry_run")),
+                             caller="human", **self._region_timekw(d))
+            self._send_json(r.to_dict(), 200 if r.ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/region/rollback 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_region_undo(self, data):
+        """POST /api/region/undo —— 撤销一次回档。"""
+        api = self._region_api()
+        if api is None:
+            return
+        d = data or {}
+        sid = d.get("session_id", d.get("id"))
+        try:
+            r = api.undo(session_id=None if sid in (None, "", 0) else int(sid),
+                         actor=self._region_actor(),
+                         notify=str(d.get("notify") or ""),
+                         dry_run=bool(d.get("dry_run")),
+                         caller="human")
+            self._send_json(r.to_dict(), 200 if r.ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/region/undo 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    #: 「区块日志」板块能改的配置分区。
+    #:
+    #: ★ 必须显式白名单。``_save_tools_config`` 的 ``sections`` 参数
+    #:   就是为这种场景设计的：只拿到 region 权限的临时账号，不能顺着
+    #:   同一个接口把 backup / cloud_blacklist / ai 的分区一起改掉
+    #:   （那等于用低权限板块拿到了高权限板块的写权限）。
+    # ★ block_record（方块日志，供回档）与 behavior_record（玩家行为日志，
+    #   供 AI/服主查"谁干了什么"）都在「🧱 区块日志与恢复」板块里配置，
+    #   所以两者都属于这个板块的可写范围。
+    #   behavior_record 原先挂在 ai 段、由 /api/ai/save 写 —— 那是它被
+    #   AI 查询的历史原因；现在它归本板块管，权限也跟着走 region，
+    #   否则会出现"在区块板块操作却要求 AI 权限"的错位。
+    _REGION_SECTIONS = {"block_record", "behavior_record"}
+
+    #: 每个配置段允许前端写入的键及其取值范围。
+    #:
+    #: ★ 必须显式白名单：这个接口的权限是 ``region``，而它写的是
+    #:   tools_config.json 里的分区 —— 不列白名单就等于"拿到 region
+    #:   权限就能往该分区里塞任意键"。
+    #: ★ 范围在这里夹取（而不是仅靠前端 max/min）：前端可以被绕过，
+    #:   而且范围本身是后端语义（比如 level 只有 0~2 有意义）。
+    _REGION_MUTABLE = {
+        "block_record": {
+            "level": (0, 2),
+            "retention_days": (1, 3650),
+            "max_records_per_rollback": (1, 10_000_000),
+            "blocks_per_batch": (1, 100_000),
+            "batch_interval_ticks": (1, 1_000),
+            "max_area_blocks": (1, 10 ** 12),
+            "max_delta_seconds": (1, 3650 * 86400),
+            "max_rows_per_query": (1, 100_000),
+        },
+        "behavior_record": {
+            "level": (0, 3),
+            "keep_days": (1, 3650),
+            "max_records": (1, 5_000_000),
+            "query_limit": (1, 500),
+        },
+    }
+
+    def _handle_api_region_settings(self, data):
+        """POST /api/region/settings —— 保存"记录系统"的配置。
+
+        本板块管**两个配置段**（都属于记录系统）：
+          · ``block_record``    —— 方块日志，给回档用
+          · ``behavior_record`` —— 玩家行为记录，给 AI / 服主查"谁做了什么"
+
+        用请求体里的 ``section`` 指定改哪一个；不传按 ``block_record``
+        处理（兼容旧前端）。两个段都在 ``_REGION_SECTIONS`` 白名单内，
+        所以只授了 region 的账号改得动它们，却碰不到 backup / ai 等分区。
+        """
+        if not self._require_admin_role("修改记录设置"):
+            return
+        d = data or {}
+        patch = d.get("config")
+        if not isinstance(patch, dict):
+            self._send_json({"ok": False, "error": "config 必须是对象"}, 400)
+            return
+        section = str(d.get("section") or "block_record").strip()
+        ranges = self._REGION_MUTABLE.get(section)
+        if ranges is None:
+            self._send_json(
+                {"ok": False, "error": f"不支持的配置段：{section}"}, 400)
+            return
+
+        # ★ 以**磁盘当前值**为底做合并，而不是直接信任前端提交的整包。
+        #   前端可能是一个开了很久的标签页（设置早已被别的会话改过），
+        #   直接用它的缓存整包覆盖，会把别人刚改的值一起抹掉 ——
+        #   典型的「最后写入者通吃」丢配置问题。
+        try:
+            current = (self.plugin._load_tools_config() or {}).get(section, {}) or {}
+        except Exception:
+            current = {}
+        merged = dict(current)
+        for k, (lo, hi) in ranges.items():
+            if k not in patch:
+                continue
+            v = patch.get(k)
+            if isinstance(v, bool):
+                merged[k] = v
+                continue
+            try:
+                n = int(float(v))
+            except (TypeError, ValueError):
+                self._send_json({"ok": False, "error": f"{k} 必须是数字"}, 400)
+                return
+            merged[k] = max(lo, min(n, hi))
+        # 两个布尔键单独放行（不在 ranges 里，因为没有数值范围）
+        for k in ("enabled", "auto_teleport"):
+            if section == "block_record" and k in patch:
+                merged[k] = bool(patch.get(k))
+
+        try:
+            ok, msg = self.plugin._save_tools_config(
+                {section: merged}, sections=self._REGION_SECTIONS)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"保存失败: {e}"}, 500)
+            return
+        if not ok:
+            self._send_json({"ok": False, "error": msg or "保存失败"}, 400)
+            return
+        # 配置改了要让引擎立刻看到 —— RegionConfig 每次 as_dict() 都重读，
+        # 所以这里只需回一个最新状态，前端据此刷新页面。
+        try:
+            api = getattr(self.plugin, "region_api", None)
+            state = api.status(caller="human").to_dict() if api else {"ok": False}
+        except Exception:
+            state = {"ok": False}
+        self._send_json({"ok": True, "message": msg or "已保存", "state": state})
+
+    def _handle_api_region_purge(self, data):
+        """POST /api/region/purge —— 清理过期记录（管理员）。"""
+        if not self._require_admin_role("清理区块日志"):
+            return
+        api = self._region_api()
+        if api is None:
+            return
+        try:
+            days = int((data or {}).get("days") or 0)
+        except (TypeError, ValueError):
+            self._send_json({"ok": False, "error": "天数必须是整数"}, 400)
+            return
+        try:
+            r = api.purge(days)
+            self._send_json(r.to_dict(), 200 if r.ok else 400)
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    @staticmethod
+    def _region_timekw(d: dict) -> dict:
+        """把请求体里的时间窗描述转成 RegionAPI 认识的关键字参数。"""
+        out = {}
+        for k in ("seconds", "minutes", "hours", "days"):
+            v = (d or {}).get(k)
+            if v not in (None, "", 0):
+                try:
+                    out[k] = float(v)
+                except (TypeError, ValueError):
+                    pass
+        return out
+
+    # ==================================================================
+    # 第三方插件面板（/api/ext/*）
+    #
+    # 三条对外通路：
+    #   GET  /api/ext/panels              列出已接入的插件面板
+    #   GET  /api/ext/panel?pid=x         读某个面板的字段与当前值
+    #   POST /api/ext/panel/save          保存某个面板的值
+    #   POST /api/ext/register            远程注册（需 token）
+    #   POST /api/ext/unregister          远程注销
+    #
+    # ★ 前两个是"人在网页上配置别的插件"用的；后两个是"别的插件把自己
+    #   挂进来"用的。它们都走同一个 PanelRegistry。
+    # ==================================================================
+
+    def _ext_registry(self):
+        try:
+            from . import panel as _panel
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"面板模块不可用: {e}"}, 503)
+            return None
+        reg = _panel.get_registry()
+        if reg is None:
+            self._send_json({"ok": False, "error": "面板注册表未初始化"}, 503)
+        return reg
+
+    def _handle_api_ext_panels(self):
+        reg = self._ext_registry()
+        if reg is None:
+            return
+        try:
+            reg.prune_expired()
+            self._send_json({"ok": True, "panels": reg.list_panels(),
+                             "count": reg.count()})
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ext_panel(self, query):
+        reg = self._ext_registry()
+        if reg is None:
+            return
+        qs = urllib.parse.parse_qs(query or "")
+        pid = str((qs.get("pid") or [""])[0] or "").strip()
+        if not pid:
+            self._send_json({"ok": False, "error": "缺少 pid"}, 400)
+            return
+        p = reg.get(pid)
+        if p is None:
+            self._send_json({"ok": False, "error": f"找不到面板 {pid}"}, 404)
+            return
+        try:
+            self._send_json({"ok": True, "panel": p.public(),
+                             "fields": p.field_dicts(),
+                             "values": p.read_values()})
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_ext_panel_save(self, data):
+        """保存某个插件面板的设置。
+
+        ★ 走 ``_require_admin_role``：这里是"替别的插件改配置"，等同于
+          直接改服务器上的配置文件，临时账号不该有这个能力。
+        """
+        if not self._require_admin_role("修改插件设置"):
+            return
+        reg = self._ext_registry()
+        if reg is None:
+            return
+        d = data or {}
+        pid = str(d.get("pid") or "").strip()
+        if not pid:
+            self._send_json({"ok": False, "error": "缺少 pid"}, 400)
+            return
+        p = reg.get(pid)
+        if p is None:
+            self._send_json({"ok": False, "error": f"找不到面板 {pid}"}, 404)
+            return
+        vals = d.get("values")
+        if not isinstance(vals, dict):
+            self._send_json({"ok": False, "error": "values 必须是对象"}, 400)
+            return
+
+        # ★ saver 可能要碰世界的插件状态 —— 必须在**主线程**执行。
+        #   插件作者自己未必意识到这一点，所以这里代为派发。
+        box = {}
+        try:
+            def _do():
+                ok, msg, rejected = p.save_values(vals)
+                box.update({"ok": bool(ok), "message": str(msg),
+                            "rejected": list(rejected)})
+            self.plugin._run_in_server_thread(_do, timeout=10.0)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"保存失败: {e}"}, 500)
+            return
+        if not box:
+            self._send_json({"ok": False, "error": "保存未返回结果"}, 500)
+            return
+        out = dict(box)
+        if out.get("rejected"):
+            out["message"] = (out.get("message") or "") + \
+                f"（{len(out['rejected'])} 项未通过校验被忽略）"
+        self._send_json(out, 200 if out.get("ok") else 400)
+
+    def _ext_token_ok(self, data: dict) -> bool:
+        """远程注册的凭据校验。
+
+        ★ 未配置 token 时**一律拒绝**，而不是放行。
+          这个端点能让外部进程往面板里塞内容，默认开放等于给服务器
+          开了一个匿名写入口子。服主必须显式在 config.json 里写
+          ``ext_api_token`` 才启用远程注册。
+        """
+        cfg = getattr(self.plugin, "web_config", {}) or {}
+        want = str(cfg.get("ext_api_token") or "").strip()
+        if not want:
+            return False
+        got = str((data or {}).get("token") or "").strip()
+        return bool(got) and hmac.compare_digest(got, want)
+
+    def _handle_api_ext_register(self, data):
+        """POST /api/ext/register —— 远程插件注册自己的面板。"""
+        d = data or {}
+        if not self._ext_token_ok(d):
+            self._send_json(
+                {"ok": False,
+                 "error": "远程注册未启用或 token 不正确"
+                          "（需在 config.json 配置 ext_api_token）"}, 403)
+            return
+        reg = self._ext_registry()
+        if reg is None:
+            return
+        try:
+            from .panel import Panel
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+            return
+        pid = str(d.get("plugin_id") or d.get("pid") or "").strip()
+        if not pid:
+            self._send_json({"ok": False, "error": "缺少 plugin_id"}, 400)
+            return
+        try:
+            ttl = float(d.get("ttl") or 900)
+        except (TypeError, ValueError):
+            ttl = 900.0
+        p = Panel(pid=pid, title=str(d.get("title") or pid),
+                  description=str(d.get("description") or ""),
+                  icon=str(d.get("icon") or "🧩"),
+                  version=str(d.get("version") or ""),
+                  fields=d.get("fields") or [],
+                  remote=True, ttl=max(30.0, min(ttl, 86400.0)),
+                  source=str(d.get("source") or "remote"),
+                  homepage=str(d.get("homepage") or ""),
+                  author=str(d.get("author") or ""))
+        # 远程面板没有本地 loader/saver：值经 HTTP 往返
+        endpoint = str(d.get("endpoint") or "")
+        if endpoint:
+            p.loader = lambda: self._ext_remote_load(endpoint, pid)
+            p.saver = lambda v: self._ext_remote_save(endpoint, pid, v)
+        ok, msg = reg.register(p)
+        self._send_json({"ok": ok, "message": msg, "pid": pid})
+
+    def _handle_api_ext_unregister(self, data):
+        d = data or {}
+        if not self._ext_token_ok(d):
+            self._send_json({"ok": False, "error": "token 不正确"}, 403)
+            return
+        reg = self._ext_registry()
+        if reg is None:
+            return
+        pid = str(d.get("plugin_id") or d.get("pid") or "").strip()
+        self._send_json({"ok": reg.unregister(pid), "pid": pid})
+
+    def _ext_remote_load(self, endpoint: str, pid: str) -> dict:
+        """向远程插件拉取当前配置值。"""
+        try:
+            import urllib.request as _rq
+            req = _rq.Request(endpoint.rstrip("/") + "/config",
+                              data=b"{}", method="POST",
+                              headers={"Content-Type": "application/json"})
+            with _rq.urlopen(req, timeout=6) as resp:
+                got = json.loads(resp.read().decode("utf-8"))
+            return got.get("values") if isinstance(got, dict) else {}
+        except Exception:
+            return {}
+
+    def _ext_remote_save(self, endpoint: str, pid: str, values: dict):
+        try:
+            import urllib.request as _rq
+            body = json.dumps({"plugin_id": pid, "values": values},
+                              ensure_ascii=False).encode("utf-8")
+            req = _rq.Request(endpoint.rstrip("/") + "/config/save",
+                              data=body, method="POST",
+                              headers={"Content-Type": "application/json"})
+            with _rq.urlopen(req, timeout=8) as resp:
+                got = json.loads(resp.read().decode("utf-8"))
+            return bool(got.get("ok")), str(got.get("message") or "")
+        except Exception as e:
+            return False, f"远程保存失败: {e}"
 
     def _handle_api_gmods_file_save(self, data):
         if not self._gmod_admin_only():
@@ -3506,10 +4842,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "不能删除服务器根目录"}, 400)
             return
         try:
+            # ★ 退避重试：Windows 上删除常因「文件刚被关闭/杀软正在扫描」
+            #   而短暂失败（WinError 32）。重试几次就能过，不重试则用户
+            #   会看到莫名其妙的「删除失败」。
             if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
+                if not retry_on_lock(shutil.rmtree, str(target)):
+                    raise RuntimeError("目录被占用（可能有程序正在使用其中的文件）")
+            elif not retry_on_lock(os.unlink, str(target)):
+                raise RuntimeError("文件被占用")
         except Exception as e:
             self._send_json({"ok": False, "error": f"删除失败: {e}"}, 500)
             return
@@ -3541,7 +4881,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "目标已存在：" + newname}, 400)
             return
         try:
-            os.rename(str(target), str(newp))
+            # ★ 用 os.replace 而不是 os.rename：目标不存在时两者等价，
+            #   但 Windows 上 os.rename 对「目标已存在」会直接抛异常，
+            #   os.replace 语义更稳。外面再包一层退避重试。
+            if not retry_on_lock(os.replace, str(target), str(newp)):
+                raise RuntimeError("文件被占用或权限不足")
         except Exception as e:
             self._send_json({"ok": False, "error": f"重命名失败: {e}"}, 500)
             return
@@ -3574,7 +4918,13 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
         try:
             d.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(s), str(d))
+            # ★ 目录走 atomic_replace_dir（避免 shutil.move 跨卷时
+            #   「先删目标再拷贝」的空档期）；文件走退避重试。
+            if s.is_dir():
+                if not atomic_replace_dir(s, d):
+                    raise RuntimeError("目录替换失败（可能被占用）")
+            elif not retry_on_lock(shutil.move, str(s), str(d)):
+                raise RuntimeError("移动失败（文件被占用）")
         except Exception as e:
             self._send_json({"ok": False, "error": f"移动失败: {e}"}, 500)
             return
@@ -3601,10 +4951,9 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
         try:
             d.parent.mkdir(parents=True, exist_ok=True)
-            if s.is_dir():
-                shutil.copytree(str(s), str(d))
-            else:
-                shutil.copy2(str(s), str(d))
+            fn = shutil.copytree if s.is_dir() else shutil.copy2
+            if not retry_on_lock(fn, str(s), str(d)):
+                raise RuntimeError("复制失败（源或目标被占用）")
         except Exception as e:
             self._send_json({"ok": False, "error": f"复制失败: {e}"}, 500)
             return
@@ -3628,7 +4977,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(str(content), encoding="utf-8")
+            # ★ 原子写 + 退避重试：直接 write_text 在写入过程中崩溃会留下
+            # 截断文件（配置文件写坏 = 服务器起不来），且 Windows 上目标被
+            # 杀软/编辑器占用时会直接抛 PermissionError。
+            if not atomic_write_text(str(target), str(content)):
+                raise RuntimeError("原子写入失败（文件可能被占用）")
         except Exception as e:
             self._send_json({"ok": False, "error": f"保存失败: {e}"}, 500)
             return
@@ -4180,7 +5533,21 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
         with self.plugin._whitelist_lock:
             app = self.plugin._whitelist_apps.get(name.lower())
-        self._send_json({"application": app})
+        # ★ 这个接口是公开的（_public_path 白名单里有），用于申请页自查进度。
+        # 但原实现把整条申请记录原样返回，里面含 xuid、申请备注、审核人 ——
+        # 而查询条件只有一个玩家名。于是任何知道别人 ID 的人都能拿它当
+        # 「玩家名 → xuid」的查询器，配合白名单审核接口伪造申请。
+        # 只回传申请页自己需要的最小字段集。
+        if not isinstance(app, dict):
+            self._send_json({"application": None})
+            return
+        self._send_json({"application": {
+            "name": str(app.get("name", "") or ""),
+            "status": str(app.get("status", "") or ""),
+            "applied_at": str(app.get("applied_at", "") or ""),
+            "reviewed_at": str(app.get("reviewed_at", "") or ""),
+            "reason": str(app.get("reason", "") or ""),
+        }})
 
     def _handle_api_whitelist_applications(self):
         try:
@@ -4234,6 +5601,19 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self.plugin._save_whitelist()
                 self.plugin._log_admin_action(f"白名单通过: {name}")
                 self.plugin._cross_push_whitelist()
+                # 可信度联动：审核通过的玩家在档案里打上白名单标记，
+                # 并把他申请时提交的设备指纹标为「信任设备」。
+                # 为什么要这样：白名单申请是人工审核过的，这份信任应当折算成
+                # 可信度加权，同时避免他刚进服就被设备突发规则误伤。
+                try:
+                    mgr = getattr(self.plugin, "trust", None)
+                    if mgr is not None:
+                        mgr.note_whitelist(
+                            stored_name,
+                            device_id=str(data.get("device_id") or "").strip(),
+                        )
+                except Exception as _e:
+                    self.plugin.logger.warning(f"[可信度] 白名单联动失败: {_e}")
                 self._send_json({"success": True, "message": f"已通过 {name} 的白名单申请"})
             else:
                 msg = result if isinstance(result, str) else "allowlist 命令执行失败"
@@ -4436,6 +5816,262 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "openid": openid, "name": name or openid})
         except Exception as e:
             self.plugin.logger.error(f"POST /api/qqbot/group/rename 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    # ================================================== QQ 官方扫码登录
+    #
+    # 与 q.qq.com 的 lite 绑定接口对接：本地生成 bind_key 建任务 →
+    # 前端把 connect.html 渲染成二维码 → 用户手机 QQ 扫码授权 →
+    # 轮询拿 bot_encrypt_secret（AES-256-GCM，密钥是 bind_key）解密出 AppSecret。
+    #
+    # ⚠ 安全红线（改这段代码务必守住）：
+    #   1. ``bind_key`` 是解密凭据，**只存内存**（_qr_tasks），绝不落盘、
+    #      绝不下发给前端。落盘/下发都等于把 AppSecret 明文送出去。
+    #   2. AppSecret **不通过任何接口回传**。前端只拿到 ``secret_len``
+    #      与掩码，真值直接写进卡片配置。
+    #   3. 建任务是会真的打到腾讯服务器上的外部调用，必须限流。
+
+    def _handle_api_qqbot_qr_create(self):
+        """GET /api/qqbot/qr/create —— 创建一个扫码绑定任务。
+
+        成功返回 ``{ok, task_id, qrcode, interval}``。
+        **不含 bind_key** —— 它留在服务端内存里，poll 时自己用。
+        """
+        try:
+            ip = self._client_ip()
+            now = time.time()
+            with _QR_LOCK:
+                # 逐出过期任务（>600s）+ 控制字典上限，防内存无限增长
+                for key, item in list(_QR_TASKS.items()):
+                    if now - float(item.get("created_at", 0)) > _QR_TASK_TTL:
+                        _QR_TASKS.pop(key, None)
+                while len(_QR_TASKS) > _QR_TASK_MAX:
+                    oldest = min(_QR_TASKS, key=lambda k: float(_QR_TASKS[k].get("created_at", 0)))
+                    _QR_TASKS.pop(oldest, None)
+                # 同 IP 30s 内只允许建一次
+                last = _QR_IP_LAST.get(ip, 0)
+                if now - last < _QR_IP_COOLDOWN:
+                    self._send_json({
+                        "ok": False,
+                        "error": f"请求过于频繁，请 {int(_QR_IP_COOLDOWN - (now - last)) + 1} 秒后重试",
+                    }, 429)
+                    return
+                _QR_IP_LAST[ip] = now
+                # IP 表自身也要清理，否则同一台机器长期运行会慢慢涨
+                if len(_QR_IP_LAST) > 4096:
+                    for key in [k for k, v in _QR_IP_LAST.items() if now - v > 3600]:
+                        _QR_IP_LAST.pop(key, None)
+
+            try:
+                task = _qqofficial_bind.create_bind_task_sync()
+            except Exception as e:
+                self.plugin.logger.warning(f"[QQ扫码] 创建绑定任务失败: {e}")
+                self._send_json({"ok": False, "error": f"向 QQ 申请二维码失败：{e}"}, 502)
+                return
+
+            task_id = str(task.get("task_id") or "")
+            with _QR_LOCK:
+                _QR_TASKS[task_id] = {
+                    "bind_key": task.get("bind_key", ""),
+                    "created_at": time.time(),
+                    "ip": ip,
+                }
+            self.plugin.logger.info("[QQ扫码] 已创建扫码绑定任务")
+            self._send_json({
+                "ok": True,
+                "task_id": task_id,
+                "qrcode": task.get("qrcode", ""),
+                "interval": task.get("interval", "2"),
+            })
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/qqbot/qr/create 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_qqbot_qr_poll(self, query=""):
+        """GET /api/qqbot/qr/poll?task_id=... —— 轮询一次绑定结果。
+
+        ``status``：``pending`` / ``created`` / ``expired`` / ``error``。
+
+        ``created`` 时把 AppSecret 写进对应卡片并重启网关，
+        但返回体里**只有** ``appid`` 和 ``secret_len``（等长掩码的信息量），
+        绝不回传明文。
+        """
+        try:
+            qs = urllib.parse.parse_qs(query or "")
+            task_id = (qs.get("task_id") or [""])[0]
+            card_id = (qs.get("card_id") or [""])[0]
+            if not task_id:
+                self._send_json({"ok": False, "error": "缺少 task_id"}, 400)
+                return
+
+            with _QR_LOCK:
+                item = _QR_TASKS.get(task_id)
+                if item is None:
+                    self._send_json({"ok": False, "status": "expired",
+                                     "error": "任务不存在或已过期，请重新获取二维码"})
+                    return
+                # 只允许创建者本人轮询，防 task_id 被猜到后他人截胡凭据
+                if item.get("ip") and item.get("ip") != self._client_ip():
+                    self._send_json({"ok": False, "error": "无权查询该任务"}, 403)
+                    return
+                bind_key = item.get("bind_key", "")
+
+            try:
+                result = _qqofficial_bind.poll_bind_task_sync(task_id, bind_key)
+            except Exception as e:
+                self.plugin.logger.warning(f"[QQ扫码] 轮询失败: {e}")
+                self._send_json({"ok": False, "status": "error", "error": str(e)})
+                return
+
+            status = str(result.get("status") or "pending")
+            if status != "created":
+                if status in ("expired", "error"):
+                    with _QR_LOCK:
+                        _QR_TASKS.pop(task_id, None)
+                payload = {"ok": True, "status": status}
+                if result.get("message"):
+                    payload["error"] = result["message"]
+                self._send_json(payload)
+                return
+
+            appid = str(result.get("appid") or "")
+            secret = str(result.get("secret") or "")
+            if not appid or not secret:
+                self._send_json({"ok": False, "status": "error", "error": "扫码成功但凭据不完整"})
+                return
+
+            # 写回卡片配置。card_id 为空时挑第一张 qqofficial 卡。
+            saved, message = self.plugin._qqbot_apply_qr_credentials(card_id, appid, secret)
+            with _QR_LOCK:
+                _QR_TASKS.pop(task_id, None)
+
+            # 等长掩码 + 长度，既让用户确认「确实拿到了」，又不泄漏任何字符
+            self._send_json({
+                "ok": bool(saved),
+                "status": "created",
+                "appid": appid,
+                "secret_len": len(secret),
+                "secret_mask": _qqofficial_bind.mask_secret(secret),
+                "message": message,
+            })
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/qqbot/qr/poll 异常: {e}")
+            self._send_json({"ok": False, "status": "error", "error": str(e)}, 500)
+
+    # ================================================== 正则触发引擎
+
+    def _regex_engine(self):
+        return getattr(self.plugin, "regex_engine", None)
+
+    def _handle_api_regex_rules(self):
+        """GET /api/qqbot/regex/rules —— 规则列表 + 可选值（供前端渲染下拉）。"""
+        try:
+            engine = self._regex_engine()
+            if engine is None:
+                self._send_json({"ok": False, "error": "正则引擎未加载", "rules": []})
+                return
+            from .regex_engine import EVENT_TYPES, ACTION_TYPES, _MAX_PATTERN_LEN
+            self._send_json({
+                "ok": True,
+                "rules": engine.snapshot_rules(),
+                "eventTypes": list(EVENT_TYPES),
+                "actionTypes": list(ACTION_TYPES),
+                "maxPatternLen": _MAX_PATTERN_LEN,
+                "config": engine.conf(),
+            })
+        except Exception as e:
+            self.plugin.logger.error(f"GET /api/qqbot/regex/rules 异常: {e}")
+            self._send_json({"ok": False, "error": str(e), "rules": []}, 500)
+
+    def _handle_api_regex_save(self, data):
+        """POST /api/qqbot/regex/save —— 整表保存规则库。
+
+        同时可以带上 ``config``（enable / only_on_main / admin_debug /
+        command_timeout），存进 tools 配置。
+        """
+        try:
+            engine = self._regex_engine()
+            if engine is None:
+                self._send_json({"ok": False, "error": "正则引擎未加载"}, 400)
+                return
+            payload = data or {}
+            rules = payload.get("rules")
+            if not isinstance(rules, list):
+                self._send_json({"ok": False, "error": "rules 必须是数组"}, 400)
+                return
+            bad = _validate_regex_rules(rules)
+            if bad:
+                self._send_json({"ok": False, "error": bad}, 400)
+                return
+            count = engine.save_rules(rules)
+
+            cfg = payload.get("config")
+            if isinstance(cfg, dict):
+                ok, msg = self.plugin._save_regex_config(cfg)
+                if not ok:
+                    self._send_json({"ok": False, "error": msg}, 400)
+                    return
+            self._send_json({"ok": True, "count": count, "message": f"已保存 {count} 条规则"})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/qqbot/regex/save 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_regex_toggle(self, data):
+        try:
+            engine = self._regex_engine()
+            if engine is None:
+                self._send_json({"ok": False, "error": "正则引擎未加载"}, 400)
+                return
+            rule_id = str((data or {}).get("id") or "")
+            if not rule_id:
+                self._send_json({"ok": False, "error": "缺少规则 id"}, 400)
+                return
+            enabled = (data or {}).get("enabled")
+            if not engine.toggle_rule(rule_id, enabled):
+                self._send_json({"ok": False, "error": "规则不存在"}, 404)
+                return
+            self._send_json({"ok": True})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/qqbot/regex/toggle 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_regex_delete(self, data):
+        try:
+            engine = self._regex_engine()
+            if engine is None:
+                self._send_json({"ok": False, "error": "正则引擎未加载"}, 400)
+                return
+            rule_id = str((data or {}).get("id") or "")
+            if not rule_id:
+                self._send_json({"ok": False, "error": "缺少规则 id"}, 400)
+                return
+            if not engine.delete_rule(rule_id):
+                self._send_json({"ok": False, "error": "规则不存在"}, 404)
+                return
+            self._send_json({"ok": True})
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/qqbot/regex/delete 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _handle_api_regex_test(self, data):
+        """POST /api/qqbot/regex/test —— 网页「测试匹配」。
+
+        必填 ``pattern``；``text`` 为空时返回正则是否合法（不判命中）。
+        """
+        try:
+            engine = self._regex_engine()
+            if engine is None:
+                self._send_json({"ok": False, "error": "正则引擎未加载"}, 400)
+                return
+            payload = data or {}
+            result = engine.test_match(
+                str(payload.get("pattern") or ""),
+                str(payload.get("flags") or ""),
+                str(payload.get("text") or ""),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/qqbot/regex/test 异常: {e}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
     def _handle_api_bots_list(self):
