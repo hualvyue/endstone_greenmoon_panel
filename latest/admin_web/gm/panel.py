@@ -61,7 +61,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from ._context import current_owner, require_grant, require_plugin
-from ._errors import GmError
+from ._errors import GmError, GmNotReady
 
 __all__ = ["register", "unregister", "mine", "available"]
 
@@ -113,7 +113,6 @@ def register(*, plugin_id: str, title: str, fields,
         收一个 dict（只含用户改动过的、且是你声明过的键），
         返回 ``(ok: bool, msg: str)``，或直接返回 bool。
     """
-    reg = _registry()
     if not str(plugin_id or "").strip():
         raise GmError("register() 必须提供 plugin_id")
     if not isinstance(fields, (list, tuple)):
@@ -122,14 +121,29 @@ def register(*, plugin_id: str, title: str, fields,
     # ★ 用当前子插件的 uuid 作为 source，便于插件卸载时整批清掉。
     #   如果作者把 plugin_id 改来改去，靠它 alone 会留孤儿面板。
     owner = current_owner() or ""
+    spec = dict(
+        plugin_id=plugin_id, title=title, description=description,
+        icon=icon, version=version, fields=list(fields),
+        loader=loader, saver=saver, source=owner,
+        homepage=homepage, author=author,
+    )
+
+    # 主面板尚未启用（GreenMoon 的 on_enable 还没跑 / 正在重载 / 模块陈旧）
+    # → 登记到待挂载队列，等 attach() 时自动补挂。这样加载顺序不再重要，
+    #   也不会因为 sys.modules 里的陈旧 gm.panel 而永远拿到 _plugin=None。
+    try:
+        _registry()
+    except GmNotReady:
+        try:
+            from .. import panel as _p
+            _p.queue_pending(**spec)
+            return True, "主面板尚未启用，已登记，启用后自动挂载"
+        except Exception as e:
+            raise GmError(f"注册面板失败：{e}")
+
     try:
         from .. import panel as _p
-        return _p.register_panel(
-            plugin_id=plugin_id, title=title, description=description,
-            icon=icon, version=version, fields=list(fields),
-            loader=loader, saver=saver, source=owner,
-            homepage=homepage, author=author,
-        )
+        return _p.register_panel(**spec)
     except GmError:
         raise
     except Exception as e:
@@ -138,8 +152,18 @@ def register(*, plugin_id: str, title: str, fields,
 
 def unregister(plugin_id: str) -> bool:
     """摘掉自己的面板。"""
-    reg = _registry()
-    return bool(reg.unregister(str(plugin_id or "")))
+    pid = str(plugin_id or "")
+    try:
+        from .. import panel as _p
+        _p.drop_pending(pid)
+    except Exception:
+        pass
+    try:
+        reg = _registry()
+    except GmNotReady:
+        # 主面板尚未启用：只清队列即可，没有可摘的活面板。
+        return True
+    return bool(reg.unregister(pid))
 
 
 def mine() -> List[Dict[str, Any]]:

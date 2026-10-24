@@ -410,6 +410,65 @@ class PanelRegistry:
 _REGISTRY: Optional[PanelRegistry] = None
 _REGISTRY_LOCK = threading.Lock()
 
+#: 待挂载队列：主面板**尚未启用**（或正在重载）时，外部插件登记的面板
+#: 先存在这里，等 ``attach()`` 建好注册表后自动补挂。
+#:
+#: 为什么需要它
+#: ------------
+#: Endstone 不保证插件加载顺序，第三方面板插件（如 satmap）常常先于
+#: GreenMoon 的 ``on_enable`` 执行。此刻 ``require_plugin()`` 会抛
+#: ``GmNotReady``；而如果 ``import gm.panel`` 拿到的是「重跑文件」生成
+#: 的副本（``__package__='gm'``），副本里的 ``from .. import panel``
+#: 还会直接越界，报 ``attempted relative import beyond top-level package``。
+#: 后者已由 ``gm/_context._AliasFinder`` 从根上堵住（子模块导入一律返回
+#: 内存里那一份真模块）；这里负责前者：把「注册意图」落在进程级、且
+#: **不随 detach 清空**的队列里，每次 ``attach()`` 重放一遍 —— 顺序、
+#: 重载、热更都不再影响结果。
+_PENDING: Dict[str, Dict[str, Any]] = {}
+_PENDING_LOCK = threading.Lock()
+
+
+def queue_pending(**spec: Any) -> None:
+    """登记一个「还挂不上」的面板，等主面板启用后自动补挂。
+
+    以 ``plugin_id`` 为键，重复登记覆盖旧值（与 ``register_panel`` 语义一致）。
+    """
+    pid = str(spec.get("plugin_id") or "").strip()
+    if not pid:
+        return
+    with _PENDING_LOCK:
+        _PENDING[pid] = dict(spec)
+
+
+def drop_pending(plugin_id: str) -> None:
+    """摘掉待挂载队列里的一项（插件主动注销时用）。"""
+    with _PENDING_LOCK:
+        _PENDING.pop(str(plugin_id or "").strip(), None)
+
+
+def pending_count() -> int:
+    with _PENDING_LOCK:
+        return len(_PENDING)
+
+
+def _flush_pending(logger: Any = None) -> int:
+    """把待挂载队列重放进当前注册表；返回成功条数。"""
+    with _PENDING_LOCK:
+        specs = list(_PENDING.values())
+    n = 0
+    for spec in specs:
+        try:
+            ok, _msg = register_panel(**spec)
+            if ok:
+                n += 1
+        except Exception as e:  # 单条失败不影响其它面板
+            if logger is not None:
+                try:
+                    logger.warning(f"补挂第三方面板失败（{spec.get('plugin_id')}）：{e}")
+                except Exception:
+                    pass
+    return n
+
 
 def get_registry() -> PanelRegistry:
     global _REGISTRY
@@ -425,7 +484,19 @@ def attach(data_dir=None, logger=None) -> PanelRegistry:
     global _REGISTRY
     with _REGISTRY_LOCK:
         _REGISTRY = PanelRegistry(data_dir=data_dir, logger=logger)
-        return _REGISTRY
+        reg = _REGISTRY
+    # 主面板启用前，外部插件可能已经登记（见 queue_pending）。现在补挂上：
+    # 这样「插件先于 GreenMoon 启用」也不丢面板，重载后也会自动重新出现。
+    try:
+        n = _flush_pending(logger)
+        if n and logger is not None:
+            try:
+                logger.info(f"已补挂 {n} 个第三方面板")
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return reg
 
 
 def detach() -> None:
@@ -462,4 +533,5 @@ def register_panel(*, plugin_id: str, title: str, description: str = "",
 
 
 def unregister_panel(plugin_id: str) -> bool:
+    drop_pending(plugin_id)
     return get_registry().unregister(plugin_id)

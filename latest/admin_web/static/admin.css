@@ -1090,7 +1090,7 @@ td { color: var(--gm-text); }
     color: #fff;
 }
 /* 标题行里的问号：跟着 h2/h3 的基线走，不撑高行距 */
-h2 .help-q, h3 .help-q { font-size: 11px; }
+h2 .help-q, h3 .help-q, h4 .help-q, summary .help-q { font-size: 11px; }
 
 /* 展开的解释：就地浮层，不推动页面布局。
    z-index 要高于模态框(1000)，否则弹窗内的问号会被盖住 */
@@ -1305,49 +1305,155 @@ h2 .help-q, h3 .help-q { font-size: 11px; }
 .spacer { flex: 1 1 auto; }
 .nowrap { white-space: nowrap; }
 
-/* ==========================================================================
-   第三方插件面板（sec-ext）
-   ========================================================================== */
-
-/* 左列插件列表 + 右列设置表单。窄屏时上下堆叠。 */
-.ext-layout { display: grid; grid-template-columns: minmax(180px, 260px) 1fr;
-              gap: var(--gm-gap); align-items: start; }
-.ext-list   { display: flex; flex-direction: column; gap: var(--gm-gap-xs); }
-
-.ext-item {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px; text-align: left; width: 100%;
+/* ---------- 面板「与 AI 对话（服主）」 ----------
+   气泡用"谁说的"分区：服主靠右对齐、AI 靠左，
+   与既有卡片同一套变量，不另起一套配色。 */
+.aiweb-row {
+    padding: 8px 10px;
+    margin-bottom: 8px;
     border-radius: var(--gm-r-md);
-    background: var(--gm-surface-2); border: 1px solid transparent;
-    color: inherit; cursor: pointer; transition: background .15s, border-color .15s;
+    border: 1px solid var(--gm-border-subtle);
+    background: var(--gm-inset);
 }
-.ext-item:hover { background: var(--gm-glass-hover); }
-.ext-item.active { border-color: var(--gm-border-strong); background: var(--gm-glass-active); }
+.aiweb-row.aiweb-me {
+    border-color: var(--gm-border);
+    background: var(--gm-surface-2);
+    margin-left: 12%;
+}
+.aiweb-row.aiweb-ai { margin-right: 12%; }
+.aiweb-head {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gm-text-dim);
+    margin-bottom: 4px;
+    letter-spacing: .02em;
+}
+.aiweb-row.aiweb-me .aiweb-head { color: var(--gm-accent); }
+.aiweb-body {
+    font-size: 13px;
+    line-height: 1.65;
+    /* AI 回复里有换行与缩进，pre-wrap 才能保留排版；
+       同时长英文/长路径要能换行撑破容器。 */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.aiweb-meta {
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--gm-text-mute);
+}
+.aiweb-empty {
+    padding: 8px 2px;
+    font-size: 13px;
+    color: var(--gm-text-dim);
+}
+#aiweb-input { resize: vertical; min-height: 46px; font-family: inherit; }
 
-.ext-icon { font-size: 20px; flex: 0 0 auto; }
-.ext-meta { display: flex; flex-direction: column; min-width: 0; }
-.ext-meta b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ---------- 15. 动效 ---------- */
+/* 这里只动 transform / opacity —— 两者都不触发布局与重绘，
+   浏览器能把它们整个丢给合成器，老机器上滚动、切板块也不会掉帧。
+   刻意没有：box-shadow / filter / width / top / left 的动画。 */
 
-.ext-head { display: flex; align-items: center; gap: var(--gm-gap-sm); flex-wrap: wrap; }
-.ext-head h3 { margin: 0; }
+@keyframes gmRise    { from { opacity: 0; transform: translate3d(0, 10px, 0) } to { opacity: 1; transform: none } }
+@keyframes gmPop     { 0% { transform: scale(.86) } 55% { transform: scale(1.18) } 100% { transform: scale(1) } }
+@keyframes gmFade    { from { opacity: 0 } to { opacity: 1 } }
+@keyframes gmModalIn { from { opacity: 0; transform: translate3d(0, 14px, 0) scale(.97) } to { opacity: 1; transform: none } }
+@keyframes gmPulse   { 0%, 100% { transform: scale(1); opacity: .95 } 50% { transform: scale(1.45); opacity: .4 } }
+@keyframes gmSpin    { to { transform: rotate(360deg) } }
 
-/* 表单：标签在上、输入在下，纵向排列比横排更好读 */
-.ext-form { display: flex; flex-direction: column; gap: var(--gm-gap); }
-.ext-field { display: flex; flex-direction: column; gap: 4px; }
-.ext-field > label { font-weight: 600; font-size: 13px; }
-.ext-field input[type="text"],
-.ext-field input[type="password"],
-.ext-field input[type="number"],
-.ext-field select,
-.ext-field textarea { width: 100%; }
+/* 形变用的图标：内联 <svg><path>，与 CSS mask 版同尺寸、同描边宽度。
+   只有真的要动的那几个才会换成这种形态（见 admin.morph.js），
+   其余几百个静态图标依旧是零 DOM 开销的 mask 版。 */
+.gm-ico-live {
+    display: inline-block;
+    width: 1.1em;
+    height: 1.1em;
+    vertical-align: -.15em;
+    flex: 0 0 auto;
+    overflow: visible;
+}
+.gm-ico-live > path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
 
-/* 分组标题（type=group / note）：只是一条分隔，不是输入项 */
-.ext-group { padding: 8px 0 2px; border-top: 1px solid var(--gm-border); }
-.ext-group:first-child { border-top: none; }
+/* 图标微动：跟着容器轻放一下；有方向的顺着箭头滑一点，
+   比原地放大更"有去处"。 */
+.gm-ico,
+.gm-ico-live { transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
 
-@media (max-width: 720px) {
-    .ext-layout { grid-template-columns: 1fr; }
-    .ext-list { flex-direction: row; flex-wrap: wrap; }
-    .ext-item { width: auto; }
+button:hover > .gm-ico,
+button:hover > .gm-ico-live,
+.sidebar a:hover > .gm-ico { transform: scale(1.14); }
+
+button:hover > .gm-ico[data-ic=arrow-r]  { transform: translate3d(2px, 0, 0); }
+button:hover > .gm-ico[data-ic=arrow-l]  { transform: translate3d(-2px, 0, 0); }
+button:hover > .gm-ico[data-ic=arrow-u]  { transform: translate3d(0, -2px, 0); }
+button:hover > .gm-ico[data-ic=arrow-d]  { transform: translate3d(0, 2px, 0); }
+
+button:active > .gm-ico,
+button:active > .gm-ico-live { transform: scale(.92); }
+
+/* 按钮：hover 浮起 1px，按下落回并缩小 —— 按下去的手感 */
+button { transition: background .15s ease, border-color .15s ease, transform .12s cubic-bezier(.2, .8, .2, 1); }
+button:hover  { transform: translate3d(0, -1px, 0); }
+button:active { transform: scale(.96); }
+button:disabled:hover, button:disabled:active { transform: none; }
+
+/* 卡片：hover 轻抬 2px */
+.card, .server-pane { transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
+.card:hover, .server-pane:hover { transform: translate3d(0, -2px, 0); }
+
+/* 板块切换：showSection 走的是 display 开关，
+   none -> block 会让 CSS animation 自动重播，所以纯 CSS 就能接管，
+   不用 JS 去 remove/add class 触发强制重排。 */
+.section { animation: gmRise .32s cubic-bezier(.2, .8, .2, 1) both; }
+
+/* 侧栏：整项右移 2px，左侧指示条从中间展开 */
+.sidebar a {
+    position: relative;
+    transition: background .2s ease, color .2s ease, transform .2s cubic-bezier(.2, .8, .2, 1);
+}
+.sidebar a:hover { transform: translate3d(2px, 0, 0); }
+.sidebar a::before {
+    content: '';
+    position: absolute; left: 3px; top: 9px; bottom: 9px; width: 3px;
+    border-radius: 3px;
+    background: var(--gm-accent);
+    opacity: 0;
+    transform: scaleY(0);
+    transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .24s ease;
+}
+.sidebar a:hover::before  { opacity: .45; transform: scaleY(.42); }
+.sidebar a.active::before { opacity: 1;   transform: scaleY(1); }
+
+/* 切到某个板块时，导航项图标弹一下（JS 加 .gm-pop）；
+   需要盯一眼的状态点持续脉动（JS 加 .gm-pulse） */
+.gm-pop   { animation: gmPop .44s cubic-bezier(.2, .8, .2, 1); }
+.gm-pulse { animation: gmPulse 1.6s ease-in-out infinite; }
+
+/* 模态框：遮罩淡入，窗体从下方浮起 */
+.modal-mask { animation: gmFade .2s ease both; }
+.modal      { animation: gmModalIn .26s cubic-bezier(.2, .8, .2, 1) both; }
+
+/* 刷新中的图标转圈（转完由 morphicons 接管形状变化） */
+.gm-spin { animation: gmSpin .8s linear infinite; }
+
+/* iOS 开关：滑块位移从 left 换成 transform —— left 每帧都在重排整行，
+   transform 只走合成层。位置不变：left 2px + 位移 20px = 22px。 */
+.ios i::after { transition: transform .4s cubic-bezier(.34, 1.56, .64, 1); }
+.ios input:checked + i::after { left: 2px; transform: translate3d(20px, 0, 0); }
+
+/* 系统开了「减弱动效」就全部降级为瞬切，
+   与 morphicons 的 reducedMotion:'user' 保持一致 */
+@media (prefers-reduced-motion: reduce) {
+    .section, .modal-mask, .modal, .gm-pop, .gm-pulse, .gm-spin { animation: none; }
+    button, .card, .server-pane, .sidebar a, .gm-ico, .gm-ico-live,
+    .sidebar a::before, .ios i::after { transition: none; }
+    button:hover, button:active, .card:hover, .server-pane:hover,
+    .sidebar a:hover, button:hover > .gm-ico, button:hover > .gm-ico-live { transform: none; }
 }
 </style>

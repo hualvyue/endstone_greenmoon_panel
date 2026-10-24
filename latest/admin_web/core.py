@@ -67,6 +67,40 @@ try:
     from endstone.event import BlockExplodeEvent
 except Exception:  # pragma: no cover
     BlockExplodeEvent = None
+# ★ 2026-05 修复（P0 Bug #2 一半）：自然生成的方块此前完全没被记录 ——
+#   流动岩浆/水相遇生成的石头、冰、黑曜石、圆石，以及活塞推拉，都属于
+#   "非爆炸 / 非玩家放置"的方块变化，原先的区块日志一个都不记，导致
+#   回档时这些破坏无法恢复。下面两类事件补上：
+#     · BlockFormEvent  —— 液体/世界条件生成的方块（岩浆遇水→石/圆石/黑曜石、
+#                           水冻结→冰）。继承 BlockGrowEvent，取 new_state。
+#     · BlockPistonExtendEvent / BlockPistonRetractEvent —— 活塞推出 / 收回，
+#                            取 direction。只监听这两个**具体子类**（见下方
+#                            on_behavior_piston_extend / _retract），不监听
+#                            基类，避免 MRO 分发下同一次事件被记两遍。
+#   两者均为防御式导入（同本文件其它事件），缺失时降级为 None、处理器
+#   不注册，不影响插件加载。
+try:
+    from endstone.event import BlockFormEvent
+except Exception:  # pragma: no cover - 仅在缺失该事件的 Endstone 版本命中
+    BlockFormEvent = None
+# 活塞伸/缩是两个独立子类。**只注册这两个子类**，不注册基类
+# ``BlockPistonEvent`` —— Endstone 的事件总线按 MRO 分发（子类事件也会
+# 送到基类监听器），基类+子类同时注册会让同一次活塞事件被记两遍。
+# 两者均为防御式导入，缺失即降级为 None、不注册。
+try:
+    from endstone.event import BlockPistonExtendEvent
+except Exception:  # pragma: no cover
+    BlockPistonExtendEvent = None
+try:
+    from endstone.event import BlockPistonRetractEvent
+except Exception:  # pragma: no cover
+    BlockPistonRetractEvent = None
+# 区块加载事件：用于补做"回档时区块未加载"的遗留恢复项。
+# 0.11 已提供（ChunkLoadEvent），仍防御式导入以兼容更老版本。
+try:
+    from endstone.event import ChunkLoadEvent
+except Exception:  # pragma: no cover
+    ChunkLoadEvent = None
 try:
     from endstone.event import PlayerCommandEvent
 except Exception:  # pragma: no cover
@@ -172,6 +206,7 @@ from .connections import (
     PURPOSE_LABELS, PURPOSE_HINTS, PURPOSES, normalize_purpose,
 )
 from .mod_loader import ModLoader, ModLoadError
+from . import ingame_forms  # 游戏内 OP 面板（endstone.form 内部防御式导入）
 from .atomic_io import atomic_write_json, atomic_write_text, atomic_write_bytes
 from .regex_engine import (
     RegexEngineModule, EVENT_PLAYER_JOIN, EVENT_PLAYER_LEFT, EVENT_LOG_LINE,
@@ -1402,6 +1437,17 @@ class GreenMoonPlugin(Plugin):
             ],
             "permissions": ["greenmoon.command.gm"],
         },
+        # ---- /gmpanel 游戏内管理员面板 ---------------------------------
+        #
+        # 仅 OP 可在游戏内唤出：弹出一个 SimpleForm 主菜单（回档 / 机器人设置
+        # / AI设置），全部可实际操作。普通玩家拿不到权限，与救援指令同理。
+        "gmpanel": {
+            "description": "游戏内管理员面板（回档 / 机器人设置 / AI设置，仅 OP）",
+            "usages": [
+                "/gmpanel",
+            ],
+            "permissions": ["greenmoon.command.gmpanel"],
+        },
     }
 
     permissions = {
@@ -1420,6 +1466,11 @@ class GreenMoonPlugin(Plugin):
         # 必须限 OP。后台控制台本身以最高权限执行，不受影响。
         "greenmoon.command.gm": {
             "description": "允许使用 /gm 修改面板端口 / 管理员账号 / 密码",
+            "default": "op",
+        },
+        # 游戏内管理面板：能直接回档世界、改 AI 接管级别，等同后门，限 OP。
+        "greenmoon.command.gmpanel": {
+            "description": "允许使用 /gmpanel 游戏内管理员面板",
             "default": "op",
         },
     }
@@ -1831,6 +1882,12 @@ class GreenMoonPlugin(Plugin):
                            "done": False, "tps": 0.0, "mspt": 0.0, "seq": 0}
         self._tps_task = None
 
+        # ★ 每次 enable 都要把"周期任务已停止"标志复位为 False。
+        #   否则若 Endstone 复用同一插件实例做 /reload（on_disable 已把它
+        #   置 True），重启用后所有周期回调会因看到 True 而永远早返回，
+        #   导致监控/快照/回档等功能在重载后静默失效。
+        self._periodic_stopped = False
+
         # ---- 数据目录（唯一来源：Endstone data_folder）--------------------
         #
         # 见 _resolve_data_dir 的说明：解析失败时**不再**偷偷退回相对路径，
@@ -2128,7 +2185,7 @@ class GreenMoonPlugin(Plugin):
                 self,
                 self.data_dir / "regionlog",
                 logger=self.logger,
-                config_loader=lambda: (self._load_tools_config() or {}).get("block_record", {}) or {},
+                config_loader=lambda: (self._tools_cfg_snapshot() or {}).get("block_record", {}) or {},
             )
             cfg = self.region_api.config.as_dict()
             if cfg.get("enabled"):
@@ -2215,12 +2272,16 @@ class GreenMoonPlugin(Plugin):
         except Exception:
             pass
         try:
-            self.server.scheduler.run_task(self, self._tick_health, delay=0, period=1)
+            # ★ 单位是 tick：20 tick = 1 秒。原来 period=1 被当成"每秒"，
+            #   实际是**每 tick 一次**（20 倍开销）。这里按秒换算。
+            self.server.scheduler.run_task(self, self._tick_health, delay=0, period=20)
         except Exception:
             self.logger.warning("[诊断] 无法注册 tick 健康监控")
 
         try:
-            self.server.scheduler.run_task(self, self._snapshot, delay=0, period=30)
+            # 30 秒一次快照。原来 period=30 被当成 30 秒，实际 1.5 秒 ——
+            # 每次都要遍历在线玩家/计分板/封禁列表，是切切实实的主线程开销。
+            self.server.scheduler.run_task(self, self._snapshot, delay=0, period=600)
         except Exception:
             pass
 
@@ -2238,8 +2299,11 @@ class GreenMoonPlugin(Plugin):
         #   而如果从不重启，每天一次又可能间隔太久 —— 取 6 小时
         #   作为折中，且 prune 本身是幂等的（没超限就不会重写文件）。
         try:
+            # delay=600 tick = 30 秒（与注释一致）；period 是 6 小时。
+            # ★ 原来 period=21600 被当成"秒"，实际只有 18 分钟 ——
+            #   而 prune 要读整个记录文件再重写，18 分钟跑一次纯属浪费 IO。
             self.server.scheduler.run_task(
-                self, self._behavior_prune_tick, delay=600, period=21600)
+                self, self._behavior_prune_tick, delay=600, period=432000)
         except Exception as e:
             self.logger.warning(f"调度行为记录清理任务失败: {e}")
 
@@ -2265,8 +2329,12 @@ class GreenMoonPlugin(Plugin):
         # 6 小时的周期是"频繁重启的服不会反复清、长期不重启的服也能清上"
         # 之间的折中，且 purge 本身幂等（没超期就不动文件）。
         try:
+            # delay=10 分钟（12000 tick）、period=6 小时（432000 tick）。
+            # ★ 原写法 delay=600/period=21600 是按"秒"想的，实际是 tick：
+            #   首次 30 秒就清、之后每 18 分钟清一次，远密于注释所说的
+            #   "10 分钟后先清一次、之后每 6 小时"。
             self.server.scheduler.run_task(
-                self, self._region_prune_tick, delay=600, period=21600)
+                self, self._region_prune_tick, delay=12000, period=432000)
         except Exception as e:
             self.logger.warning(f"调度区块日志清理任务失败: {e}")
 
@@ -2282,6 +2350,15 @@ class GreenMoonPlugin(Plugin):
             self._executor.submit(self.trust.preload)
         except Exception as e:
             self.logger.warning(f"提交可信度预载失败: {e}")
+
+        # AI Agent 巡检：定时检查服务器问题并写报告发 QQ 群。
+        # 独立于其它调度（失败不影响开服）。
+        try:
+            from .ai.agent import AgentMonitor
+            self.agent = AgentMonitor(self)
+            self.agent.start()
+        except Exception as e:
+            self.logger.warning(f"启动 AI Agent 巡检失败: {e}")
 
         # 跨服药水效果缓存：{uuid: {effect_id: (amplifier, duration_tick)}}
         # 由 on_cross_packet_send 写入，_cross_tick_effect_cache 每 tick 倒计时。
@@ -2309,7 +2386,11 @@ class GreenMoonPlugin(Plugin):
             self._cross_effect_cache = {}
             self._cross_effect_lock = threading.Lock()
             try:
-                self.server.scheduler.run_task(self, self._cross_tick_effect_cache, delay=0, period=1)
+                # ★ 每秒一次（20 tick）。原来 period=1 是**每 tick** 一次，
+                #   而这个函数每次都要遍历所有在线玩家的效果表；
+                #   更要命的是它按「调用一次 = 过期 1 秒」倒计时 ——
+                #   每 tick 调一次会让药水剩余时间以 20 倍速蒸发。
+                self.server.scheduler.run_task(self, self._cross_tick_effect_cache, delay=0, period=20)
             except Exception as e:
                 self.logger.warning(f"[跨服] 无法注册效果倒计时任务（buff 同步可能不准）: {e}")
 
@@ -2525,10 +2606,25 @@ class GreenMoonPlugin(Plugin):
         # ★ 必须在关线程池 / 关子系统**之前**做。
         #   否则任务还会在下一秒被调度进来，而它依赖的 executor / trust
         #   已经没了 —— 表现为关闭瞬间刷出一串无害但很吵的异常。
-        #   （Endstone 没有"取消单个 task"的公开 API，所以这里做的是
-        #    把回调置空：任务仍在跑，但立刻返回，不再触碰任何状态。）
+        # ★ 关键修复（/reload 段错误 SIGSEGV）：
+        #   旧实现只置 self._periodic_stopped=True 让回调早返回，但任务
+        #   句柄被直接丢弃、从未真正从调度器摘除 —— Endstone 的 C++ 调度器
+        #   会一直持有旧 plugin 实例上的回调。/reload 后旧回调仍被按 tick
+        #   反复调用，回调捕获的对象已被卸载/重建 → 引用悬空 →
+        #   EndstoneScheduler::mainThreadHeartbeat 触发段错误。
+        #   改用 Endstone 公开的 cancel_tasks(plugin)，把本插件名下全部
+        #   任务（含 qqbot / regionlog / onebot / ai.agent / cross 等经
+        #   self.plugin 注册的）一次性整体取消，杜绝悬空引用。
+        #   （_periodic_stopped 仍保留作二级保险，防止取消后到函数返回前
+        #    的极窄窗口里有任务再被触发。）
         self._periodic_stopped = True
         try:
+            self.server.scheduler.cancel_tasks(self)
+        except Exception as e:
+            self.logger.warning(f"[调度] 取消本插件全部任务失败: {e}")
+        try:
+            if getattr(self, "_tps_task", None) is not None:
+                self._tps_task.cancel()
             self._tps_task = None
         except Exception:
             pass
@@ -2660,6 +2756,14 @@ class GreenMoonPlugin(Plugin):
                     qq_bot.stop()
                 except Exception as e:
                     self.logger.warning(f"关闭 QQ 网关时出错: {e}")
+
+        # ★ 兜底清扫：所有子系统关闭之后，再整体取消一次本插件名下任务。
+        #   防止任何子系统在各自 stop() 过程中（含异常分支）又排了新任务，
+        #   导致 /reload 后仍有悬空回调残留。幂等操作，多次调用无害。
+        try:
+            self.server.scheduler.cancel_tasks(self)
+        except Exception as e:
+            self.logger.warning(f"[调度] 收尾取消任务失败: {e}")
         self._close_plugin_logging()
 
     # ------------------------------------------------------- 内置指令入口
@@ -2689,7 +2793,7 @@ class GreenMoonPlugin(Plugin):
             name = str(getattr(command, "name", "") or "")
             if ":" in name:
                 name = name.rsplit(":", 1)[-1]
-            if name not in ("gmback", "gmreload", "gm"):
+            if name not in ("gmback", "gmreload", "gm", "gmpanel"):
                 # ★ 必须显式返回 False，让服务端继续把这条指令交给别的插件。
                 #
                 # 这里曾经是「if name != "gmback": return self._gm_reload_command(...)」，
@@ -2702,6 +2806,8 @@ class GreenMoonPlugin(Plugin):
                 return self._gm_reload_command(sender, command, args, name)
             if name == "gm":
                 return self._gm_config_command(sender, command, args, name)
+            if name == "gmpanel":
+                return self._gm_panel_command(sender, command, args, name)
 
             argv = [str(a) for a in (args or [])]
             sub = argv[0].lower() if argv else ""
@@ -2904,6 +3010,35 @@ class GreenMoonPlugin(Plugin):
             return True
 
     # --------------------------------------------------- /gm 配置指令
+
+    def _gm_panel_command(self, sender, command, args, name: str) -> bool:
+        """``/gmpanel`` 游戏内管理员面板（仅 OP 可唤出）。
+
+        弹出一个 endstone 表单主菜单（回档 / 机器人设置 / AI设置），
+        全部可实际操作。非玩家（控制台）或普通玩家会被拒。
+        """
+        # 判定是否为"可在游戏内收表单的玩家"：有 is_op 且有 send_form。
+        looks_player = bool(getattr(sender, "is_op", None) is not None
+                            and hasattr(sender, "send_form"))
+        if not looks_player:
+            self._gmback_reply(
+                sender, "该指令只能在游戏内由 OP 玩家使用（请改用网页面板）。")
+            return True
+        if not getattr(sender, "is_op", False):
+            try:
+                sender.send_message("§c只有管理员(OP)才能打开管理面板。")
+            except Exception:
+                pass
+            return True
+        try:
+            ingame_forms.open_admin_form(self, sender)
+        except Exception as e:
+            self.logger.error(f"[gmpanel] 打开面板失败: {e}")
+            try:
+                sender.send_message(f"§c打开面板失败：{e}")
+            except Exception:
+                pass
+        return True
 
     def _gm_config_command(self, sender, command, args, name: str) -> bool:
         """``/gm`` 配置入口 —— 面板服的"没有 stdin 也能配"通道。
@@ -3652,6 +3787,80 @@ class GreenMoonPlugin(Plugin):
         if gw is not None:
             try:
                 gw.config["group_openid"] = str(group_openid or "")
+            except Exception:
+                pass
+
+    def _qqbot_persist_owner_openid(self, owner_openid, card_id=None):
+        """持久化「服主」身份（绑定码发起人），重启后仍保留。
+
+        与 ``_qqbot_persist_group_openid`` 同款通道：优先走 conn_mgr
+        更新卡片配置，并同步到运行中的网关 ``gw.config``。
+        """
+        oid = str(owner_openid or "").strip()
+        if not oid:
+            return
+        mgr = getattr(self, "conn_mgr", None)
+        if mgr is None:
+            path = self.data_dir / "qqbot.json"
+            try:
+                current = self._load_qqbot_config()
+                current["owner_openid"] = oid
+                atomic_write_json(path, current, indent=2)
+            except Exception as e:
+                self.logger.warning(f"[QQ] 持久化服主失败: {e}")
+            gw = getattr(self, "qq_bot", None)
+            if gw is not None:
+                try:
+                    gw.config["owner_openid"] = oid
+                except Exception:
+                    pass
+            return
+        primary, pid = self._qqbot_resolve_adapter(card_id)
+        if primary is None or pid is None:
+            return
+        try:
+            mgr.update(pid, {"owner_openid": oid})
+        except Exception as e:
+            self.logger.warning(f"[QQ] 持久化服主失败: {e}")
+            return
+        gw = self._hub_gateway_for(pid)
+        if gw is not None:
+            try:
+                gw.config["owner_openid"] = oid
+            except Exception:
+                pass
+
+    def _qqbot_persist_qq_tiers(self, tiers: dict, card_id=None):
+        """持久化 QQ 三档映射 ``{openid: tier}`` 到卡片配置。"""
+        if not isinstance(tiers, dict):
+            return
+        mgr = getattr(self, "conn_mgr", None)
+        if mgr is None:
+            try:
+                current = self._load_qqbot_config()
+                current["qq_tiers"] = dict(tiers)
+                atomic_write_json(self.data_dir / "qqbot.json", current, indent=2)
+            except Exception as e:
+                self.logger.warning(f"[QQ] 持久化分档失败: {e}")
+            gw = getattr(self, "qq_bot", None)
+            if gw is not None:
+                try:
+                    gw.config["qq_tiers"] = dict(tiers)
+                except Exception:
+                    pass
+            return
+        primary, pid = self._qqbot_resolve_adapter(card_id)
+        if primary is None or pid is None:
+            return
+        try:
+            mgr.update(pid, {"qq_tiers": dict(tiers)})
+        except Exception as e:
+            self.logger.warning(f"[QQ] 持久化分档失败: {e}")
+            return
+        gw = self._hub_gateway_for(pid)
+        if gw is not None:
+            try:
+                gw.config["qq_tiers"] = dict(tiers)
             except Exception:
                 pass
 
@@ -4611,9 +4820,11 @@ class GreenMoonPlugin(Plugin):
     def _behavior_level(self) -> int:
         """实时读取行为记录档位。
 
-        ★ 每次事件都实时读配置，不做缓存 —— 服主在面板上把档位从 3
-        改成 0，应当**立刻**停止记录。缓存会让它晚一拍生效，
-        而这在隐私场景下是不可接受的。
+        ★ 每次事件都读配置，**不做长期缓存** —— 服主在面板上把档位从 3
+        改成 0，应当**立刻**停止记录。这里用的是 2 秒 TTL 的只读快照
+        （``_tools_cfg_snapshot``）：面板保存会立即让它失效，所以改档位
+        仍是即时生效；而它避免了"每个方块事件都 open+json.load+深拷贝"
+        把主线程拖垮（见该方法的说明）。
 
         ★ 配置位置：``behavior_record.level``（旧位置 ``ai.behavior_record_level``
           仍被兼容）。注意这里与 **方块日志** 的档位（``block_record.level``）
@@ -4676,7 +4887,10 @@ class GreenMoonPlugin(Plugin):
           且天然支持回滚版本的 —— 用户降级回旧版也照样能跑。
         """
         try:
-            allcfg = self._load_tools_config() or {}
+            # ★ 用热路径快照：本函数在每个方块/行为事件里都会被调用，
+            #   直接 _load_tools_config() 会每个事件读一次磁盘（见
+            #   _tools_cfg_snapshot 的说明）。快照只读，这里不修改它。
+            allcfg = self._tools_cfg_snapshot() or {}
             br = allcfg.get("behavior_record")
             if isinstance(br, dict):
                 v = br.get(key)
@@ -4922,6 +5136,43 @@ class GreenMoonPlugin(Plugin):
         except Exception:
             pass
 
+    @staticmethod
+    def _explode_actor_name(actor) -> str:
+        """爆炸事件的"责任标识"。
+
+        ★ 只对**玩家**取显示名，其余实体一律取命名空间 ID。
+
+          Endstone 里 ``Actor.name`` 是给人看的显示名（苦力怕是 "Creeper"），
+          ``Actor.type`` 才是稳定的命名空间 ID（"minecraft:creeper"）。
+          原实现优先取 ``name``，于是区块日志里留下一堆 "Creeper"。
+          下游判断"这是不是玩家"靠的是「含冒号 / 以括号开头」这类特征，
+          一个纯英文单词 "Creeper" 完美躲过所有规则 → 巡检报告写成
+          「玩家「Creeper」近期 86 次 explode 事件」，还准备让腐竹封禁它。
+
+          这里改成：玩家取名字（人要看的就是名字），非玩家取 type
+          （"minecraft:creeper" 带冒号，下游一眼就能判定不是玩家）。
+          连 type 都拿不到时才退回显示名，并加 ``(实体)`` 前缀 ——
+          前缀不是装饰，它是告诉下游"这不是账号名"的唯一线索。
+        """
+        atype = ""
+        try:
+            atype = str(getattr(actor, "type", "") or "")
+        except Exception:
+            atype = ""
+        if atype.lower() in ("minecraft:player", "player"):
+            try:
+                return str(getattr(actor, "name", "") or "") or atype
+            except Exception:
+                return atype
+        if atype:
+            return atype
+        nm = ""
+        try:
+            nm = str(getattr(actor, "name", "") or "")
+        except Exception:
+            nm = ""
+        return f"(实体){nm}" if nm else "未知"
+
     def _region_record_explode(self, event, actor) -> None:
         """把一片「被爆炸摧毁的方块」写进区块日志。
 
@@ -4937,7 +5188,7 @@ class GreenMoonPlugin(Plugin):
             blocks = getattr(event, "block_list", None)
             if not blocks:
                 return
-            name = str(getattr(actor, "name", "") or getattr(actor, "type", "") or "未知")
+            name = self._explode_actor_name(actor)
             dim = ""
             # 爆炸事件的 block 自带 dimension，优先用它（比 actor 的位置更准：
             # TNT 引爆点可能与被炸方块不在同一维度视距内）。
@@ -5187,6 +5438,212 @@ class GreenMoonPlugin(Plugin):
                 return
             rec.record("block_explode", "", btype or "unknown",
                        lv, x, y, z, dim)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # 自然/机械方块变化（P0 Bug #2 修复）
+    #
+    # ★ 下面两个处理器补上「非爆炸 / 非玩家放置」的方块变化：
+    #     · on_behavior_block_form  —— 液体/世界条件生成的方块
+    #       （岩浆遇水→石/圆石/黑曜石、水冻结→冰）。这类变化会覆盖掉
+    #       原有的液体/空气，原先完全没记录，导致"被生成的石头埋掉的建筑"
+    #       无法回档。
+    #     · on_behavior_piston_*    —— 活塞推/拉。Endstone 事件不暴露被
+    #       推动的方块列表，无法逐格精确回退，故记为审计事件（时间线可见、
+    #       可纳入时间窗），详见 _region_record_piston 的注释。
+    #   两者都独立于「行为记录档位」，只要区块记录开着就记（与放置/爆炸
+    #   同理由：服主可能关行为记录但仍要能回档）。
+    # ------------------------------------------------------------------
+    def _region_record_form(self, event) -> None:
+        """把「自然生成的方块」写进区块日志（action=block_form）。
+
+        ★ 字段约定（与 regionlog/store.py 的语义注释严格一致）：
+            block_form 属于「记录变化前方块」的组（与 break/explode 同类），
+            所以 ``block_type`` 存**变化前**的方块（通常是液体/空气），
+            ``replaced_*`` 存**新生成**的方块（stone/obsidian/ice…）。
+            回档引擎对「非 place 类」动作按 ``block_type`` 还原 —— 即把
+            那一格重新变回原来的液体/空气，等于"撤销这次生成"。
+        """
+        api = self._region_recorder()
+        if api is None:
+            return
+        try:
+            old = getattr(event, "block", None)
+            new_state = getattr(event, "new_state", None)
+            if old is None or new_state is None:
+                return
+            old_type = str(getattr(old, "type", "") or "")
+            new_type = str(getattr(new_state, "type", "") or "")
+            if not old_type or not new_type:
+                return
+            dim = ""
+            try:
+                dim = str(getattr(old.dimension, "name", "") or "")
+            except Exception:
+                dim = ""
+            api.record_block(
+                actor="(自然生成)",
+                action="block_form",
+                block_type=old_type,                 # 变化前（回档还原目标）
+                block_states=self._block_states_json(old),
+                x=int(old.x), y=int(old.y), z=int(old.z),
+                dimension=dim,
+                replaced_type=new_type,               # 新生成的方块
+                replaced_states=self._block_states_json(new_state),
+            )
+        except Exception:
+            pass
+
+    @_optional_event_handler(BlockFormEvent)
+    def on_behavior_block_form(self, event: BlockFormEvent):
+        """自然生成的方块 —— 岩浆/水生成的石头、冰、黑曜石、圆石。"""
+        if BlockFormEvent is None:
+            return
+        try:
+            self._region_record_form(event)
+        except Exception:
+            pass
+
+    #: 活塞一次最多推动 12 格（原版上限）。
+    _PISTON_MAX_PUSH = 12
+
+    def _region_record_piston(self, event, op: str) -> None:
+        """把活塞推/拉的**方块位移**记成可回档记录（actor 标 "(活塞)"）。
+
+        ★ 为什么不只记审计事件：
+          Endstone 的 BlockPistonEvent 确实不暴露 moved blocks 列表，但它给了
+          ``block`` 与 ``direction``，而 ``Block.get_relative(face, n)`` 能读到
+          活塞前方每一格。事件在**真正移动之前**触发（Cancellable），所以此时
+          读到的就是"移动前"的状态 —— 逐格记下来，回档按 ``block_type``
+          还原即可精确撤销。
+
+        记录规则（action 统一为 ``block_piston``，属于"记变化前"的一组）：
+          · 伸出：从 +1 开始沿方向扫描，非空气格逐格记录**当前**方块；
+                  扫描到的第一个空气格是链条终点，额外记一条 air（回档清空它）。
+          · 收回：粘性活塞把 +2 的方块拉到 +1。记 +1 为 air（活塞头消失后
+                  应为空气）、+2 为被拉方块的当前类型。
+
+        ★ ``get_relative`` 读的是主线程即时状态，事件处理器本身就在主线程，
+          与其它方块事件同源，不会拿到撕裂的数据。
+        """
+        api = self._region_recorder()
+        if api is None:
+            return
+        try:
+            pb = getattr(event, "block", None)
+            face = getattr(event, "direction", None)
+            if pb is None or face is None:
+                return
+            try:
+                dim = str(getattr(pb.dimension, "name", "") or "")
+            except Exception:
+                dim = ""
+            opname = "extend" if op == "piston_extend" else "retract"
+
+            def _type_of(b):
+                return str(getattr(b, "type", "") or "")
+
+            def _is_air(t):
+                return (not t) or t == "minecraft:air" or t.endswith(":air")
+
+            def _write(b, btype, why):
+                try:
+                    api.record_block(
+                        actor="(活塞)",
+                        action="block_piston",
+                        block_type=btype,
+                        block_states=("{}" if _is_air(btype)
+                                      else self._block_states_json(b)),
+                        x=int(b.x), y=int(b.y), z=int(b.z),
+                        dimension=dim,
+                        extra=json.dumps(
+                            {"op": opname, "dir": str(face), "why": why},
+                            ensure_ascii=False),
+                    )
+                except Exception:
+                    pass
+
+            if op == "piston_extend":
+                moved = 0
+                for i in range(1, self._PISTON_MAX_PUSH + 1):
+                    try:
+                        b = pb.get_relative(face, i)
+                    except Exception:
+                        return
+                    if b is None:
+                        return
+                    t = _type_of(b)
+                    if _is_air(t):
+                        # 链条末端：这里会被推入一个方块，回档要把它清回空气。
+                        # moved==0 说明前方本来就是空，没有方块被推动。
+                        if moved:
+                            _write(b, "minecraft:air", "dest")
+                        return
+                    _write(b, t, "push")
+                    moved += 1
+                return
+
+            # 收回（粘性活塞）：+1 是活塞头，+2 是被拉回的方块
+            try:
+                head = pb.get_relative(face, 1)
+                pulled = pb.get_relative(face, 2)
+            except Exception:
+                return
+            if head is None or pulled is None:
+                return
+            tp = _type_of(pulled)
+            if _is_air(tp):
+                return          # 没吸住东西，没有方块位移
+            _write(head, "minecraft:air", "head")
+            _write(pulled, tp, "pull")
+        except Exception:
+            pass
+
+    @_optional_event_handler(BlockPistonExtendEvent)
+    def on_behavior_piston_extend(self, event: BlockPistonExtendEvent):
+        """活塞伸出。"""
+        if BlockPistonExtendEvent is None:
+            return
+        try:
+            self._region_record_piston(event, "piston_extend")
+        except Exception:
+            pass
+
+    @_optional_event_handler(BlockPistonRetractEvent)
+    def on_behavior_piston_retract(self, event: BlockPistonRetractEvent):
+        """活塞收回。"""
+        if BlockPistonRetractEvent is None:
+            return
+        try:
+            self._region_record_piston(event, "piston_retract")
+        except Exception:
+            pass
+
+    @_optional_event_handler(ChunkLoadEvent)
+    def on_region_chunk_load(self, event: ChunkLoadEvent):
+        """区块加载后，补做"回档时没人加载区块"遗留的恢复项。
+
+        ★ 这是"人不在服务器里，回档也能最终生效"的关键一环：
+          回档当时目标区块没加载、也没人能传送过去触发加载，那些方块
+          被写进 pending_restore；以后任何玩家走到这里、区块被加载时，
+          这个回调就把它们恢复掉。
+        ★ ChunkLoadEvent 对**每个**加载的区块都会触发（登录/走动/传送），
+          所以这里不能查库：``apply_pending_chunk`` 第一层只查内存里的
+          区块集合，没有待办立即返回。
+        ★ 不判断 ``api.enabled``：这些是**已经承诺过的修复**，即使服主
+          后来关掉记录功能，也应该把欠世界的账还完。
+        """
+        if ChunkLoadEvent is None:
+            return
+        try:
+            api = getattr(self, "region_api", None)
+            if api is None:
+                return
+            ch = event.chunk
+            api.apply_pending_chunk(
+                int(ch.x), int(ch.z),
+                str(getattr(ch.dimension, "name", "") or ""))
         except Exception:
             pass
 
@@ -8550,6 +9007,36 @@ class GreenMoonPlugin(Plugin):
             pass
         return default
 
+    #: 热路径配置快照的存活时间（秒）。配置由面板保存时**立即失效**，
+    #: 这个 TTL 只兜底"有人手工改了 tools_config.json"的场景。
+    _TOOLS_CFG_TTL = 2.0
+
+    def _tools_cfg_snapshot(self) -> Dict[str, Any]:
+        """热路径专用：短 TTL 的配置快照。**返回值只读，禁止修改。**
+
+        ★ 为什么需要它（真实性能问题）：
+          ``_load_tools_config()`` 每次都会 open + json.load + 深拷贝
+          ``DEFAULT_TOOLS_CONFIG``。而 ``RegionAPI.level``（记录颗粒度）和
+          ``_behavior_level()``（行为档位）是在**每个方块事件**里读的 ——
+          方块放置/破坏/交互、爆炸、活塞、液体生成……高峰期每秒几十上百次，
+          等于每秒几十上百次读盘 + 解析，全部发生在**服务器主线程**上。
+          表现为 TPS 莫名其妙往下掉，而 CPU 看起来又不高（卡在 IO）。
+
+          这里把"读盘结果"缓存 2 秒，热路径改读缓存（纯字典查找）。
+          面板保存配置时调用方会置空缓存，所以改档位仍然**立即生效**。
+          缓存对象只给读，不复制 —— 写路径仍走 ``_load_tools_config()``
+          拿独立副本，互不影响。
+        """
+        now = time.monotonic()
+        cached = getattr(self, "_tools_cfg_snap", None)
+        if cached is not None:
+            ts, data = cached
+            if now - ts < self._TOOLS_CFG_TTL:
+                return data
+        data = self._load_tools_config()
+        self._tools_cfg_snap = (now, data)
+        return data
+
     def _tools_public_config(self) -> Dict[str, Any]:
         cfg = self._load_tools_config()
         public = json.loads(json.dumps(cfg))
@@ -8585,19 +9072,30 @@ class GreenMoonPlugin(Plugin):
             return False, "数据格式不正确"
         # ★ 每加一个新分区都必须同步这里 —— 否则前端「保存成功」但
         #   值根本没写进去（历史上有过 binding/signin/mods 就是这么丢的）。
+        # ★ 2026-05 修复：``behavior_record``（玩家行为记录粒度）长期被漏在这
+        #   份清单之外 —— 结果就是「区块日志」板块里调了行为记录颗粒度、点
+        #   保存，后端 ``allowed`` 交集算出来永远没有它，写盘时整段被静默跳过，
+        #   前端却显示「已保存」，刷新后档位又回到 0（不记录）。这就是用户
+        #   报的 P0 Bug #1。下面两处（白名单 + 写盘循环）必须同步补上。
         _ALL_SECTIONS = ("backup", "cloud_blacklist", "binding", "signin", "mods",
-                         "regex_engine", "trust", "ai", "block_record")
+                         "regex_engine", "trust", "ai", "block_record",
+                         "behavior_record")
         if sections is None:
             allowed = set(_ALL_SECTIONS)
         else:
             allowed = set(sections) & set(_ALL_SECTIONS)
         with self._CONFIG_WRITE_LOCK:
-            return self._save_tools_config_locked(payload, allowed)
+            ok, msg = self._save_tools_config_locked(payload, allowed)
+        if ok:
+            # 配置已落盘 —— 让热路径快照立即失效，档位改动马上生效。
+            self._tools_cfg_snap = None
+        return ok, msg
 
     def _save_tools_config_locked(self, payload: Dict[str, Any], allowed: set):
         current = self._load_tools_config()
         for section in ("backup", "cloud_blacklist", "binding", "signin", "mods",
-                        "regex_engine", "trust", "ai", "block_record"):
+                        "regex_engine", "trust", "ai", "block_record",
+                        "behavior_record"):
             if section not in allowed:
                 continue
             p = payload.get(section)
@@ -8708,6 +9206,7 @@ class GreenMoonPlugin(Plugin):
             self._start_log_tailer()
         except Exception as e:
             self.logger.warning(f"[日志采集] 重新加载失败: {e}")
+        self._tools_cfg_snap = None
         return True, "已保存"
 
     def _backup_dir(self, cfg: Dict[str, Any] = None) -> Path:
@@ -9187,13 +9686,22 @@ class GreenMoonPlugin(Plugin):
     #   （面板初始化时会并发拉取各板块），那一刻实例还不存在。
     #   惰性属性保证「任何时刻调用都拿得到实例」，和 cloud_mgr 同理。
 
+    #: ai_manager 惰性构造锁。
+    #: ★ 面板（HTTP 线程池）与 QQ（asyncio.to_thread）会并发首次访问；
+    #:   没有锁时两边可能各构造一个 AIManager —— 它内部有后台线程与
+    #:   额度计数，构造两次等于线程泄漏 + 计数分裂。双重检查即可。
+    _AI_MGR_LOCK = threading.Lock()
+
     @property
     def ai_manager(self):
         mgr = getattr(self, "_ai_mgr_inst", None)
         if mgr is None:
-            from .ai import AIManager
-            mgr = AIManager(self)
-            self._ai_mgr_inst = mgr
+            with self._AI_MGR_LOCK:
+                mgr = getattr(self, "_ai_mgr_inst", None)
+                if mgr is None:
+                    from .ai import AIManager
+                    mgr = AIManager(self)
+                    self._ai_mgr_inst = mgr
         return mgr
 
     def _ai_status(self):
@@ -9428,6 +9936,44 @@ class GreenMoonPlugin(Plugin):
                     raise RuntimeError("原子写入失败")
             except Exception as e:
                 return False, f"保存失败: {e}"
+        self._tools_cfg_snap = None
+        return True, "已保存"
+
+    def _save_agent_config(self, payload: Dict[str, Any]):
+        """保存 AI Agent 巡检配置到主配置 ``agent`` 段（逐字段白名单）。"""
+        if not isinstance(payload, dict):
+            return False, "数据格式不正确"
+        try:
+            from .ai.agent import _DEFAULTS
+        except Exception:
+            _DEFAULTS = {"enabled": True, "check_interval_min": 10,
+                         "report_to_group": True, "auto_fix": False,
+                         "grief_event_threshold": 20, "tps_warn": 18.0}
+        cfg = self._load_config() or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        sub = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else {}
+        allowed = set(_DEFAULTS.keys())
+        for k, v in payload.items():
+            if k not in allowed:
+                continue
+            if k in ("enabled", "report_to_group", "auto_fix"):
+                sub[k] = bool(v)
+            elif k in ("check_interval_min", "grief_event_threshold", "dedup_minutes"):
+                try:
+                    sub[k] = max(1, int(v))
+                except Exception:
+                    pass
+            elif k == "tps_warn":
+                try:
+                    sub[k] = float(v)
+                except Exception:
+                    pass
+        cfg["agent"] = sub
+        try:
+            self._persist_config(cfg)
+        except Exception as e:
+            return False, f"保存失败: {e}"
         return True, "已保存"
 
     def _ai_test_connection(self):
@@ -9493,6 +10039,33 @@ class GreenMoonPlugin(Plugin):
             except Exception:
                 pass
         return ok, msg
+
+    def _ai_owner_chat(self, text: str, history=None) -> Dict[str, Any]:
+        """面板「服主对话」入口。
+
+        全部交给 LLM（``ai_manager.owner_chat``，带工具、以服主身份）。
+        LLM 自带 ``rollback_region`` / ``ban_player`` 等工具，自然语言
+        理解更准确，也能复用 ``qq_agent.is_player_actor`` 过滤，绝不会
+        把 TNT / 床这类方块当成"炸服者"去回档或封禁。
+
+        ★ 2026-05 改进 #7：原先这里有一段"确定性直连"（``qq_agent.
+          interpret`` / ``qq_agent.execute`` 按关键词硬匹配意图再执行），
+          已整体移除 —— 它会把爆炸记录的 actor（``minecraft:tnt`` /
+          ``Block of TNT``）误当成责任人，且关键词匹配 brittle。
+          现在面板与群里走同一套 LLM 路径，语义一致、不会臆造责任人。
+        """
+        text = str(text or "").strip()
+        if not text:
+            return {"ok": False, "error": "消息为空", "actions": [], "api_calls": 0}
+        try:
+            res = self.ai_manager.owner_chat(text, history or [])
+        except Exception as e:
+            self.logger.error(f"AI 面板对话异常: {e}")
+            return {"ok": False, "error": f"对话失败：{e}", "actions": [],
+                    "api_calls": 0}
+        if isinstance(res, dict):
+            res.setdefault("source", "llm")
+        return res
 
     def _ai_default_prompts(self) -> Dict[str, str]:
         """内置默认提示词全文（面板「查看默认提示词 / 一键恢复默认」用）。"""
@@ -9958,7 +10531,7 @@ class GreenMoonPlugin(Plugin):
         enabled_res, enabled_beh = self._read_world_enabled(target_world)
 
         seen = set()
-        def _scan(base, scope):
+        def _scan(base, scope, world_name=""):
             try:
                 if not base.is_dir():
                     return
@@ -9995,10 +10568,17 @@ class GreenMoonPlugin(Plugin):
                     # 只有世界级目录里的包才谈得上「启用/停用」——
                     # 全局 resource_packs/behavior_packs 是给存档引用的仓库，
                     # 是否生效取决于各存档自己的 world_*_packs.json。
-                    if scope == "world":
-                        enabled = (uuid_ in enabled_res) if ptype == "resource" else (
-                            (uuid_ in enabled_beh) if ptype == "behavior" else False)
+                    # ★ 启用状态是**按存档**记录的，与包放在全局目录还是
+                    #   存档目录无关：BDS 只看 world_*_packs.json 里有没有
+                    #   这个 uuid。所以只要定位到了目标存档，两种 scope 都
+                    #   按该存档的清单算 —— 否则「包装在全局目录、但在存档
+                    #   里已启用」会显示成「—」，用户根本没法停用它。
+                    if target_world is not None and ptype == "resource":
+                        enabled = uuid_ in enabled_res
+                    elif target_world is not None and ptype == "behavior":
+                        enabled = uuid_ in enabled_beh
                     else:
+                        # 没有目标存档 / 类型无法识别：不提供开关
                         enabled = None
                     installed.append({
                         "name": name,
@@ -10006,6 +10586,9 @@ class GreenMoonPlugin(Plugin):
                         "version": ver,
                         "path": str(pack_dir),
                         "parent": base.name,
+                        # 这个包属于哪个存档（全局目录为空串）——
+                        # 前端用它区分「同名包出现在多个世界」的情况
+                        "world": world_name,
                         # kind: resource / behavior / unknown，用于前后端分组
                         "kind": ptype or "unknown",
                         "scope": scope,
@@ -10018,20 +10601,14 @@ class GreenMoonPlugin(Plugin):
                 pass
         for sub in ("resource_packs", "behavior_packs"):
             _scan(root / sub, "global")
-        worlds_dir = root / "worlds"
-        try:
-            world_entries = [d for d in sorted(worlds_dir.iterdir()) if d.is_dir()] if worlds_dir.is_dir() else []
-        except Exception:
-            world_entries = []
-        if not world_entries:
-            try:
-                world_entries = [d for d in sorted(root.iterdir())
-                                 if d.is_dir() and (d / "level.dat").exists() and d.name not in ("worlds", "resource_packs", "behavior_packs")]
-            except Exception:
-                world_entries = []
-        for wd in world_entries:
+        # ★ 只扫描**当前选中存档**的包目录。老实现把所有存档都扫进来：
+        #   · 同一个包会在列表里出现多次（每个世界一份）；
+        #   · 每份的「已启用」却都按当前存档的 json 计算，状态全是错的；
+        #   · 界面上又只写「存档内」，根本分不清是哪个世界。
+        #   页面标题本来就是「该存档的启用状态」，只扫目标存档才对。
+        if target_world is not None:
             for sub in ("resource_packs", "behavior_packs"):
-                _scan(wd / sub, "world")
+                _scan(target_world / sub, "world", target_world.name)
 
         meta = {
             "world": target_world.name if target_world is not None else "",
@@ -10399,7 +10976,13 @@ class GreenMoonPlugin(Plugin):
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 with zipfile.ZipFile(str(src), "r", allowZip64=True) as zf:
-                    zf.extractall(tmpdir)
+                    # ★ 必须用安全解压：直接 extractall 时，包含
+                    #   "../../xxx" 成员的恶意 mcpack 可以把文件写到临时
+                    #   目录之外，覆盖服务端 / 插件文件。这里复用子插件
+                    #   导入器里已经写好的 _safe_extract（拒绝穿越、绝对
+                    #   路径、解压炸弹）。
+                    from .mod_loader import _safe_extract
+                    _safe_extract(zf, Path(tmpdir))
                 t_root = Path(tmpdir)
 
                 leaf_packs, notes = self._discover_packs_in_zip(src, t_root)
@@ -10531,10 +11114,17 @@ class GreenMoonPlugin(Plugin):
         except Exception as e:
             return False, f"读取 manifest.json 失败: {e}"
         header = m.get("header", {}) or {}
-        uuid_ = header.get("uuid")
+        uuid_ = str(header.get("uuid") or "").strip()
         version = header.get("version")
         if not uuid_:
             return False, f"{folder.name} 缺少 header.uuid"
+        # ★ header.uuid 来自第三方 manifest，**不能直接当目录名用**：
+        #   形如 "../../server.properties" 会把下面的 copytree 引到目标
+        #   目录之外（任意文件覆盖）。只允许字母/数字/点/下划线/连字符。
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", uuid_):
+            return False, f"{folder.name} 的 header.uuid 非法: {uuid_!r}"
+        if not (isinstance(version, list) and version):
+            version = [1, 0, 0]
         pack_type = self._pack_type(m)
         if not pack_type:
             return False, f"无法识别包类型: {folder.name}"
@@ -10543,8 +11133,20 @@ class GreenMoonPlugin(Plugin):
             return False, f"找不到世界: {world_name}"
         base_dir.mkdir(parents=True, exist_ok=True)
         target_pack = base_dir / str(uuid_)
+        # 双保险：即使上面的 uuid 校验将来被放宽，也不允许越出 base_dir
+        try:
+            if target_pack.resolve().parent != base_dir.resolve():
+                return False, f"安装路径非法: {uuid_!r}"
+        except Exception:
+            return False, f"安装路径非法: {uuid_!r}"
         if target_pack.exists():
-            shutil.rmtree(str(target_pack), ignore_errors=True)
+            if target_pack.is_dir():
+                shutil.rmtree(str(target_pack), ignore_errors=True)
+            else:
+                try:
+                    target_pack.unlink()
+                except Exception as e:
+                    return False, f"无法覆盖已存在的同名文件 {target_pack.name}: {e}"
         shutil.copytree(str(folder), str(target_pack))
         self._enable_pack_in_world(world_path, pack_type, uuid_, version)
         return True, f"{header.get('name', folder.name)}（{pack_type}）→ {target_pack}"
@@ -10552,7 +11154,9 @@ class GreenMoonPlugin(Plugin):
     def _install_one_pack_file(self, f: Path, root: Path, target_type, world_name):
         with tempfile.TemporaryDirectory() as td:
             with zipfile.ZipFile(str(f), "r", allowZip64=True) as zf:
-                zf.extractall(td)
+                # 嵌套的 .mcpack 同样来自第三方，必须安全解压
+                from .mod_loader import _safe_extract
+                _safe_extract(zf, Path(td))
             t = Path(td)
 
             found = None

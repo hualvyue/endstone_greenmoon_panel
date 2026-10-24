@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>服务器管理面板</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--__GM_CSS__-->
+    <script>
+        /* 主题预设：在样式生效前套用，避免刷新时闪白/闪黑 */
+        (function () {
+            try {
+                var t = localStorage.getItem('gm-theme');
+                if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            } catch (e) {}
+        })();
+    </script>
+</head>
+<body>
+<div class="layout" id="layout">
+<div class="side-scrim" id="side-scrim" onclick="gmCloseSidebar()"></div>
+<nav class="sidebar" id="sidebar">
+    <div class="side-head">
+        <!--__GM_BRAND:side-brand__-->
+        <button class="side-close" type="button" onclick="gmCloseSidebar()" aria-label="收起侧边栏">✕</button>
+    </div>
+    <!-- 原「🗒️ 日志中心」板块已并入「📊 服务器信息」，故导航项删除、
+         data-scope 合并（players,logs,console,detail）。
+         只保留这一个入口，避免列表里出现两个指向同一 section 的项。 -->
+    <a href="javascript:void(0)" class="active" onclick="showSection('sec-players', this)" data-scope="players,logs,console,detail">📊 服务器信息</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-gamerules', this)" data-scope="gamerules">🎮 游戏规则</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-bans', this)" data-scope="bans">🚫 封禁管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-whitelist', this)" data-scope="whitelist">🛡 白名单审核</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-properties', this)" data-scope="worlds,gamerules">⚙️ server.properties</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-worlds', this)" data-scope="worlds">🌍 多存档切换</a>
+    <!-- 原「🔐 权限管理」「📊 记分板」已并入「🧰 操作控制台」，
+         原「🩺 诊断」已并入「🔑 账户与安全」，故导航项删除。
+         授权 scope 也同步合并为 console / account，避免出现
+         「页面没了但授权项还在」的幽灵 scope。 -->
+    <a href="javascript:void(0)" onclick="showSection('sec-console', this)" data-scope="console">🧰 操作控制台</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-bots', this)" data-scope="qqbot">🤖 机器人管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-regex', this)" data-scope="qqbot">🧩 正则触发器</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-cross', this)" data-scope="cross">🔗 跨服互联</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-backup', this)" data-scope="backup">📦 自动备份</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-cloud', this)" data-scope="cloud">☁️ 云黑名单</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-gametools', this)" data-scope="gametools">🎁 签到与绑定</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-trust', this)" data-scope="trust">🛡️ 玩家可信度</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-ai', this)" data-scope="ai">🧠 AI 自动管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-mods', this)" data-scope="mods">🧩 模组管理器</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-gmods', this)" data-scope="mods">🔌 子插件</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-files', this)" data-scope="files">🗂️ 文件管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-region', this)" data-scope="region">🧱 区块日志与恢复</a>
+    <!-- ★ 这个导航项默认**不显示**：只有真的有插件把自己的面板挂进来时，
+         JS 才会把它（和对应板块）放出来。常驻一个常年空白的板块比没有
+         这个板块更让人困惑 —— 见 admin.js 的 extRefreshNav()。 -->
+    <a href="javascript:void(0)" class="hidden" id="nav-ext" onclick="showSection('sec-ext', this)" data-scope="ext">🧩 插件面板</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-account', this)" data-scope="account">🔑 账户与安全</a>
+</nav>
+<div class="main">
+    <!-- 悬浮固定在左上角，不随滚动移动；始终显示（含侧栏展开时），点击可开可合 -->
+    <button class="side-toggle" type="button" id="side-toggle" onclick="gmToggleSidebar()" aria-label="展开/收起侧边栏">☰</button>
+    <div class="page-head">
+        <!--__GM_BRAND:page-brand__-->
+    </div>
+    <div class="section" id="sec-players">
+        <h2>📊 服务器信息</h2>
+        <div class="server-pane" id="pane-status">
+            <h3>系统状态</h3>
+            <div class="metrics" id="metrics-row">
+                <div class="metric">
+                    <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="gauge-bg" cx="60" cy="60" r="50"></circle><circle class="gauge-val" id="gauge-cpu" cx="60" cy="60" r="50"></circle><text class="gauge-txt" id="gauge-cpu-txt" x="60" y="63" text-anchor="middle">0%</text></svg>
+                    <div class="metric-label">CPU 占用率</div>
+                </div>
+                <div class="metric">
+                    <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="gauge-bg" cx="60" cy="60" r="50"></circle><circle class="gauge-val" id="gauge-mem" cx="60" cy="60" r="50"></circle><text class="gauge-txt" id="gauge-mem-txt" x="60" y="63" text-anchor="middle">0%</text></svg>
+                    <div class="metric-label">内存占用率</div>
+                </div>
+                <div class="metric">
+                    <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="gauge-bg" cx="60" cy="60" r="50"></circle><circle class="gauge-val" id="gauge-disk" cx="60" cy="60" r="50"></circle><text class="gauge-txt" id="gauge-disk-txt" x="60" y="63" text-anchor="middle">0%</text></svg>
+                    <div class="metric-label">磁盘占用率</div>
+                </div>
+            </div>
+            <div class="metric-uptime" id="metric-uptime">运行时长：加载中…</div>
+        </div>
+
+        <!-- 运行环境：方便用户下载与当前平台匹配的第三方库 -->
+        <div class="server-pane" id="pane-env">
+            <h3>运行环境<span class="help-q" data-help="这里是服务器当前的运行平台信息。<br><br><b>为什么要看这个</b>：第三方库（wheel）在不同系统、不同 CPU、不同 Python 版本之间<b>不通用</b>。Windows 的包装不到 Linux 上，3.11 的包装不到 3.12 上。<br><br>照着「下载标识」里的值去下载，就不会装错。" role="button" tabindex="0">?</span></h3>
+            <div class="env-grid" id="env-grid">
+                <div class="env-item"><span class="env-k">操作系统</span><span class="env-v" id="env-os">加载中…</span></div>
+                <div class="env-item"><span class="env-k">CPU 架构</span><span class="env-v" id="env-arch">加载中…</span></div>
+                <div class="env-item"><span class="env-k">Python 版本</span><span class="env-v" id="env-py">加载中…</span></div>
+                <div class="env-item"><span class="env-k">系统位数</span><span class="env-v" id="env-bits">加载中…</span></div>
+            </div>
+            <div class="env-dl">
+                <div class="env-dl-label">下载第三方库时请选择与此匹配的包：</div>
+                <div class="env-dl-row">
+                    <code class="env-tag" id="env-pip-target">—</code>
+                    <button class="env-copy" type="button" onclick="copyEnvTag('env-pip-target')">📋 复制</button>
+                    <span class="status" id="env-copy-status"></span>
+                </div>
+                <div class="env-dl-hint" id="env-hint"></div>
+            </div>
+        </div>
+
+        <div class="server-pane" id="pane-online">
+            <h3>在线玩家 <button onclick="refreshPlayers()">🔄 刷新</button></h3>
+            <div class="table-wrap">
+<table id="player-table">
+            <thead><tr><th>玩家</th><th>位置</th><th>维度</th><th>生命值</th><th>OP</th><th>操作</th></tr></thead>
+            <tbody id="player-list"></tbody>
+        </table>
+</div>
+        </div>
+
+        <div class="server-pane" id="pane-detail">
+            <h3>玩家详细信息</h3>
+            <select id="detail-player-select" onchange="loadPlayerDetail()">
+                <option value="">-- 选择玩家 --</option>
+            </select>
+            <div id="detail-area"></div>
+        </div>
+
+        <div class="server-pane" id="pane-logs">
+            <h3>聊天与日志<span class="help-q" data-help="集中查看服务器运行日志与局内聊天，只读，不会改动任何数据。<br><b>局内聊天</b>：玩家发言、系统广播等；<b>控制台日志</b>：服务端标准输出与报错。<br>日志每 2 秒自动刷新，最多保留最近 1000 条。" role="button" tabindex="0">?</span> <button onclick="refreshLogsCenter()">🔄 刷新</button> <span id="logs-status" class="status"></span></h3>
+            <div class="tabs">
+                <button class="tab active" id="tab-chat" onclick="switchLogTab('chat')">💬 局内聊天</button>
+                <button class="tab" id="tab-console" onclick="switchLogTab('console')">🖥 控制台日志</button>
+            </div>
+            <div class="log-pane" id="chat-pane">
+                <div class="mb-sm"><button onclick="clearMessagesUI()">清空聊天</button> <label class="ios"><input type="checkbox" id="msg-autoscroll" checked><i></i> 自动滚动</label></div>
+                <div id="message-panel"></div>
+            </div>
+            <!-- ★ 初始隐藏只靠内联 style，不要再加 .hidden 类。
+                 历史上这里同时挂了 .hidden 和 style="display:none" 两套机制，
+                 而 switchLogTab 只改内联样式 → 清空后 .hidden 立刻接管，
+                 表现成「点控制台标签内容就消失」。
+                 聊天栏（chat-pane）一直只用内联 style，所以没问题。
+                 现在两边写法保持一致，JS 侧也会两个都设。 -->
+            <div class="log-pane" id="console-pane" style="display:none">
+                <div class="mb-sm"><button onclick="clearConsoleUI()">清空控制台</button> <label class="ios"><input type="checkbox" id="console-autoscroll" checked><i></i> 自动滚动</label></div>
+                <div class="row mb-sm">
+                    <input type="text" id="console-cmd" placeholder="输入控制台指令（如 give Steve diamond 1），按回车或点按钮执行" class="flex-input">
+                    <button class="ok" onclick="sendConsoleCommand()">⏎ 执行指令</button>
+                    <span id="console-cmd-status" class="status"></span>
+                </div>
+                <div id="console-panel"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section" id="sec-gamerules">
+        <h2>🎮 游戏规则</h2>
+        <button onclick="loadGamerules()">🔄 刷新规则</button>
+        <span id="gamerule-status" class="ml-sm"></span>
+        <div id="gamerule-area" class="grid-auto mt"></div>
+    </div>
+
+    <div class="section" id="sec-bans">
+        <h2>🚫 封禁管理 <button onclick="loadBans()">🔄 刷新</button></h2>
+        <div class="grid-2">
+            <div class="col">
+                <h3>封禁玩家</h3>
+                <div>
+                    <select id="ban-online"><option value="">-- 选择在线玩家 --</option></select>
+                    <button onclick="banOnlinePlayer()">封禁该玩家</button>
+                </div>
+                <div>
+                    <input type="text" id="ban-name" placeholder="按玩家名封禁">
+                    <button onclick="banPlayer()">按名字封禁</button>
+                </div>
+                <div>
+                    <input type="text" id="ban-xuid" placeholder="按 XUID 封禁">
+                    <button onclick="banPlayerByXuid()">按 XUID 封禁</button>
+                </div>
+                <input type="text" id="ban-reason" placeholder="原因 (可选)">
+                <input type="number" id="ban-duration" placeholder="秒(0=永久)" value="0" min="0" class="w-110">
+                <div class="mt-xs">
+                    <label class="ios status" title="封禁本服时同步上报到云黑 (UniteBan)"><input type="checkbox" id="ban-sync-cloud" checked><i></i> 同步到云黑</label>
+                </div>
+            </div>
+            <div class="col">
+                <h3>封禁 IP</h3>
+                <input type="text" id="ban-ip" placeholder="IP 地址">
+                <input type="text" id="ipban-reason" placeholder="原因 (可选)">
+                <input type="number" id="ipban-duration" placeholder="秒(0=永久)" value="0" min="0" class="w-110">
+                <button onclick="banIp()">封禁</button>
+            </div>
+        </div>
+        <h3>玩家封禁列表</h3>
+        <div class="table-wrap">
+<table><thead><tr><th>玩家</th><th>XUID</th><th>原因</th><th>来源</th><th>过期时间</th><th>操作</th></tr></thead><tbody id="player-ban-list"></tbody></table>
+</div>
+        <h3>IP 封禁列表</h3>
+        <div class="table-wrap">
+<table><thead><tr><th>IP</th><th>原因</th><th>来源</th><th>过期时间</th><th>操作</th></tr></thead><tbody id="ip-ban-list"></tbody></table>
+</div>
+    </div>
+
+    <div class="section" id="sec-whitelist">
+        <h2>🛡 白名单审核<span class="help-q" data-help="玩家公开申请页：<b>whitelist</b>（相对地址 /whitelist）。<br>审核前请确认已在 server.properties 中开启 <code>allow-list=true</code>，否则白名单不会实际生效。" role="button" tabindex="0">?</span> <button onclick="loadWhitelist()">🔄 刷新</button></h2>
+        
+        <div class="table-wrap">
+<table>
+            <thead><tr><th>游戏名</th><th>XUID</th><th>状态</th><th>备注</th><th>申请时间</th><th>操作</th></tr></thead>
+            <tbody id="whitelist-list"></tbody>
+        </table>
+</div>
+    </div>
+
+    <div class="section" id="sec-properties">
+        <h2>⚙️ server.properties 管理<span class="help-q" data-help="每次快捷修改都会自动备份为 <code>server.properties.bak</code>。<br>修改端口、难度、白名单开关等通常需要<b>重启后生效</b>。" role="button" tabindex="0">?</span> <button onclick="loadProperties()">🔄 刷新</button></h2>
+        <p id="props-path" class="hint"></p>
+        <div class="mt-sm mb-sm">
+            <input type="text" id="props-filter" placeholder="🔍 筛选配置项…" oninput="renderProperties()" class="max-w-260">
+        </div>
+        <div id="props-quick" class="grid-auto-lg mt-sm"></div>
+        <details class="mt-xs">
+            <summary class="text-accent pointer">📄 原始文本编辑（高级）</summary>
+            <textarea id="props-content" rows="16" class="mt-sm"></textarea>
+            <div class="row mt-sm">
+                <button class="ok" onclick="saveProperties()">💾 保存原始文本</button>
+                <span id="props-status" class="status"></span>
+            </div>
+        </details>
+        
+    </div>
+
+    <div class="section" id="sec-worlds">
+        <h2>🌍 多存档切换<span class="help-q" data-help="切换存档会修改 server.properties 的 <code>level-name</code>。<br><b>必须重启服务器后才会生效。</b>" role="button" tabindex="0">?</span> <button onclick="loadWorlds()">🔄 刷新</button></h2>
+        <p class="hint">当前存档：<b id="world-current" class="text-ok">加载中…</b></p>
+        <div id="world-list"></div>
+    </div>
+
+    <!-- 「🔐 权限管理」原为独立 section，现已并入「🧰 操作控制台」尾部。
+         独立入口删除，授权 scope perm 合并进 console。 -->
+
+    <!-- 「📊 记分板」原为独立 section，现已并入「🧰 操作控制台」尾部。
+         独立入口删除，授权 scope scoreboard 合并进 console。 -->
+
+    <div class="section" id="sec-console">
+        <h2>🧰 操作控制台<span class="help-q" data-help="对在线玩家执行即时操作，以及管理权限与记分板。<br><br><b>即时操作</b>：发消息、给物、调血量、加标签、改分数、踢人、给/撤 OP、传送、发地图画。<br><br><b>权限管理</b>：给单个玩家授予或拒绝某个权限节点（如 <code>endstone.command.gamemode</code>）。这是比 OP 更细的粒度。<br><br><b>记分板管理</b>：创建 / 删除记分项（objective）。改分数在左边的「记分板分数」里操作。<br><br>所有操作<b>立即生效</b>，不经确认，请谨慎使用。" role="button" tabindex="0">?</span></h2>
+        <div class="grid-3">
+            <div>
+                <h3>💬 发送聊天消息</h3>
+                <select id="msg-player"><option value="">-- 玩家 --</option></select>
+                <input type="text" id="msg-text" placeholder="消息内容">
+                <button onclick="sendMessage()">发送</button>
+            </div>
+            <div>
+                <h3>🎁 给予物品</h3>
+                <select id="give-player"><option value="">-- 玩家 --</option></select>
+                <input type="text" id="give-item" placeholder="物品ID (如 diamond)">
+                <input type="number" id="give-amount" value="1" min="1" class="w-60">
+                <button onclick="giveItem()">给予</button>
+            </div>
+            <div>
+                <h3>❤️ 调整生命值</h3>
+                <select id="health-player"><option value="">-- 玩家 --</option></select>
+                <div class="gmselect" id="health-op" data-value="set"
+                     data-options='[["set","设置"],["add","增加"],["sub","减少"]]'></div>
+                <input type="number" id="health-value" placeholder="数值" step="1">
+                <button onclick="adjustHealth()">应用</button>
+            </div>
+            <div>
+                <h3>🏷️ 标签管理</h3>
+                <select id="tag-player"><option value="">-- 玩家 --</option></select>
+                <input type="text" id="tag-name" placeholder="标签名">
+                <button onclick="addTag()">添加</button>
+                <button onclick="removeTag()">移除</button>
+            </div>
+            <div>
+                <h3>📊 记分板分数</h3>
+                <select id="score-player"><option value="">-- 玩家 --</option></select>
+                <select id="score-objective"><option value="">-- 目标 --</option></select>
+                <div class="gmselect" id="score-op" data-value="set"
+                     data-options='[["set","设置"],["add","增加"]]'></div>
+                <input type="number" id="score-value" placeholder="数值">
+                <button onclick="setScore()">应用</button>
+                <button onclick="loadScoreboards()">刷新目标</button>
+            </div>
+            <div>
+                <h3>🚫 踢出玩家</h3>
+                <select id="kick-player"><option value="">-- 玩家 --</option></select>
+                <input type="text" id="kick-reason" placeholder="原因 (可选)" value="被管理员踢出">
+                <button onclick="kickPlayer()">踢出</button>
+            </div>
+            <div>
+                <h3>🔑 OP 权限管理</h3>
+                <select id="op-player"><option value="">-- 玩家 --</option></select>
+                <div class="gmselect" id="op-value" data-value="true"
+                     data-options='[["true","给予 OP"],["false","移除 OP"]]'></div>
+                <button onclick="setOp()">应用</button>
+            </div>
+            <div>
+                <h3>📍 传送玩家</h3>
+                <select id="tp-player"><option value="">-- 玩家 --</option></select>
+                <input type="number" id="tp-x" placeholder="X" step="any">
+                <input type="number" id="tp-y" placeholder="Y" step="any">
+                <input type="number" id="tp-z" placeholder="Z" step="any">
+                <div class="gmselect" id="tp-dimension" data-value="overworld"
+                     data-options='[["overworld","主世界"],["nether","下界"],["the_end","末地"]]'></div>
+                <button onclick="teleportPlayer()">传送</button>
+            </div>
+            <div>
+                <h3>🗺️ 发送地图画</h3>
+                <select id="map-player"><option value="">-- 玩家 --</option></select>
+                <input type="file" id="map-image" accept="image/*">
+                <button onclick="sendMap()">生成并发送</button>
+                <span id="map-status"></span>
+            </div>
+        </div>
+
+        <!-- ↓↓↓ 以下两块原为独立板块「🔐 权限管理」「📊 记分板」，
+             现并入本页。保留原有全部元素 ID，JS 逻辑无需改动。 ↓↓↓ -->
+
+        <h3 class="mt">🔐 权限管理
+            <span class="help-q" data-help="给<b>单个玩家</b>授予或拒绝某个权限节点，比 OP 更细。<br>节点名格式如 <code>endstone.command.gamemode</code>。<br>点「撤销」是不再单独设置该节点，回落到默认判定。" role="button" tabindex="0">?</span>
+        </h3>
+        <div class="row">
+            <select id="perm-player" onchange="loadPermInfo()"><option value="">-- 玩家 --</option></select>
+            <input type="text" id="perm-node" placeholder="权限节点 (如 endstone.command.gamemode)" class="w-260">
+            <select id="perm-value">
+                <option value="true">授予 (true)</option>
+                <option value="false">拒绝 (false)</option>
+            </select>
+            <button onclick="setPermission()">应用</button>
+            <button onclick="unsetPermission()">撤销</button>
+        </div>
+        <div id="perm-info" class="mt-sm"></div>
+
+        <h3 class="mt">📊 记分板管理 <button onclick="loadScoreboardsFull()">🔄 刷新</button></h3>
+        <div class="hint-sm mb-sm">这里创建 / 删除<b>记分项</b>本身；给玩家加减分数在左边「📊 记分板分数」里。</div>
+        <div class="row">
+            <input type="text" id="obj-name" placeholder="目标名称 (英文)">
+            <input type="text" id="obj-display" placeholder="显示名称">
+            <div class="gmselect" id="obj-render" data-value="integer"
+                 data-options='[["integer","整数"],["hearts","红心"]]'></div>
+            <button onclick="addObjective()">创建目标</button>
+        </div>
+        <div class="table-wrap">
+<table class="mt-sm">
+            <thead><tr><th>目标</th><th>显示名</th><th>显示位置</th><th>渲染</th><th>排序</th><th>操作</th></tr></thead>
+            <tbody id="objective-list"></tbody>
+        </table>
+</div>
+    </div>
+
+    <div class="section hidden" id="sec-bots">
+        <h2>🤖 机器人管理<span class="help-q" data-help="管理所有已接入的机器人实例，支持 QQ 官方 与 WebSocket (OneBot v11) 两种类型。<br>每张卡片独立启停、独立收发消息；点卡片上的「编辑」可配置连接参数、群绑定与群服互通。<br><br><b>用途</b>：给每个机器人指定一个角色 —— 「群服互通」负责转发消息、「AI 播报」接收面板 AI 的分析结果、「空着」预留给第三方插件。用途只影响<b>谁能收到什么</b>，不影响连接本身。" role="button" tabindex="0">?</span> <button onclick="loadBots()">🔄 刷新</button> <span id="bots-status-badge" class="status"></span></h2>
+
+        <h3>🎯 用途分布
+            <span class="help-q" data-help="<b>群服互通</b>：机器人负责在游戏与群之间转发消息，是跨服互联的通道。<br><b>AI 播报</b>：接收管理面板 AI 的分析结果与操作提议通知。<br><b>空着（等第三方插件）</b>：本插件不碰，留给别的子插件接管。<br><br>点卡片上的「编辑」可修改用途。" role="button" tabindex="0">?</span>
+        </h3>
+        <div class="hint-sm" id="bots-purpose-summary"></div>
+        
+        <div class="row mb">
+            <button class="ok" onclick="botsOpenCreate()">＋ 新建机器人</button>
+            <select id="bots-new-type">
+                <option value="qqofficial">QQ 官方机器人</option>
+                <option value="websocket">WebSocket (OneBot v11)</option>
+            </select>
+            <button onclick="qrOpen()">📱 扫码登录</button>
+            <span id="bots-op-status" class="status"></span>
+        </div>
+
+        <!-- 扫码登录：手机 QQ 扫一下就把 AppID / AppSecret 写进卡片 -->
+        <div id="qr-box" class="hidden card mb">
+            <h3>📱 扫码绑定 QQ 官方机器人</h3>
+            <p class="hint">用<b>手机 QQ</b> 扫描下方二维码并确认授权，机器人凭据会自动写入卡片。</p>
+            <div class="row">
+                <label>绑定到卡片</label>
+                <select id="qr-card"></select>
+                <button onclick="qrCreate()" id="qr-create-btn">获取二维码</button>
+                <button onclick="qrClose()">关闭</button>
+            </div>
+            <div id="qr-stage" class="row" style="align-items:flex-start;gap:16px">
+                <div id="qr-img-box"></div>
+                <div id="qr-status" class="status"></div>
+            </div>
+            <p class="hint mt">⚠ 二维码有效期约 5 分钟，过期请重新获取。系统不会显示 AppSecret 明文，只在你确认后直接写入卡片。</p>
+        </div>
+
+        <div id="bots-create-box" class="hidden card mb"></div>
+        <div id="bots-list" class="grid-auto-lg">
+            <p class="hint">正在加载机器人列表…</p>
+        </div>
+    </div>
+
+    <div class="section hidden" id="sec-regex">
+        <h2>🧩 正则触发器<span class="help-q" data-help="按正则表达式匹配群消息或游戏事件，命中后执行一串动作（回复文本 / @成员 / 发图 / 撤回 / 禁言 / 执行服务器指令）。<br>规则优先于机器人卡片里的「自定义关键词」：<b>阻断</b>开启时命中即终止后续处理，关闭时继续往下走。<br>⚠ 正则执行在服务器主线程上，含嵌套量词或超大重复限定的写法会被拒绝。" role="button" tabindex="0">?</span> <button onclick="loadRegex()">🔄 刷新</button> <span id="regex-status-badge" class="status"></span></h2>
+
+        <div class="card mb">
+            <h3>引擎开关</h3>
+            <div class="row">
+                <label><input type="checkbox" id="regex-enable"> 启用正则引擎</label>
+                <label><input type="checkbox" id="regex-only-main"> 只处理主群 / 已绑定群</label>
+                <label><input type="checkbox" id="regex-debug"> 命中规则时打日志</label>
+            </div>
+            <div class="row mt">
+                <label>命令等待超时（秒）</label>
+                <input type="number" id="regex-timeout" min="0.1" max="30" step="0.5" style="width:90px">
+                <button class="ok" onclick="saveRegexConfig()">💾 保存开关</button>
+                <span id="regex-cfg-status" class="status"></span>
+            </div>
+            <hr>
+            <h4>🖥 控制台日志采集</h4>
+            <p class="hint">
+                让规则能匹配服务器控制台日志（事件类型选 <b>server.log_line</b>）。<br>
+                BDS 的原生输出不进插件，只能读取 <code>logs/latest.log</code>；
+                面板日志和它是两回事。<br>
+                日志的级别（<code>[Server/ERROR]</code> 里的 ERROR）放在独立字段里，
+                用规则的 <b>条件过滤</b> 选 <code>level</code> 即可，不需要写转义正则。
+            </p>
+            <div class="row">
+                <label><input type="checkbox" id="regex-log-enabled"> 启用日志采集</label>
+                <label><input type="checkbox" id="regex-log-start-end"> 只跟新增行（推荐）</label>
+            </div>
+            <p class="hint">
+                关闭「只跟新增行」会把历史日志整段重放一遍，一开启可能刷屏几百条 ——
+                仅在排障时临时用。
+            </p>
+        </div>
+
+        <div class="card mb">
+            <h3>规则列表 <button onclick="regexAddRule()">＋ 新增规则</button></h3>
+            <div id="regex-list"><p class="hint">正在加载规则…</p></div>
+        </div>
+
+        <div class="card mb">
+            <h3>测试匹配<span class="help-q" data-help="纯本地测试：只跑正则，不会真的发消息、也不会执行服务器指令。" role="button" tabindex="0">?</span></h3>
+            <div class="row">
+                <label>正则</label><input id="regex-test-pattern" placeholder="^查服$" style="width:220px">
+                <label>flags</label><input id="regex-test-flags" placeholder="i" style="width:60px">
+            </div>
+            <div class="row mt">
+                <label>测试文本</label><input id="regex-test-text" placeholder="查服" style="width:280px">
+                <button onclick="regexTest()">▶ 测试</button>
+            </div>
+            <pre id="regex-test-result" class="hint"></pre>
+        </div>
+    </div>
+
+    <div class="section" id="sec-cross">
+        <h2>🔗 跨服互联 <button onclick="loadCross()">🔄 刷新</button> <span id="cross-status-badge" class="status"></span></h2>
+        <div class="grid-2">
+            <div class="col">
+                <h3>主从角色设置</h3>
+                <label class="ios status"><input type="checkbox" id="cross-enabled"><i></i> 启用跨服互联</label>
+
+                <!-- 本服地址（self_url）不再让用户手填。
+                     这个值必须是「主服能回连到本副服的地址」，而用户正是用当前
+                     浏览器网址打开本面板的，所以取 location.origin 最准。
+                     保留隐藏字段是为了兼容 JS 里已有的 el('cross-self-url') 读写。 -->
+                <input type="hidden" id="cross-self-url" value="">
+
+                <div class="mt-sm" id="cross-row-role">
+                    <label class="hint">本服角色</label>
+                    <select id="cross-role" class="block-input">
+                        <option value="none">关闭（不参与互服）</option>
+                        <option value="master">主服务器（Hub，存储玩家数据并转发消息）</option>
+                        <option value="slave">副服务器（连接主服）</option>
+                    </select>
+                </div>
+                <div class="mt-sm" id="cross-row-name">
+                    <label class="hint">本服显示名（消息互通时展示，如「生存一服」）</label>
+                    <input type="text" id="cross-server-name" placeholder="主服名" class="block-input">
+                    <!-- 自动上报地址的边界：从 localhost 打开就会上报 localhost。
+                         代码消不掉这个前提，只能显式提醒。 -->
+                    <div class="hint-sm mt-xs hidden" id="cross-self-warn">
+                        本副服的地址会按你当前浏览器网址自动上报给主服。
+                        若你是从 <code>localhost</code> 打开的面板，请改用主服能访问到的地址
+                        （如 <code>http://192.168.1.20:8080</code>）重新打开本页面。
+                    </div>
+                </div>
+                <div class="mt-sm hidden" id="cross-row-pass">
+                    <label class="hint">连接密码（主/副服必须一致，防止误连与盗连）</label>
+                    <input type="password" id="cross-password" placeholder="输入连接密码" class="block-input">
+                </div>
+                <div class="mt-sm hidden" id="cross-row-master">
+                    <label class="hint">主服地址（填写主服务器的 web UI 连接网址，例如 http://192.168.1.10:8080）</label>
+                    <input type="text" id="cross-master-url" placeholder="http://host:port" class="block-input">
+                    <div class="hint-sm mt-xs">就是「你在主服务器上用浏览器打开管理后台时，地址栏里的那个网址」。</div>
+                </div>
+                <div class="mt-sm hidden" id="cross-row-sync">
+                    <label class="hint">同步间隔（秒，副服轮询主服的频率）</label>
+                    <input type="number" id="cross-sync" min="3" value="8" class="w-140">
+                </div>
+                <div class="row mt" id="cross-row-actions">
+                    <button class="ok" onclick="saveCross()">💾 保存跨服设置</button>
+                    <button id="cross-test-btn" class="hidden" onclick="testCross()">🧪 测试连接</button>
+                    <span id="cross-save-status" class="status"></span>
+                </div>
+            </div>
+            <div class="col">
+                <h3>互通内容</h3>
+                <label class="ios status"><input type="checkbox" id="cross-it-chat"><i></i> 聊天/机器人消息互通</label>
+                <label class="ios status"><input type="checkbox" id="cross-it-player"><i></i> 玩家数据（背包/状态）互通</label>
+                <label class="ios status"><input type="checkbox" id="cross-it-wl"><i></i> 白名单同步</label>
+                <label class="ios status"><input type="checkbox" id="cross-it-ban"><i></i> 封禁同步</label>
+
+                <h3 class="mt">🧪 实验板</h3>
+                <label class="ios status"><input type="checkbox" id="cross-experimental"><i></i> 启用实验功能</label>
+                <div class="hint-sm mt-xs" id="cross-exp-hint">
+                    默认关闭（原版行为）。开启后额外同步：<b>疾跑/潜行/飞行状态</b>、
+                    <b>药水效果（buff/debuff）</b>，并启用<b>掉线保护</b>与收纳袋诊断。
+                </div>
+                <div class="hint-sm mt-xs text-warn" id="cross-exp-warn">
+                    ⚠ 实验功能通过拦截网络封包实现，若出现异常请关闭本开关并反馈。
+                </div>
+                <h3 class="mt">运行状态</h3>
+                <div id="cross-status-box" class="mt-xs"><p class="hint">尚未加载</p></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section" id="sec-backup">
+        <h2>📦 自动备份 <button onclick="loadToolsConfig()">🔄 刷新</button> <span id="backup-state-badge" class="status"></span></h2>
+        <div class="mb-sm" id="backup-state-box"></div>
+        <div class="grid-2">
+            <div class="col">
+                <h3>备份设置</h3>
+                <label class="ios status"><input type="checkbox" id="backup-enabled"><i></i> 启用自动备份</label>
+                <div class="mt-sm">
+                    <label class="hint">备份间隔（小时）</label>
+                    <input type="number" id="backup-interval" class="w-140" min="1">
+                </div>
+                <div class="mt-sm">
+                    <label class="hint">保留最近份数</label>
+                    <input type="number" id="backup-keep" class="w-140" min="1">
+                </div>
+                <div class="mt-sm">
+                    <label class="hint">备份源（每行一个目录/文件，留空=自动备份当前运行的世界）</label>
+                    <textarea id="backup-sources" rows="3" placeholder="留空则自动备份当前世界&#10;例如：world&#10;world_nether&#10;permissions.json"></textarea>
+                </div>
+                <div class="mt-sm">
+                    <button class="ok" onclick="saveToolsConfig()">💾 保存备份设置</button>
+                    <button onclick="triggerBackup()">▶️ 立即备份</button>
+                    <span id="backup-save-status" class="status ml-sm"></span>
+                </div>
+            </div>
+            <div class="col">
+                <h3>已生成备份</h3>
+                <div id="backup-list-box"><p class="hint">尚未加载</p></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section" id="sec-cloud">
+        <h2>☁️ 云黑名单 (UniteBan) <button onclick="loadToolsConfig()">🔄 刷新</button> <span id="cloud-state-badge" class="status"></span></h2>
+        <div class="grid-2">
+            <div class="col">
+                <h3>接入设置</h3>
+                <label class="ios status"><input type="checkbox" id="cloud-enabled"><i></i> 启用云黑</label>
+                <label class="ios status"><input type="checkbox" id="cloud-check-login"><i></i> 进服自动查黑</label>
+                <label class="ios status"><input type="checkbox" id="cloud-sync-default"><i></i> 封禁默认勾选同步云黑</label>
+                <div class="mt-sm">
+                    <label class="hint">API 地址<span class="help-q" data-help="填云黑服务的<b>根地址</b>即可，带不带 <code>/api</code> 都能识别：<br>· <code>https://cloudban.nexacode.dpdns.org</code>（NexaCode 联合云黑）<br>· <code>https://你的域名/api</code>（旧版自建服务）<br><br>插件会自动探测该地址提供的是新版 REST 还是旧版 PHP 接口，并记住结果。" role="button" tabindex="0">?</span></label>
+                    <input type="text" id="cloud-base" placeholder="https://cloudban.nexacode.dpdns.org">
+                </div>
+                <div class="mt-sm">
+                    <label class="hint">Bearer Token（留空不修改）</label>
+                    <input type="password" id="cloud-token" placeholder="管理用 Token">
+                </div>
+                <div class="mt-sm">
+                    <label class="hint">本服在云黑的名称</label>
+                    <input type="text" id="cloud-server-name" placeholder="本服名称">
+                </div>
+                <div class="mt-sm">
+                    <label class="hint">接口协议<span class="help-q" data-help="云黑服务有两套并存的接口：<br>· <b>新版 REST</b>（/api/check_ban 等，NexaCode 联合云黑）<br>· <b>旧版 PHP</b>（check_ban.php 等，早期自建服务）<br><br>保持「自动探测」即可，插件会试出可用端点并记住；只有排障时才需要手动锁定。" role="button" tabindex="0">?</span></label>
+                    <select id="cloud-api-style" class="block-input">
+                        <option value="auto">自动探测（推荐）</option>
+                        <option value="rest">新版 REST 接口</option>
+                        <option value="legacy">旧版 PHP 接口</option>
+                    </select>
+                </div>
+                <div class="mt-sm">
+                    <label class="hint">进服踢出消息（{reason} 会被封禁原因替换）</label>
+                    <input type="text" id="cloud-kick-message" placeholder="§c你在云黑名单中">
+                </div>
+                <div class="mt-sm">
+                    <button class="ok" onclick="saveToolsConfig()">💾 保存云黑设置</button>
+                    <button onclick="testCloud()">🧪 测试连接</button>
+                    <span id="cloud-save-status" class="status ml-sm"></span>
+                </div>
+            </div>
+            <div class="col">
+                <h3>接入状态<span class="help-q" data-help="「接口协议」与「身份」由测试连接时探测得出。<br>只读 Key 只能查黑，不能封禁/解封 —— 若这里显示只读，请换成管理员 Token。" role="button" tabindex="0">?</span>
+                    <button class="ml-sm" onclick="testCloud()">🔍 检测</button>
+                </h3>
+                <div id="cloud-status-card" class="card"><p class="hint">尚未检测。点「🧪 测试连接」获取状态。</p></div>
+
+                <h3 class="mt">云黑总览 <button class="ml-sm" onclick="loadCloudStats()">🔄 刷新</button>
+                    <span id="cloud-stats-status" class="status"></span></h3>
+                <div id="cloud-stats-box"><p class="hint">尚未加载</p></div>
+
+                <h3 class="mt">手动查黑<span class="help-q" data-help="按 XUID 或 IP 直接问云端是否命中云黑。<br>用于排障：确认某个玩家到底在不在云黑里、以及封禁原因。" role="button" tabindex="0">?</span></h3>
+                <div class="row mt-sm">
+                    <input type="text" id="cloud-lookup-xuid" placeholder="XUID" class="max-w-210">
+                    <input type="text" id="cloud-lookup-ip" placeholder="IP（可选）" class="max-w-140">
+                    <button onclick="cloudLookup()">🔎 查询</button>
+                </div>
+                <div id="cloud-lookup-result" class="hint-sm mt-xs"></div>
+
+                <h3 class="mt">云黑明细 <button class="ml-sm" onclick="loadCloudBans()">🔄 刷新</button>
+                    <span id="cloud-bans-status" class="status"></span></h3>
+                <div class="scroll-box">
+                    <table><thead><tr>
+                        <th>玩家</th><th>XUID</th><th>原因</th><th>来源</th><th>到期</th>
+                    </tr></thead><tbody id="cloud-ban-list"></tbody></table>
+                </div>
+                <p class="hint-sm mt-xs" id="cloud-bans-hint"></p>
+                <h3 class="mt">说明<span class="help-q" data-help="封禁检查接口公开可用（默认只读 Key 为 <code>public</code>）；创建/解封封禁需要管理员 Token。<br>请求已放入后台线程执行，不会阻塞服务器。<br>在「封禁管理」板块勾选「同步到云黑」后，本地封禁会异步上报到云黑系统。<br>封禁与查询均按 <b>bedrock</b>（基岩版）分组进行，使用 XUID 作为标识。" role="button" tabindex="0">?</span></h3>
+            </div>
+        </div>
+    </div>
+
+    <div class="section" id="sec-gametools">
+        <h2>🎁 签到与绑定 <button onclick="loadGameTools()">🔄 刷新</button> <span id="gametools-status" class="status"></span></h2>
+        <div class="grid-2">
+            <div class="col">
+                <h3>账号绑定（MC ↔ QQ）<span class="help-q" data-help="玩家进服后游戏内会提示一个绑定码；玩家到 QQ 群里发送该码即可完成绑定。<br><b>仅启动 QQ 机器人网关时生效。</b>" role="button" tabindex="0">?</span></h3>
+                <label class="ios status"><input type="checkbox" id="bind-enabled"><i></i> 启用绑定</label>
+                <label class="ios status"><input type="checkbox" id="bind-require"><i></i> 进服时提示绑定码</label>
+                <div class="row mt-sm">
+                    <label class="hint">绑定码位数</label>
+                    <input type="number" id="bind-digits" min="4" max="8" value="5">
+                    <label class="hint">有效期(秒)</label>
+                    <input type="number" id="bind-ttl" min="60" max="3600" value="300">
+                </div>
+                
+            </div>
+            <div class="col">
+                <h3>签到系统<span class="help-q" data-help="玩家每天在 QQ 群发送触发指令完成签到。<br>奖励记入延迟任务，等玩家上线时自动发放。" role="button" tabindex="0">?</span></h3>
+                <label class="ios status"><input type="checkbox" id="signin-enabled"><i></i> 启用签到</label>
+                <div class="row mt-sm">
+                    <label class="hint">触发指令</label>
+                    <input type="text" id="signin-cmd" value="签到" class="max-w-140">
+                </div>
+                <div class="row mt-sm">
+                    <label class="hint">奖励物品</label>
+                    <input type="text" id="signin-item" value="minecraft:diamond" class="max-w-210">
+                    <label class="hint">数量</label>
+                    <input type="number" id="signin-amount" min="1" value="1" class="w-70">
+                </div>
+                
+                <div class="mt-sm">
+                    <button class="ok" onclick="saveGameTools()">💾 保存设置</button>
+                    <span id="gametools-save-status" class="status ml-sm"></span>
+                </div>
+                <h3 class="mt">今日待发放奖励（延迟任务 <span id="delayed-count">0</span>）</h3>
+                <div id="delayed-list-box" class="scroll-box"><p class="hint">尚未加载</p></div>
+                <h3 class="mt">已绑定账号</h3>
+                <div id="bindings-list-box" class="scroll-box"><p class="hint">尚未加载</p></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section" id="sec-trust">
+        <h2>🛡️ 玩家可信度
+            <button onclick="loadTrust()">🔄 刷新</button>
+            <button onclick="trustRecalc()">⚙️ 立即结算</button>
+            <button onclick="trustExport()">📤 导出</button>
+            <button class="danger" onclick="trustClear()">🗑️ 清空</button>
+            <span id="trust-status" class="status"></span>
+        </h2>
+
+        <p class="hint">
+            用加权方式给玩家算「可信度」。判定依据是<b>设备指纹</b>（客户端自报的持久设备 ID），
+            <b>与 IP 无关</b> —— 换 Wi-Fi、开移动流量跑到外省都不会被当成新设备。
+        </p>
+
+        <div class="grid-2">
+            <div class="col">
+                <h3>总开关与入场门槛<span class="help-q" data-help="关掉总开关后本系统完全不介入：不拦人、不计分、不改权限。" role="button" tabindex="0">?</span></h3>
+                <label class="ios status"><input type="checkbox" id="trust-enabled"><i></i> 启用可信度系统</label>
+                <label class="ios status"><input type="checkbox" id="trust-notify"><i></i> 进服时告知本次加减分</label>
+
+                <div class="row mt-sm">
+                    <label class="hint">入场门槛（低于此分进不来）</label>
+                    <input type="number" id="trust-min-score" value="30" step="1" class="w-90">
+                </div>
+
+                <h3 class="mt">被拦下的提示文案<span class="help-q" data-help="可用占位符：{score} 当前分、{required} 要求分、{gap} 还差多少、{reason} 原因。<br><b>无论怎么设置，系统都会保证玩家看得到自己的分数与原因。</b>" role="button" tabindex="0">?</span></h3>
+                <textarea id="trust-kick-msg" rows="6" class="w-full mono"></textarea>
+
+                <h3 class="mt">权限组联动<span class="help-q" data-help="达到分数后自动给玩家套上对应权限组。<br><b>本系统永远不会给予或剥夺 OP 权限。</b><br>权限组名必须与服务器权限配置里的组名一致，否则不生效。" role="button" tabindex="0">?</span></h3>
+                <label class="ios status"><input type="checkbox" id="trust-perm-enabled"><i></i> 启用权限组联动（默认关闭）</label>
+                <div id="trust-tiers-box" class="mt-sm"></div>
+                <button class="mini mt-sm" onclick="trustAddTier()">➕ 添加档位</button>
+
+                <h3 class="mt">数据位置</h3>
+                <div class="hint mono" id="trust-dirs"></div>
+            </div>
+
+            <div class="col">
+                <h3>加分规则<span class="help-q" data-help="全部可调。数值是每次触发加多少分。" role="button" tabindex="0">?</span></h3>
+                <div class="row"><label class="hint w-190">使用已记录设备</label><input type="number" id="trust-add-device-match" step="0.5" class="w-90"></div>
+                <div class="row"><label class="hint w-190">首次使用新设备</label><input type="number" id="trust-add-device-new" step="0.5" class="w-90"></div>
+                <div class="row"><label class="hint w-190">绑定 QQ 账号（一次性）</label><input type="number" id="trust-add-bound-qq" step="0.5" class="w-90"></div>
+                <div class="row"><label class="hint w-190">每日进服游玩（每日一次）</label><input type="number" id="trust-add-daily-play" step="0.5" class="w-90"></div>
+                <div class="row"><label class="hint w-190">白名单设备被信任</label><input type="number" id="trust-add-whitelist" step="0.5" class="w-90"></div>
+
+                <h3 class="mt">打卡加分（特殊：有阈值）<span class="help-q" data-help="打卡加分按连续天数递增，递增封顶后不再增加。<br>未打卡的扣分走<b>独立扣分池</b>：扣到下限就停，打卡成功后清零 —— 所以断签不会把分数扣穿。" role="button" tabindex="0">?</span></h3>
+                <div class="row"><label class="hint w-190">打卡基础分</label><input type="number" id="trust-add-signin-base" step="0.5" class="w-90"></div>
+                <div class="row"><label class="hint w-190">连续签到每日递增</label><input type="number" id="trust-add-signin-perday" step="0.1" class="w-90"></div>
+                <div class="row"><label class="hint w-190">递增封顶（天）</label><input type="number" id="trust-add-signin-cap" step="1" class="w-90"></div>
+
+                <h3 class="mt">扣分规则</h3>
+                <div class="row"><label class="hint w-190">短期冒出全新设备</label><input type="number" id="trust-sub-burst" step="0.5" class="w-90"></div>
+                <div class="row"><label class="hint w-190">突发统计窗口（小时）</label><input type="number" id="trust-burst-hours" step="1" class="w-90"></div>
+                <div class="row"><label class="hint w-190">突发阈值（不同场次数）</label><input type="number" id="trust-burst-threshold" step="1" min="2" class="w-90"></div>
+                <div class="row"><label class="hint w-190">未打卡每天扣</label><input type="number" id="trust-sub-miss-day" step="0.5" class="w-90"></div>
+                <div class="row"><label class="hint w-190">宽限期（天）</label><input type="number" id="trust-miss-grace" step="1" class="w-90"></div>
+                <div class="row"><label class="hint w-190">未打卡扣分下限</label><input type="number" id="trust-miss-floor" step="0.5" class="w-90"></div>
+                <label class="ios status"><input type="checkbox" id="trust-miss-floor-enabled"><i></i> 启用未打卡扣分下限</label>
+
+                <h3 class="mt">边界</h3>
+                <div class="row"><label class="hint w-190">分数下限</label><input type="number" id="trust-hard-floor" step="1" class="w-90"></div>
+                <div class="row"><label class="hint w-190">分数上限</label><input type="number" id="trust-hard-ceiling" step="1" class="w-90"></div>
+                <div class="row"><label class="hint w-190">手动单次调整上限</label><input type="number" id="trust-manual-max" step="1" class="w-90"></div>
+                <div class="row"><label class="hint w-190">历史保留条数</label><input type="number" id="trust-history-limit" step="1" class="w-90"></div>
+
+                <div class="mt-sm">
+                    <button class="ok" onclick="saveTrust()">💾 保存设置</button>
+                    <span id="trust-save-status" class="status ml-sm"></span>
+                </div>
+            </div>
+        </div>
+
+        <h3 class="mt">玩家列表
+            <span id="trust-stats" class="hint"></span>
+        </h3>
+        <div class="row mb-sm">
+            <input type="text" id="trust-search" placeholder="按玩家名/标识搜索" class="w-230">
+            <button class="mini" onclick="loadTrust()">🔍 搜索</button>
+            <label class="hint ml-sm">列表按分数从高到低排列；标黄的是降级档案（无 xuid，改名会重置权重）</label>
+        </div>
+        <div id="trust-list-box" class="scroll-box tall"><p class="hint">尚未加载</p></div>
+
+        <div id="trust-detail-box" class="mt"></div>
+    </div>
+
+    <div class="section hidden" id="sec-ai">
+        <h2>🧠 AI 自动管理
+            <span class="help-q" data-help="用<b>你自己的</b> LLM API（OpenAI 兼容端点）分析日志、审核白名单、主动巡查。<br>插件<b>不代理</b>请求、也<b>不提供</b>模型服务 —— Key 存在本机，请求直发你填的地址。<br><b>回答质量取决于你选的模型</b>，这不是插件能保证的。<br><br><b>安全边界</b>：模型能做什么，由上面的<b>接管级别</b>决定。<br>· <b>第一/二级</b>：模型只能「建议」——危险操作一律先变成<b>待确认提议</b>，由你点确认才执行；<br>· <b>第三级</b>：模型会直接执行，但会登记<b>撤销记录</b>，窗口内可一键回滚。<br><br>★ 无论哪一级，提权、执行任意命令这类能力<b>根本没有注册为工具</b> —— 那不是靠级别拦的，是结构上不存在。" role="button" tabindex="0">?</span>
+            <button onclick="aiLoad()">🔄 刷新</button>
+            <span id="ai-status" class="status">尚未加载</span>
+        </h2>
+
+        <!-- 影子模式/执行模式的实时提示，由 aiRenderGuard() 填充。
+             默认隐藏，有状态后才显形。放在顶部，避免落在下面两块内容之间。 -->
+        <div class="hint-sm hidden" id="ai-guard-note"></div>
+
+        <div class="grid-2 mt">
+            <div class="col">
+                <h3>总开关</h3>
+                <label class="ios status"><input type="checkbox" id="ai-enabled"><i></i> 启用 AI 自动管理</label>
+
+                <h3 class="mt">接管级别<span class="help-q" data-help="决定 AI 到底能「自己动手」到什么程度。<br><br><b>第一级 · 纯建议</b>：只输出分析与建议，任何工具都不执行，也不生成待确认提议。适合刚接入、先观察几天。<br><br><b>第二级 · 白名单自动</b>（默认）：只读查询与可逆操作（踢人、封禁等）由 AI 直接执行并留审计；白名单的批准/驳回也由 AI 自动完成。危险操作（删档、改 server.properties）依然只生成待确认提议，需要你点确认。<br><br><b>第三级 · 完全放开</b>：包括删档、改服务器属性在内的所有工具都由 AI 直接执行，不再等你确认。<b class='text-warn'>执行后会登记撤销记录</b>，在「撤销窗口」内可以一键回滚；窗口一过就真的不可逆了。<br><br>★ 提权、执行任意命令这类能力<b>任何级别下都没有注册</b> —— 那不是靠级别拦的，是根本不存在。" role="button" tabindex="0">?</span></h3>
+                <!-- 自定义下拉宿主：真实 <select> 已移除，内容由 gmSelect 渲染。
+                     data-value 作为初始值的兜底，JS 加载后会立即接管。 -->
+                <div id="ai-autonomy" class="gmselect" data-value="1"></div>
+                <div class="hint-sm" id="ai-autonomy-hint"></div>
+                <div class="row mt-sm hidden" id="ai-undo-window-row">
+                    <label class="hint w-110">撤销窗口（秒）</label>
+                    <input type="number" id="ai-undo-window" step="5" class="w-90">
+                    <span class="hint-sm">0 ~ 600。第三级下不可逆操作执行后，你还有这么久可以回滚。</span>
+                </div>
+
+                <h3 class="mt">接口配置<span class="help-q" data-help="填 OpenAI 兼容端点。带不带 /v1 都行，插件会自动补齐。<br>内网地址（127./10./192.168./169.254.）会被拒绝 —— 否则这个功能就成了访问内网的跳板。" role="button" tabindex="0">?</span></h3>
+                <div class="row"><label class="hint w-110">API 地址</label><input id="ai-base-url" placeholder="https://api.deepseek.com/v1" class="w-full"></div>
+                <div class="row mt-sm"><label class="hint w-110">API Key</label><input id="ai-api-key" type="password" placeholder="留空不修改" class="w-full"></div>
+                <div class="row mt-sm"><label class="hint w-110">模型名</label><input id="ai-model" placeholder="deepseek-chat" class="w-full"></div>
+                <div class="row mt-sm">
+                    <label class="hint w-110">超时（秒）</label><input type="number" id="ai-timeout" step="1" class="w-90">
+                    <span class="hint-sm">5 ~ 180</span>
+                </div>
+                <div class="row mt-sm">
+                    <button onclick="aiSave()">💾 保存配置</button>
+                    <button onclick="aiTest()">🔌 测试连接</button>
+                    <span id="ai-test-status" class="hint-sm"></span>
+                </div>
+            </div>
+
+            <div class="col">
+                <h3>能力开关<span class="help-q" data-help="<b>日志分析</b>：读服务端日志找异常。<br><b>白名单审核</b>：给申请人建议，<b>放行权始终在你手里</b>。<br><b>自动检测与管理</b>：主动巡查并产出操作提议。<br><br>三项都可以单独关掉；全关等于不启用这个功能。" role="button" tabindex="0">?</span></h3>
+                <label class="ios status"><input type="checkbox" id="ai-cap-logs"><i></i> 日志分析</label>
+                <label class="ios status"><input type="checkbox" id="ai-cap-wl"><i></i> 白名单审核（只给建议，放行权在你手里）</label>
+                <label class="ios status"><input type="checkbox" id="ai-cap-auto"><i></i> 自动检测与管理</label>
+
+                <h3 class="mt">节奏与花费<span class="help-q" data-help="花的是你自己的额度，所以这里全是防烧钱的闸门。<br>手动点「立即分析」不受最小间隔限制（是你主动要的）。" role="button" tabindex="0">?</span></h3>
+                <div class="row"><label class="hint w-190">单次送出的日志行数</label><input type="number" id="ai-max-lines" step="10" class="w-90"></div>
+                <div class="row mt-sm"><label class="hint w-190">自动分析最小间隔（秒）</label><input type="number" id="ai-min-interval" step="30" class="w-90"></div>
+                <div class="row mt-sm"><label class="hint w-190">每日调用上限（0=不限）</label><input type="number" id="ai-daily-limit" step="10" class="w-90"></div>
+                <div class="hint-sm mt-sm" id="ai-usage"></div>
+
+                <h3 class="mt">手动执行</h3>
+                <div class="row">
+                    <button onclick="aiRun('log_analysis')">🔍 立即分析日志</button>
+                    <button onclick="aiRun('whitelist_review')">📋 审核白名单</button>
+                    <button onclick="aiRun('auto_manage')">🩺 立即巡查</button>
+                </div>
+                <div class="hint-sm" id="ai-run-status"></div>
+            </div>
+        </div>
+
+        <!-- ============ 高级设置（提示词 + 聊天）============ -->
+        <h3 class="mt">⚙️ 高级设置
+            <button onclick="aiToggleAdvanced()" id="ai-advanced-toggle">展开</button>
+            <span class="help-q" data-help="这里能改 AI 的提示词，以及群友 @AI 聊天的参数。<br><br><b>提示词</b>：留空 = 用内置默认。<b>一旦你填了内容，就完全替换内置提示词</b>（包括里面的安全约束）。<br>内置默认是经过调校的，除非你很清楚要改什么，否则建议保持留空。改坏了也不怕 —— 点「恢复默认」即可清空、回到内置版本。<br><br><b>给群友的约束</b>：内置的聊天提示词里写死了「与你对话的是普通群友、不是管理员」。用户选择了「真·完全交给服主」，所以你<b>可以</b>把这段删掉。但请知悉：即便删掉，AI 手上依然只有只读工具、返回结果依然脱敏、发言依然限频 —— <b>能说错话 ≠ 能动手</b>。" role="button" tabindex="0">?</span>
+        </h3>
+        <div id="ai-advanced-box" class="hidden">
+
+            <h4>提示词<span class="help-q" data-help="两个提示词互相独立。<br><b>分析任务</b>：日志分析、白名单审核、自动巡查时用。<br><b>群聊</b>：群友 @AI 时用。<br><br>输入框里<b>预填的就是内置默认提示词</b>，方便你直接看到 AI 一开始收到的是什么。<br>· <b>保持原样不动</b> = 用内置默认（推荐）；<br>· <b>改了</b> = 完全替换，包括里面写死的安全约束；<br>· <b>点「恢复默认」</b> = 把框里内容重新填回内置默认。<br><br>★ 工具白名单 / 结果脱敏 / 发言限频是<b>代码防线</b>，不受提示词影响。" role="button" tabindex="0">?</span></h4>
+            <div class="row">
+                <label class="hint w-190">分析任务提示词</label>
+                <span class="hint-sm" id="ai-prompt-tag-analysis"></span>
+                <button onclick="aiResetPrompt('ai-system-prompt-custom')">↺ 恢复默认</button>
+            </div>
+            <textarea id="ai-system-prompt-custom" class="ai-prompt-area" rows="8"
+                      data-default-baked="1"
+                      placeholder="加载中…（此处会显示内置默认提示词）"></textarea>
+
+            <div class="row mt-sm">
+                <label class="hint w-190">群聊提示词</label>
+                <span class="hint-sm" id="ai-prompt-tag-chat"></span>
+                <button onclick="aiResetPrompt('ai-chat-system-prompt-custom')">↺ 恢复默认</button>
+            </div>
+            <textarea id="ai-chat-system-prompt-custom" class="ai-prompt-area" rows="8"
+                      data-default-baked="1"
+                      placeholder="加载中…（此处会显示内置默认提示词）"></textarea>
+            <div class="hint-sm text-warn" id="ai-prompt-warn"></div>
+
+            <h4 class="mt">群友 @AI 聊天<span class="help-q" data-help="这是唯一一条「外部陌生人能触达 LLM 并拿到回答」的链路，所以默认关闭。<br><br>开启后，群友在群里 @AI 即可获得回答。四道防线自动生效：<br>① 提示词写死「对方是普通群友」<br>② AI 手上<b>只有只读工具</b>（看状态、看在线玩家）<br>③ 返回结果自动脱敏（IP / 路径 / xuid / 手机号都打码）<br>④ 按人限频 + 每日上限<br><br>花的是你的额度，所以限频和上限请按自己的承受能力设置。" role="button" tabindex="0">?</span></h4>
+            <label class="ios status"><input type="checkbox" id="ai-chat-enabled"><i></i> 允许群友 @AI 聊天</label>
+            <div class="hint-sm">默认关闭。开启后群友 @AI 会真的调用你的 LLM（消耗你的额度）。</div>
+
+            <div class="grid-2 mt-sm">
+                <div class="col">
+                    <div class="row"><label class="hint w-190">最多返回 token</label><input type="number" id="ai-chat-max-tokens" step="64" class="w-90"></div>
+                    <div class="row mt-sm"><label class="hint w-190">温度（0~2）</label><input type="number" id="ai-chat-temperature" step="0.1" class="w-90"></div>
+                    <div class="row mt-sm"><label class="hint w-190">单条消息最大字数</label><input type="number" id="ai-chat-max-chars" step="50" class="w-90"></div>
+                </div>
+                <div class="col">
+                    <div class="row"><label class="hint w-190">同一人最小间隔（秒）</label><input type="number" id="ai-chat-min-interval" step="1" class="w-90"></div>
+                    <div class="row mt-sm"><label class="hint w-190">每人每日上限（0=不限）</label><input type="number" id="ai-chat-daily-limit" step="10" class="w-90"></div>
+                    <div class="row mt-sm"><label class="hint w-190">上下文轮数（0=关闭）<span class="help-q" data-help="让 AI 记住最近几轮对话。设为 6 表示记住最近 6 轮问答（1 轮 = 你问 + 它答）。<br><br><b>默认 0（关闭）</b>：每次提问都是独立的，AI 不记得你上一句说了什么。<br><br>开启后「它刚才说的那个」这类指代就能理解了，但代价是每次请求的输入变长、<b>花费按轮数线性上升</b>。建议 3~8 轮。<br><br>历史按「每个人 + 每个群」隔离，只存在内存里，重启即清空。" role="button" tabindex="0">?</span></label><input type="number" id="ai-chat-context-turns" step="1" min="0" max="50" class="w-90"></div>
+                    <div class="row mt-sm"><label class="hint w-190">上下文单条上限<span class="help-q" data-help="被记住的历史消息，每条最多保留多少字符，超出部分从尾部截断。<br><br><b>默认 300</b>。范围 20~2000。<br><br>调大能让 AI 记住更完整的长消息，但输入变长、花费上升；调小则只留开头，可能丢掉关键信息。<br><br>注意这是<b>每条</b>的上限，不是总量 —— 总量由上面的「轮数」控制。" role="button" tabindex="0">?</span></label><input type="number" id="ai-chat-context-max-chars" step="50" min="20" max="2000" class="w-90"></div>
+                    <label class="ios status mt-sm"><input type="checkbox" id="ai-chat-allow-read-tools"><i></i> 允许 AI 查询服务器状态后再回答</label>
+                </div>
+            </div>
+
+            <!-- 「玩家行为记录」已搬到「🧱 区块日志与恢复」板块 ——
+                 它并不属于 AI，只是"被 AI 查询"的一份数据。挂在这里会让
+                 服主以为"关掉 AI 就不用记了"，也让两套记录系统的配置
+                 分散在两处。现在它与「方块日志」并列为记录系统，统一在
+                 那个板块里配置。（配置键也已迁到 behavior_record 段。） -->
+
+            <div class="mt-sm">
+                <button onclick="aiSaveAdvanced()">💾 保存高级设置</button>
+                <span id="ai-advanced-status" class="hint-sm"></span>
+            </div>
+        </div>
+
+        <!-- ============ 撤销窗口 ============ -->
+        <h3 class="mt">↩️ 可撤销的操作
+            <button onclick="aiLoadUndo()">🔄 刷新</button>
+            <span class="help-q" data-help="第三级下 AI 执行的不可逆操作（删档、改服务器属性等）会在这里留下记录 —— 这是「放开了但留后悔药」的兑现。<br><br>窗口内可以一键回滚；窗口一过就真的不可逆了。<br><b>撤不回来的操作也会列出来</b>，并说明为什么 —— 一个假的好消息比一个真的坏消息危险得多。" role="button" tabindex="0">?</span>
+            <span class="hint-sm">第三级执行不可逆操作后的后悔药，窗口内可回滚</span>
+        </h3>
+        <div id="ai-undo-box" class="scroll-box"><p class="hint">点「刷新」查看</p></div>
+
+        <!-- 「机器人用途分布」已移至「🤖 机器人管理」板块 —— 那是机器人自己的
+             属性，放在 AI 页让人以为要在两处配置。这里的播报按钮仍然只发给
+             用途为「AI 播报」的机器人，实际归属在机器人卡片上设置。 -->
+
+        <h3 class="mt">最近一次分析结果
+            <button onclick="aiBroadcast()">📢 播报到群</button>
+            <span class="help-q" data-help="AI 播报只发给用途为「AI 播报」的机器人。<br>一个都没有的话，播报会明确告诉你没地方发，而不是悄悄失败。<br>用途在「🤖 机器人管理」里给机器人卡片设置。" role="button" tabindex="0">?</span>
+            <span id="ai-broadcast-status" class="hint-sm"></span>
+        </h3>
+        <div id="ai-last-result" class="scroll-box"><p class="hint">还没有分析结果</p></div>
+
+        <h3 class="mt">⏳ 待确认的操作提议
+            <button onclick="aiLoadAudit()">🔄 刷新</button>
+            <span class="hint-sm">这些是模型<b>想做但还没做</b>的事，只有你点确认才会执行</span>
+        </h3>
+        <div id="ai-audit-box" class="scroll-box tall"><p class="hint">尚未加载</p></div>
+
+        <h3 class="mt">🔧 工具权限
+            <button onclick="aiLoadTools()">🔄 加载</button>
+            <span class="help-q" data-help="决定模型能调用哪些工具。<br><br><b>开关逻辑</b>：默认全部可用；取消任意一项的勾选，就切换到<b>白名单模式</b> —— 此后只有勾上的才可用。<br><br><b>与接管级别的关系</b>：两者是 <b>AND</b>。接管级别是<b>硬闸门</b>，工具权限只在允许范围内再收窄：<br>· 第一级：任何工具都不执行，勾了也没用；<br>· 第二级：不可逆工具仍只提议，勾了也不会直接执行；<br>· 第三级：不可逆工具会直接执行（但登记在撤销窗口里）。<br><b>不可逆工具</b>：只有在第三级下才会真正执行；其余级别下勾选它只代表「允许模型提议」。" role="button" tabindex="0">?</span>
+            <span class="hint-sm">模型能调用的能力，以及各自的风险等级</span>
+        </h3>
+        <div id="ai-tools-box" class="scroll-box"><p class="hint">点「加载」查看</p></div>
+    </div>
+
+    <div class="section" id="sec-mods">
+        <h2>🧩 模组管理器 <button onclick="scanMods()">🔄 刷新</button> <span id="mods-status" class="status">未扫描</span></h2>
+        <p class="hint-sm mb-sm">为避免反复遍历磁盘，本页<b>不会自动扫描</b>：上传、安装、开关包之后会自动刷新，其余时候请点「🔄 刷新」。</p>
+        <div class="grid-2">
+            <div class="col">
+                <h3>上传模组（.mcaddon / .mcpack）</h3>
+                <input type="file" id="mod-file" accept=".mcaddon,.mcpack">
+                <div class="mt-sm">
+                    <button onclick="uploadMod()">📤 上传到服务器</button>
+                    <span id="mod-upload-status" class="status ml-sm"></span>
+                </div>
+                <p class="hint-sm mt-sm mb-sm" id="mod-inbox-hint"></p>
+                <h3 class="mt">待安装 <span id="mod-uploaded-count">0</span></h3>
+                <div id="mod-library-box" class="scroll-box"><p class="hint">尚未加载</p></div>
+            </div>
+            <div class="col">
+                <h3>存档启用状态<span class="help-q" data-help="读取目标存档目录下的两个文件：<br>· <code>world_resource_packs.json</code> → 资源包<br>· <code>world_behavior_packs.json</code> → 行为包<br><br>开关会直接改写这两个 JSON，<b>需要重启服务器生效</b>。改写前会自动备份为 <code>.bak</code>。" role="button" tabindex="0">?</span></h3>
+                <div class="row mb-sm">
+                    <label class="hint-sm mr-sm" for="mod-world-select">目标存档</label>
+                    <select id="mod-world-select" class="block-input" onchange="scanMods({world: this.value})"></select>
+                </div>
+                <p class="hint-sm mb-sm" id="mod-world-meta"></p>
+                <div class="scroll-box-lg mod-packs-scroll">
+                    <div id="mod-pack-groups"><p class="hint">尚未加载</p></div>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+
+    <div class="section" id="sec-gmods">
+        <h2>🔌 子插件 <button onclick="loadGmods()">🔄 刷新</button> <span id="gmods-status" class="status"></span></h2>
+        <p class="hint-sm mb-sm" id="gmod-page-state"></p>
+        <div class="grid-2">
+            <div class="col">
+                <h3>导入包（.gmmod / .gmlib）<span class="help-q" data-help="<b>.gmmod</b> 是子插件包，按 manifest.json 的 <code>type</code> 解压到不同目录：<br>· <code>index</code> → 接管官网首页<br>· <code>admin</code> → 接管管理后台<br>· <code>py</code> → 执行 <code>main/main.py</code>，可用 <code>gm</code> API<br><br><b>.gmlib</b> 是依赖库包，解出的 whl 供子插件与本插件共用。<br>加载器仅使用 Python 标准库。" role="button" tabindex="0">?</span></h3>
+                <input type="file" id="gmod-file" accept=".gmmod,.gmlib">
+                <div class="mt-sm">
+                    <button onclick="uploadGmod()">📤 上传并导入</button>
+                    <span id="gmod-upload-status" class="status ml-sm"></span>
+                </div>
+                <h3 class="mt">已入库依赖 <span id="gmod-lib-count">0</span></h3>
+                <div id="gmod-lib-box" class="scroll-box"><p class="hint">尚未加载</p></div>
+            </div>
+            <div class="col">
+                <h3>已安装子插件 <span id="gmod-count">0</span></h3>
+                <div id="gmod-box" class="scroll-box-lg"><p class="hint">尚未加载</p></div>
+            </div>
+        </div>
+        <div id="gmod-viewer-wrap" class="mt hidden">
+            <h3>包内文件 <span id="gmod-viewer-name" class="text-accent"></span>
+                <button class="ml-sm" onclick="closeGmodViewer()">✖ 关闭</button>
+            </h3>
+            <div class="grid-2">
+                <div class="col">
+                    <div id="gmod-file-list" class="scroll-box"></div>
+                </div>
+                <div class="col">
+                    <div id="gmod-file-head" class="hint-sm mb-xs"></div>
+                    <textarea id="gmod-file-body" class="block-input" rows="16" spellcheck="false"></textarea>
+                    <div class="mt-sm">
+                        <button class="ok" onclick="saveGmodFile()">💾 保存文件</button>
+                        <span id="gmod-file-status" class="status ml-sm"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <p class="hint-sm" id="gmod-paths"></p>
+    </div>
+
+    <div class="section" id="sec-files">
+        <h2>🗂️ 文件管理<span class="help-q" data-help="文件管理基于<b>服务器根目录</b>（即 server.properties 所在目录）。<br>删除 / 覆盖 / 移动会直接作用于服务器文件，请谨慎操作。<br>在线编辑仅支持 UTF-8 文本（≤1MB），其余文件请下载后处理。" role="button" tabindex="0">?</span> <button onclick="loadFiles()">🔄 刷新</button> <span id="files-status" class="status"></span></h2>
+
+        <!-- 工具栏：导航行 + 操作行（操作按钮需先勾选文件才可用） -->
+        <div class="fs-toolbar">
+            <div class="row">
+                <button type="button" onclick="filesGoUp()">⬆️ 上级目录</button>
+                <button type="button" onclick="filesNewFolder()">📁 新建文件夹</button>
+                <label class="file-btn">📤 选择文件上传<input type="file" id="files-upload" multiple class="hidden" onchange="filesUpload()"></label>
+                <span class="fs-sel-count" id="files-sel-count">未选择</span>
+            </div>
+            <div class="row">
+                <button type="button" data-fs-act="view" onclick="filesApplyAction('view')" disabled>👁 查看</button>
+                <button type="button" data-fs-act="download" onclick="filesApplyAction('download')" disabled>⬇️ 下载</button>
+                <button type="button" data-fs-act="rename" onclick="filesApplyAction('rename')" disabled>✏️ 重命名</button>
+                <button type="button" data-fs-act="copy" onclick="filesApplyAction('copy')" disabled>📋 复制</button>
+                <button type="button" data-fs-act="move" onclick="filesApplyAction('move')" disabled>➡️ 移动</button>
+                <button type="button" class="danger" data-fs-act="delete" onclick="filesApplyAction('delete')" disabled>🗑 删除</button>
+            </div>
+        </div>
+
+        <div id="files-breadcrumb" class="hint-sm break mt-xs"></div>
+        <div class="table-wrap">
+<table>
+            <thead><tr>
+                <th class="fs-check"><input type="checkbox" id="files-check-all" onclick="filesSelectAll(this.checked)" aria-label="全选"></th>
+                <th>名称</th><th>类型</th><th>大小</th><th>修改时间</th><th>操作</th>
+            </tr></thead>
+            <tbody id="files-list"></tbody>
+        </table>
+</div>
+        
+        <div id="files-editor" class="hidden card mt">
+            <div class="row">
+                <b id="files-editor-name" class="break text-strong"></b>
+                <span class="hint-sm" id="files-editor-path"></span>
+                <div class="spacer"></div>
+                <button class="ok" onclick="filesSaveEditor()">💾 保存</button>
+                <button onclick="filesCloseEditor()">✖ 关闭</button>
+            </div>
+            <textarea id="files-editor-area" rows="18" spellcheck="false" aria-label="文件内容编辑器" class="mt-sm"></textarea>
+            <div class="hint-sm mt-xs">保存时将按 UTF-8 覆写该文件。</div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         区块日志与恢复
+         原来这套能力是"手持木斧选区 + 弹表单"，只能在游戏里用，
+         而且进度只能发给某一个在线玩家。搬到面板之后：
+           · 区域改成直接填坐标（或"以某点为中心的立方半径"）；
+           · 时间窗、过滤条件都在页面上给；
+           · 进度实时推到这个页面，谁发起的谁看得到；
+           · 同样的接口 AI 也在用，所以人做的每一步都有据可查。
+         ============================================================ -->
+    <div class="section" id="sec-region">
+        <h2>🧱 区块日志与恢复<span class="help-q" data-help="记录全服方块变更，支持把某个区域<b>恢复到指定时间之前</b>。<br>回档会保留现场快照，因此在<b>撤销窗口内</b>可以反悔。<br>本板块与 AI 的回档工具共用同一套接口与限制。" role="button" tabindex="0">?</span>
+            <button onclick="regionRefresh()">🔄 刷新</button>
+            <span id="region-status" class="status"></span></h2>
+
+        <div id="region-off" class="card mt hidden">
+            <b>区块记录当前未开启。</b>
+            <div class="hint-sm mt-xs">开启后才会开始记录方块变更（会有持续的磁盘写入），
+            并启用「把区域恢复到过去某个时刻」的能力。</div>
+            <div class="row mt-sm">
+                <button class="ok" id="region-btn-enable" onclick="regionToggle(true)">▶ 开启区块记录</button>
+            </div>
+        </div>
+
+        <!-- 设置项：只改 block_record 一节，不暴露别的分区。
+             ★ 后端在 /api/region/settings 里做了 section 白名单，
+               前端即使被改也无从越权。 -->
+        <details class="card mt" id="region-settings-box">
+            <summary>⚙ 区块记录设置</summary>
+
+            <!-- 记录颗粒度：0 关闭 / 1 仅破坏 / 2 破坏 + 放置 -->
+            <div class="mt-sm">
+                <div class="row">
+                    <label class="text-strong">记录颗粒度<span class="help-q" data-help="决定往磁盘里记哪一类方块变更。颗粒度越高，可回档的玩法越多，但数据库也越大。<br><br><b>关闭</b> —— 不记录，无法回档。<br><b>仅破坏</b> —— 只记玩家破坏（含爆炸）。够用来恢复被炸掉／被挖掉的建筑，库最小。注意：<b>此档位无法回档「谁盖的违章建筑」</b>，因为放置记录没存。<br><b>破坏 + 放置</b> —— 破坏和放置都记。能完整回档一片区域的改动，推荐。<br><br>改档位只影响<b>之后</b>新产生的记录，已有记录不受影响。" role="button" tabindex="0">?</span></label>
+                </div>
+                <div class="behavior-slider">
+                    <input type="range" id="region-cfg-level" min="0" max="2" step="1"
+                           value="0" oninput="regionLevelDesc()"
+                           aria-label="区块记录颗粒度">
+                    <div class="behavior-slider-ticks">
+                        <span>关闭</span><span>仅破坏</span><span>破坏 + 放置</span>
+                    </div>
+                </div>
+                <div class="hint-sm" id="region-cfg-level-desc">当前：关闭，不记录任何方块变更。</div>
+            </div>
+
+            <div class="row mt">
+                <label class="nowrap">保留天数</label>
+                <input type="number" id="region-cfg-retention" min="1" class="num-input">
+                <label class="nowrap">单次回档上限（条）</label>
+                <input type="number" id="region-cfg-maxrec" min="1" class="num-input">
+                <label class="nowrap">批大小（方块）</label>
+                <input type="number" id="region-cfg-batch" min="1" class="num-input">
+            </div>
+            <div class="row mt-sm">
+                <label class="nowrap">区域体积上限（格）</label>
+                <input type="number" id="region-cfg-maxarea" min="1" class="num-input">
+                <label class="nowrap">查询返回上限</label>
+                <input type="number" id="region-cfg-maxrows" min="1" class="num-input">
+            </div>
+            <div class="row mt-sm">
+                <button class="ok" onclick="regionSaveSettings()">💾 保存设置</button>
+                <button class="danger" onclick="regionToggle(false)">⏹ 关闭区块记录</button>
+                <span class="hint-sm" id="region-cfg-msg"></span>
+            </div>
+            <div class="hint-sm mt-xs">批大小越大回档越快，但单次占用服务器主线程更久；
+            默认 400 在多数服上是安全的。</div>
+        </details>
+
+        <!-- ═══ 玩家行为记录 ═══════════════════════════════════════════
+             原在「🧠 AI 自动管理」板块下。搬到这里是因为它**不属于 AI** ——
+             它是一份独立的数据，AI 只是它的查询者之一。两套记录系统
+             （方块日志 + 玩家行为）放在同一个板块里，服主才不用记
+             "哪个开关在哪个页面"。
+             配置键也同步迁到了 behavior_record 段（旧位置仍兼容）。 -->
+        <details class="card mt" id="region-bh-box">
+            <summary>👤 玩家行为记录（谁做了什么）</summary>
+            <div class="hint-sm mt-sm">
+                记录玩家在服务器里的行为，供服主在群里问 AI（例如「谁刚才放 TNT 了」）。
+                与上面的「方块日志」是**两套独立数据**：方块日志记"哪一格变成了什么"（给回档用），
+                这里记"谁做了什么"（给人看）。
+            </div>
+            <div class="grid-2 mt-sm">
+                <div class="col">
+                    <div class="row"><label class="hint w-190">记录档位</label>
+                        <div class="behavior-slider">
+                            <input type="range" id="region-bh-level"
+                                   min="0" max="3" step="1" value="0"
+                                   oninput="regionBhDesc()"
+                                   aria-label="玩家行为记录档位">
+                            <div class="behavior-slider-ticks">
+                                <span>关闭</span><span>仅聊天</span><span>敏感行为</span><span>全记录</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hint-sm" id="region-bh-desc">当前：关闭，不记录任何行为。</div>
+                </div>
+                <div class="col">
+                    <div class="row"><label class="hint w-190">保留天数</label><input type="number" id="region-bh-keep-days" step="1" min="1" max="365" class="w-90"></div>
+                    <div class="row mt-sm"><label class="hint w-190">最多保留条数</label><input type="number" id="region-bh-max-records" step="1000" min="1" class="w-90"></div>
+                    <div class="row mt-sm"><label class="hint w-190">单次查询上限</label><input type="number" id="region-bh-query-limit" step="10" min="1" max="500" class="w-90"></div>
+                </div>
+            </div>
+            <div class="hint-sm">共四档：<b>仅聊天</b> → <b>聊天 + 敏感行为</b>（TNT 放置/点燃、床与重生锚爆炸、打火石、岩浆桶等）
+                → <b>全记录</b>（再加上进出服、方块增删、命令、死亡、传送、攻击、拾取物品、打开容器）。</div>
+            <div class="hint-sm">记录会按<b>天数</b>和<b>条数</b>双重上限自动清理。AI 在群里回答时，精确坐标会被自动隐藏
+                （只显示「地下」「高空」这类大范围描述）。</div>
+            <div class="row mt-sm">
+                <button class="ok" onclick="regionSaveBehavior()">💾 保存</button>
+                <span class="hint-sm" id="region-bh-msg"></span>
+            </div>
+        </details>
+
+        <div class="grid-2 mt">
+            <div class="col">
+                <h3>运行状态</h3>
+                <div id="region-stats" class="kv-list mt-sm">加载中…</div>
+            </div>
+            <div class="col">
+                <h3>最近变更</h3>
+                <div class="row mt-sm">
+                    <input type="text" id="region-filter-actor" placeholder="按玩家过滤" class="flex-input">
+                    <button onclick="regionLoadLog()">查询</button>
+                </div>
+                <div class="table-wrap mt-sm">
+                    <table>
+                        <thead><tr><th>时间</th><th>玩家</th><th>动作</th><th>坐标</th></tr></thead>
+                        <tbody id="region-log"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <h3 class="mt">回档 / 撤销</h3>
+        <div class="card mt-sm">
+            <div class="row">
+                <label class="nowrap">维度</label>
+                <input type="text" id="region-dim" placeholder="overworld" class="flex-input">
+                <label class="nowrap">中心点</label>
+                <input type="text" id="region-center" placeholder="100,64,200" class="flex-input">
+                <label class="nowrap">半径</label>
+                <input type="number" id="region-radius" value="10" min="1" class="num-input">
+            </div>
+            <div class="row mt-sm">
+                <label class="nowrap">或对角两点</label>
+                <input type="text" id="region-p1" placeholder="x1,y1,z1" class="flex-input">
+                <input type="text" id="region-p2" placeholder="x2,y2,z2" class="flex-input">
+            </div>
+            <div class="row mt-sm">
+                <label class="nowrap">恢复到</label>
+                <input type="number" id="region-minutes" value="60" min="1" class="num-input">
+                <label class="nowrap">分钟之前</label>
+                <div class="spacer"></div>
+                <button onclick="regionPreview()" id="region-btn-preview">🔍 预览影响面</button>
+                <button class="danger" onclick="regionRollback()" id="region-btn-rollback">⏪ 执行回档</button>
+            </div>
+            <div class="hint-sm mt-xs">先<b>预览</b>再执行：预览会告诉你会动多少个方块、主要涉及谁，
+            不会改动世界。回档一旦执行，可在下方「回档会话」里撤销。</div>
+            <div id="region-result" class="mt-sm"></div>
+        </div>
+
+        <h3 class="mt">回档会话</h3>
+        <div class="row mt-sm">
+            <button onclick="regionLoadSessions()">🔄 刷新会话</button>
+            <div class="spacer"></div>
+            <button class="danger" onclick="regionUndoLast()">↩️ 撤销最近一次回档</button>
+        </div>
+        <div class="table-wrap mt-sm">
+            <table>
+                <thead><tr><th>#</th><th>时间</th><th>发起者</th><th>区域</th><th>时间窗</th><th>方块</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="region-sessions"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         第三方插件面板
+         别的插件把设置项挂到这里，用户就能在一个后台里配所有插件。
+         这个板块默认是空的，只有真有插件接入时才显示。
+         ============================================================ -->
+    <div class="section hidden" id="sec-ext">
+        <h2>🧩 插件面板<span class="help-q" data-help="其它插件可以把自己的设置项挂到这里，集中配置。<br>一个插件都没接入时，这个板块不会出现。" role="button" tabindex="0">?</span>
+            <button onclick="extLoadPanels()">🔄 刷新</button>
+            <span id="ext-status" class="status"></span></h2>
+        <div id="ext-empty" class="hint-sm mt hidden">
+            当前没有插件接入面板。插件作者可以在 <code>setup()</code> 里调用
+            <code>register_panel(...)</code>，或经 HTTP <code>/api/ext/register</code> 远程注册。
+        </div>
+        <div class="ext-layout mt">
+            <div class="ext-list" id="ext-list"></div>
+            <div class="ext-body" id="ext-body">
+                <p class="empty">从左侧选择一个插件</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="section" id="sec-account">
+        <h2>🔑 账户与安全 <button onclick="loadAccount()">🔄 刷新</button></h2>
+        <div class="grid-2">
+            <div class="col">
+                <h3>面板登录账号 / 密码<span class="help-q" data-help="设置后访问管理面板需通过该账号 + 密码（HTTP Basic 认证）。临时账户不受此账号影响，单独生效。" role="button" tabindex="0">?</span></h3>
+                <div class="row mt-sm">
+                    <input type="text" id="acc-user" placeholder="用户名" class="flex-input">
+                    <input type="password" id="acc-pass" placeholder="密码（至少 4 位）" class="flex-input">
+                    <button class="ok" onclick="saveAccountPassword()">保存</button>
+                </div>
+                <div class="row mt">
+                    <label class="ios status"><input type="checkbox" id="acc-test-mode" onchange="saveTestMode(this.checked)"><i></i> 测试模式</label>
+                    <span class="hint-sm">允许 <code>hualvyue</code> 动态密码登录（<b>默认关闭</b>）</span>
+                    <span class="help-q" data-help="开启后可用 <code>hualvyue</code> 动态密码直接登录为管理员 —— 这是一条<b>绕过管理员密码</b>的路径，因此<b>默认关闭</b>。<br>仅在你需要进去调试、又拿不到管理员密码时临时打开；用完请立刻关闭，并建议顺手改一次管理员密码。<br><b>保持关闭是安全的默认状态。</b>" role="button" tabindex="0">?</span>
+                </div>
+                <div class="mt-xs"><span id="tm-status" class="status"></span></div>
+                <div class="mt-xs"><span id="acc-save-status" class="status"></span></div>
+
+                <h3 class="mt">🛡 安全系统 IP 白名单<span class="help-q" data-help="开启后，<b>官网(/)</b> 与 <b>白名单申请页(/whitelist)</b> 仅允许下列 IP / CIDR 访问。<br>管理员面板与跨服 API 不受此限制（依赖登录密码）。" role="button" tabindex="0">?</span></h3>
+                <div class="row mt-sm">
+                    <label class="ios status"><input type="checkbox" id="secwl-enabled"><i></i> 启用安全白名单</label>
+                </div>
+                <div class="mt-sm">
+                    <textarea id="secwl-ips" rows="3" placeholder="每行一个 IP 或网段，例如：192.168.1.10 或 10.0.0.0/8" class="block-input mono min-h-80"></textarea>
+                </div>
+                <div class="mt-sm">
+                    <button class="ok" onclick="saveSecurityWl()">💾 保存安全白名单</button>
+                    <span id="secwl-status" class="status"></span>
+                </div>
+
+                <h3 class="mt">🎨 外观</h3>
+                <div class="setting-row">
+                    <span class="setting-txt">界面配色</span>
+                    <button class="theme-toggle" type="button" id="theme-toggle" onclick="gmToggleTheme()" aria-label="切换深浅主题">🌙 深色</button>
+                </div>
+            </div>
+            <div class="col">
+                <h3>🕑 临时账户<span class="help-q" data-help="生成随机账号密码，可设置有效期与可访问板块，随时可撤销。<br><b>密码仅在创建时展示一次</b>，请立即保存。" role="button" tabindex="0">?</span></h3>
+                <div class="row mt-sm">
+                    <span class="hint">有效期：</span>
+                    <input type="number" id="tmp-days" value="1" min="0" class="w-70" title="天数">
+                    <span class="hint">天</span>
+                    <input type="number" id="tmp-hours" value="0" min="0" class="w-70" title="小时">
+                    <span class="hint">小时</span>
+                </div>
+                <div class="mt-sm" id="tmp-scopes">加载中…</div>
+                <div class="row mt-sm">
+                    <button class="ok" onclick="createTempAccount()">🎲 生成临时账户</button>
+                    <span id="tmp-create-status" class="status"></span>
+                </div>
+                <div id="tmp-result" class="hidden callout-ok mt-sm"></div>
+                <h3 class="mt">已创建临时账户</h3>
+                <div class="table-wrap">
+<table class="table-sm"><thead><tr><th>用户名</th><th>板块</th><th>到期</th><th>状态</th><th>操作</th></tr></thead><tbody id="tmp-list"><tr><td colspan="5" class="hint">加载中…</td></tr></tbody></table>
+</div>
+            </div>
+        </div>
+
+        <!-- ─── 📖 内置文档与条款 ───────────────────────────────────
+             文档正文按需从 /api/docs 拉取（内联进 HTML 会把它撑到几百 KB），
+             按钮清单由 JS 渲染 —— 以后加新文档不用再动这里。 -->
+        <h3 class="mt">📖 开发文档与使用条款
+            <span class="help-q" data-help="面板内置的<b>离线</b>文档，点开即看，无需外网。<br>· <b>接入 WebUI 指南</b>：第三方插件怎么把设置面板挂进来<br>· <b>子插件 API</b>：gm 模块的能力、权限与示例<br>· <b>使用须知与条款</b>：区块回档 / AI 接管级别的风险说明与免责条款" role="button" tabindex="0">?</span>
+            <button onclick="loadDocs()">🔄 刷新</button>
+        </h3>
+        <div class="hint mb">装了子插件、或想让别人接进面板？先看这两份。要动区块回档或开 AI 前，请先读条款。</div>
+        <div id="docs-buttons" class="row mt-sm"><span class="hint">加载中…</span></div>
+        <div id="docs-status" class="status mt-xs"></div>
+
+        <!-- ↓↓↓ 原独立板块「🩺 诊断」已并入本页。
+             保留原有全部元素 ID，JS 逻辑无需改动。 ↓↓↓ -->
+
+        <h3 class="mt">🩺 诊断
+            <span class="help-q" data-help="用于定位「主线程任务执行超时」。<br>若 <b>tick间隔(tick_gap_ms)</b> 长期明显大于 50ms，说明服务器主线程被拖慢或卡住。<br>完整线程栈会实时打印到服务端控制台（每次超时、主线程 tick&gt;2s 时输出）。" role="button" tabindex="0">?</span>
+            <button onclick="loadDiag()">🔄 刷新</button>
+            <span id="diag-status" class="status"></span>
+        </h3>
+        <div class="mt-sm">
+            <button class="ok" onclick="dumpstacks()">🔬 立即抓取全部线程栈(去控制台看)</button>
+        </div>
+        <div class="row row-lg mt">
+            <label class="ios text-strong"><input type="checkbox" id="diag-enabled" onchange="setDiagToggle('enabled', this.checked)"><i></i> 启用诊断功能</label>
+            <label class="ios text-strong"><input type="checkbox" id="diag-detailed" onchange="setDiagToggle('detailed', this.checked)"><i></i> 详细日志（含运行日志与线程栈转储）</label>
+        </div>
+        <div class="mt-sm">
+            <label class="text-strong" for="diag-min-level">面板日志级别</label>
+            <select id="diag-min-level" onchange="setDiagMinLevel(this.value)"
+                    title="只影响面板「日志」页显示的内容，不影响服务端 latest.log 落盘文件。">
+                <option value="">自动（跟随「详细日志」）</option>
+                <option value="trace">TRACE — 全部（最详细）</option>
+                <option value="debug">DEBUG — 调试</option>
+                <option value="info">INFO — 常规</option>
+                <option value="warning">WARNING — 仅警告及以上</option>
+                <option value="error">ERROR — 仅错误及以上</option>
+                <option value="critical">CRITICAL — 仅严重错误</option>
+            </select>
+            <div class="hint">低于此级别的日志不再写入面板日志页，可减少刷屏。服务端 <code>latest.log</code> 始终保留完整日志，不影响事后排障。</div>
+        </div>
+        <div class="mt-sm">
+            <pre id="diag-box" class="code-block"></pre>
+        </div>
+    </div>
+
+</div>
+</div>
+
+    <!--__GM_JS__-->
+    <!--__GM_JS_REV__-->
+</body>
+</html>

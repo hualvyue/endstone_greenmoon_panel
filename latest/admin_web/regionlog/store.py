@@ -128,11 +128,37 @@ CREATE INDEX IF NOT EXISTS idx_evt_actor ON event_log(actor);
 CREATE INDEX IF NOT EXISTS idx_evt_action ON event_log(action);
 -- 掉落物指纹查询：action+维度+时间窗前缀命中，避免大表全扫
 CREATE INDEX IF NOT EXISTS idx_evt_drop ON event_log(action, dimension, ts);
+
+-- 待恢复队列：回档时目标区块**没有加载**（且没有在线玩家可传送过去
+-- 触发加载）的方块。先落库，等区块真正被加载时由 ChunkLoadEvent 补做。
+--
+-- ★ 为什么必须持久化而不是留在内存：
+--   服主完全可能在人都不在线时发起回档（或者发起后玩家全下线），
+--   而区块可能几小时后才因为有人靠近而被加载。进程内状态撑不到那时，
+--   重启更会直接丢 —— 那些方块就永远恢复不了了。
+--
+-- UNIQUE(dimension,x,y,z) + INSERT OR REPLACE：同一格被多次回档时，
+-- 以**最后一次**目标为准（等价于"回档到更晚的时刻"）。
+CREATE TABLE IF NOT EXISTS pending_restore (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   INTEGER NOT NULL,
+    ts           REAL NOT NULL,
+    dimension    TEXT NOT NULL,
+    x            INTEGER NOT NULL,
+    y            INTEGER NOT NULL,
+    z            INTEGER NOT NULL,
+    block_type   TEXT NOT NULL,
+    block_states TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(dimension, x, y, z)
+);
+-- 区块加载时按 (dimension, x, z) 范围查；x 上的范围扫描能吃掉大部分过滤
+CREATE INDEX IF NOT EXISTS idx_pending_chunk ON pending_restore(dimension, x, z);
+CREATE INDEX IF NOT EXISTS idx_pending_ts    ON pending_restore(ts);
 """
 
 ROLLBACK_ACTIONS = (
     "break", "place", "explode",
-    "leaves_decay", "block_grow", "block_form", "liquid_flow",
+    "leaves_decay", "block_grow", "block_form", "block_piston", "liquid_flow",
 )
 
 WATER_TYPES = ("minecraft:water", "minecraft:flowing_water")
@@ -402,6 +428,103 @@ class RegionStore:
             )
             self.conn.commit()
 
+    # ------------------------------------------------------------------
+    # 待恢复队列（区块未加载，等加载后补做）
+    # ------------------------------------------------------------------
+    def enqueue_pending_restore(self, rows: list[tuple]) -> None:
+        """登记待恢复项。
+
+        ``rows`` 每项：
+        ``(session_id, ts, dimension, x, y, z, block_type, block_states)``
+        """
+        if not rows:
+            return
+        with self._lock:
+            self.conn.executemany(
+                """
+                INSERT OR REPLACE INTO pending_restore
+                    (session_id, ts, dimension, x, y, z, block_type, block_states)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            self.conn.commit()
+
+    def fetch_pending_restore(self, dimension: str, cx: int, cz: int,
+                              limit: int = 512) -> list[tuple]:
+        """取某区块（16x16 立柱）内的待恢复项。
+
+        返回 ``(id, session_id, x, y, z, block_type, block_states)``。
+        """
+        x1, x2 = int(cx) * 16, int(cx) * 16 + 15
+        z1, z2 = int(cz) * 16, int(cz) * 16 + 15
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                SELECT id, session_id, x, y, z, block_type, block_states
+                FROM pending_restore
+                WHERE dimension = ? AND x BETWEEN ? AND ? AND z BETWEEN ? AND ?
+                ORDER BY id LIMIT ?
+                """,
+                (str(dimension), x1, x2, z1, z2, max(1, int(limit))),
+            )
+            return [tuple(r) for r in cur.fetchall()]
+
+    def delete_pending_restore(self, ids: list[int]) -> None:
+        if not ids:
+            return
+        with self._lock:
+            self.conn.executemany(
+                "DELETE FROM pending_restore WHERE id = ?",
+                [(int(i),) for i in ids],
+            )
+            self.conn.commit()
+
+    def delete_pending_restore_for_session(self, session_id: int) -> int:
+        """撤销某次回档时，取消它尚未执行的待恢复项。
+
+        ★ 不做这件事会出一个很隐蔽的错：先回档（部分区块未加载）→ 再撤销
+          → 几小时后有人走到那些区块，**回档又被补做了一次**，而撤销已经
+          结束，世界就停留在"回档后"的状态。
+        """
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM pending_restore WHERE session_id = ?",
+                (int(session_id),),
+            )
+            self.conn.commit()
+            return int(cur.rowcount or 0)
+
+    def list_pending_chunks(self) -> list[tuple]:
+        """启动时建内存索引：返回 ``[(dimension, cx, cz)]``（已去重）。
+
+        用 SQL 里做 floor 除法，避免把几十万行坐标全拉回 Python。
+        """
+        with self._lock:
+            cur = self.conn.execute(
+                """
+                SELECT DISTINCT dimension,
+                       CAST((x - (((x % 16) + 16) % 16)) / 16 AS INTEGER) AS cx,
+                       CAST((z - (((z % 16) + 16) % 16)) / 16 AS INTEGER) AS cz
+                FROM pending_restore
+                """
+            )
+            return [(str(r[0]), int(r[1]), int(r[2])) for r in cur.fetchall()]
+
+    def count_pending_restore(self) -> int:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM pending_restore").fetchone()
+            return int(row[0]) if row else 0
+
+    def purge_pending_restore(self, before_ts: float) -> int:
+        """清理过期待恢复项（与日志保留期一致，避免无限增长）。"""
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM pending_restore WHERE ts < ?", (float(before_ts),))
+            self.conn.commit()
+            return int(cur.rowcount or 0)
+
     def finalize_session(self, session_id: int, applied: int) -> None:
         """回档收尾：给关联日志打回档标记并更新会话方块数（原子）。"""
         with self._lock:
@@ -581,12 +704,17 @@ class RegionStore:
             cur2 = self.conn.execute(
                 "DELETE FROM rollback_sessions WHERE ts<?", (cutoff,)
             )
+            # 过期的待恢复项也一并清掉，避免"几年前的欠账"永远躺在库里
+            cur4 = self.conn.execute(
+                "DELETE FROM pending_restore WHERE ts<?", (cutoff,)
+            )
             self.conn.commit()
             self._stats_cache = None
         return {
             "logs": cur1.rowcount,
             "sessions": cur2.rowcount,
             "events": cur3.rowcount,
+            "pending": cur4.rowcount,
         }
 
     def stats(self) -> dict[str, Any]:

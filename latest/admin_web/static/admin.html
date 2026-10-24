@@ -5,6 +5,93 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!--__GM_CSS__-->
+
+<style id="gm-icon-style">
+/* 本面板的图标来自 Tabler Icons（Outline，24×24 描边）—— MIT © Paweł Kuna
+   https://github.com/tabler/tabler-icons
+   图标之间的形状渐变由 morphicons 驱动，见 admin.morph.js。 */
+.gm-ico{display:inline-block;width:1.1em;height:1.1em;vertical-align:-0.15em;background-color:transparent;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center center;mask-position:center center;-webkit-mask-size:contain;mask-size:contain;flex:0 0 auto}
+.gm-ico-emoji{display:inline-block;min-width:1.1em;font-size:1em;line-height:1.1;text-align:center;vertical-align:-0.12em}
+.gm-ico[data-ic=arrow-d]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205l0%2014'/%3E%3Cpath%20d='M18%2013l-6%206'/%3E%3Cpath%20d='M6%2013l6%206'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205l0%2014'/%3E%3Cpath%20d='M18%2013l-6%206'/%3E%3Cpath%20d='M6%2013l6%206'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=arrow-l]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2012l14%200'/%3E%3Cpath%20d='M5%2012l6%206'/%3E%3Cpath%20d='M5%2012l6-6'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2012l14%200'/%3E%3Cpath%20d='M5%2012l6%206'/%3E%3Cpath%20d='M5%2012l6-6'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=arrow-lr]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M21%2017l-18%200'/%3E%3Cpath%20d='M6%2010l-3-3l3-3'/%3E%3Cpath%20d='M3%207l18%200'/%3E%3Cpath%20d='M18%2020l3-3l-3-3'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M21%2017l-18%200'/%3E%3Cpath%20d='M6%2010l-3-3l3-3'/%3E%3Cpath%20d='M3%207l18%200'/%3E%3Cpath%20d='M18%2020l3-3l-3-3'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=arrow-r]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2012l14%200'/%3E%3Cpath%20d='M13%2018l6-6'/%3E%3Cpath%20d='M13%206l6%206'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2012l14%200'/%3E%3Cpath%20d='M13%2018l6-6'/%3E%3Cpath%20d='M13%206l6%206'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=arrow-u]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205l0%2014'/%3E%3Cpath%20d='M18%2011l-6-6'/%3E%3Cpath%20d='M6%2011l6-6'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205l0%2014'/%3E%3Cpath%20d='M18%2011l-6-6'/%3E%3Cpath%20d='M6%2011l6-6'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=ban]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3Cpath%20d='M5.7%205.7l12.6%2012.6'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3Cpath%20d='M5.7%205.7l12.6%2012.6'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=book]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2019a9%209%200%200%201%209%200a9%209%200%200%201%209%200'/%3E%3Cpath%20d='M3%206a9%209%200%200%201%209%200a9%209%200%200%201%209%200'/%3E%3Cpath%20d='M3%206l0%2013'/%3E%3Cpath%20d='M12%206l0%2013'/%3E%3Cpath%20d='M21%206l0%2013'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2019a9%209%200%200%201%209%200a9%209%200%200%201%209%200'/%3E%3Cpath%20d='M3%206a9%209%200%200%201%209%200a9%209%200%200%201%209%200'/%3E%3Cpath%20d='M3%206l0%2013'/%3E%3Cpath%20d='M12%206l0%2013'/%3E%3Cpath%20d='M21%206l0%2013'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=box]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%203l8%204.5l0%209l-8%204.5l-8-4.5l0-9l8-4.5'/%3E%3Cpath%20d='M12%2012l8-4.5'/%3E%3Cpath%20d='M12%2012l0%209'/%3E%3Cpath%20d='M12%2012l-8-4.5'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%203l8%204.5l0%209l-8%204.5l-8-4.5l0-9l8-4.5'/%3E%3Cpath%20d='M12%2012l8-4.5'/%3E%3Cpath%20d='M12%2012l0%209'/%3E%3Cpath%20d='M12%2012l-8-4.5'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=bulb]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012h1m8-9v1m8%208h1m-15.4-6.4l.7%20.7m12.1-.7l-.7%20.7'/%3E%3Cpath%20d='M9%2016a5%205%200%201%201%206%200a3.5%203.5%200%200%200-1%203a2%202%200%200%201-4%200a3.5%203.5%200%200%200-1-3'/%3E%3Cpath%20d='M9.7%2017l4.6%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012h1m8-9v1m8%208h1m-15.4-6.4l.7%20.7m12.1-.7l-.7%20.7'/%3E%3Cpath%20d='M9%2016a5%205%200%201%201%206%200a3.5%203.5%200%200%200-1%203a2%202%200%200%201-4%200a3.5%203.5%200%200%200-1-3'/%3E%3Cpath%20d='M9.7%2017l4.6%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=chart]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%203v18h18'/%3E%3Cpath%20d='M20%2018v3'/%3E%3Cpath%20d='M16%2016v5'/%3E%3Cpath%20d='M12%2013v8'/%3E%3Cpath%20d='M8%2016v5'/%3E%3Cpath%20d='M3%2011c6%200%205-5%209-5s3%205%209%205'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%203v18h18'/%3E%3Cpath%20d='M20%2018v3'/%3E%3Cpath%20d='M16%2016v5'/%3E%3Cpath%20d='M12%2013v8'/%3E%3Cpath%20d='M8%2016v5'/%3E%3Cpath%20d='M3%2011c6%200%205-5%209-5s3%205%209%205'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=chat]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2020l1.3-3.9c-2.32-3.44-1.43-7.87%202.1-10.37c3.53-2.5%208.59-2.3%2011.85%20.48c3.25%202.78%203.69%207.27%201.03%2010.5c-2.67%203.23-7.62%204.21-11.57%202.29l-4.7%201'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2020l1.3-3.9c-2.32-3.44-1.43-7.87%202.1-10.37c3.53-2.5%208.59-2.3%2011.85%20.48c3.25%202.78%203.69%207.27%201.03%2010.5c-2.67%203.23-7.62%204.21-11.57%202.29l-4.7%201'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=check]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2012l5%205l10-10'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2012l5%205l10-10'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=clock]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%200%200-18%200'/%3E%3Cpath%20d='M12%207v5l3%203'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%200%200-18%200'/%3E%3Cpath%20d='M12%207v5l3%203'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=cloud]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.66%2018c-2.57%200-4.66-2.01-4.66-4.48c0-2.48%202.08-4.48%204.66-4.48c.393-1.76%201.79-3.2%203.67-3.77c1.88-.572%203.96-.193%205.44%201c1.49%201.19%202.16%203.01%201.77%204.77h.99c1.91%200%203.46%201.56%203.46%203.49c0%201.93-1.55%203.49-3.46%203.49h-11.88'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.66%2018c-2.57%200-4.66-2.01-4.66-4.48c0-2.48%202.08-4.48%204.66-4.48c.393-1.76%201.79-3.2%203.67-3.77c1.88-.572%203.96-.193%205.44%201c1.49%201.19%202.16%203.01%201.77%204.77h.99c1.91%200%203.46%201.56%203.46%203.49c0%201.93-1.55%203.49-3.46%203.49h-11.88'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=code]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%208l-4%204l4%204'/%3E%3Cpath%20d='M17%208l4%204l-4%204'/%3E%3Cpath%20d='M14%204l-4%2016'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%208l-4%204l4%204'/%3E%3Cpath%20d='M17%208l4%204l-4%204'/%3E%3Cpath%20d='M14%204l-4%2016'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=cpu]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%206a1%201%200%200%201%201-1h12a1%201%200%200%201%201%201v12a1%201%200%200%201-1%201h-12a1%201%200%200%201-1-1l0-12'/%3E%3Cpath%20d='M9%209h6v6h-6l0-6'/%3E%3Cpath%20d='M3%2010h2'/%3E%3Cpath%20d='M3%2014h2'/%3E%3Cpath%20d='M10%203v2'/%3E%3Cpath%20d='M14%203v2'/%3E%3Cpath%20d='M21%2010h-2'/%3E%3Cpath%20d='M21%2014h-2'/%3E%3Cpath%20d='M14%2021v-2'/%3E%3Cpath%20d='M10%2021v-2'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%206a1%201%200%200%201%201-1h12a1%201%200%200%201%201%201v12a1%201%200%200%201-1%201h-12a1%201%200%200%201-1-1l0-12'/%3E%3Cpath%20d='M9%209h6v6h-6l0-6'/%3E%3Cpath%20d='M3%2010h2'/%3E%3Cpath%20d='M3%2014h2'/%3E%3Cpath%20d='M10%203v2'/%3E%3Cpath%20d='M14%203v2'/%3E%3Cpath%20d='M21%2010h-2'/%3E%3Cpath%20d='M21%2014h-2'/%3E%3Cpath%20d='M14%2021v-2'/%3E%3Cpath%20d='M10%2021v-2'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=cross]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%206l-12%2012'/%3E%3Cpath%20d='M6%206l12%2012'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%206l-12%2012'/%3E%3Cpath%20d='M6%206l12%2012'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=cube]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M21%2016.01v-8.02a1.98%201.98%200%200%200-1-1.72l-7-4.01a2.02%202.02%200%200%200-2%200l-7%204.01c-.619%20.355-1%201.01-1%201.72v8.02c0%20.709%20.381%201.36%201%201.72l7%204.01a2.02%202.02%200%200%200%202%200l7-4.01c.619-.355%201-1.01%201-1.72'/%3E%3Cpath%20d='M12%2022v-10'/%3E%3Cpath%20d='M12%2012l8.73-5.04'/%3E%3Cpath%20d='M3.27%206.96l8.73%205.04'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M21%2016.01v-8.02a1.98%201.98%200%200%200-1-1.72l-7-4.01a2.02%202.02%200%200%200-2%200l-7%204.01c-.619%20.355-1%201.01-1%201.72v8.02c0%20.709%20.381%201.36%201%201.72l7%204.01a2.02%202.02%200%200%200%202%200l7-4.01c.619-.355%201-1.01%201-1.72'/%3E%3Cpath%20d='M12%2022v-10'/%3E%3Cpath%20d='M12%2012l8.73-5.04'/%3E%3Cpath%20d='M3.27%206.96l8.73%205.04'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=dice]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%205a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202v14a2%202%200%200%201-2%202h-14a2%202%200%200%201-2-2v-14'/%3E%3Cpath%20d='M8%208.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3Cpath%20d='M15%208.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3Cpath%20d='M15%2015.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3Cpath%20d='M8%2015.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%205a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202v14a2%202%200%200%201-2%202h-14a2%202%200%200%201-2-2v-14'/%3E%3Cpath%20d='M8%208.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3Cpath%20d='M15%208.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3Cpath%20d='M15%2015.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3Cpath%20d='M8%2015.5a.5%20.5%200%201%200%201%200a.5%20.5%200%201%200-1%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=disk]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%204h10l4%204v10a2%202%200%200%201-2%202h-12a2%202%200%200%201-2-2v-12a2%202%200%200%201%202-2'/%3E%3Cpath%20d='M10%2014a2%202%200%201%200%204%200a2%202%200%201%200-4%200'/%3E%3Cpath%20d='M14%204l0%204l-6%200l0-4'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%204h10l4%204v10a2%202%200%200%201-2%202h-12a2%202%200%200%201-2-2v-12a2%202%200%200%201%202-2'/%3E%3Cpath%20d='M10%2014a2%202%200%201%200%204%200a2%202%200%201%200-4%200'/%3E%3Cpath%20d='M14%204l0%204l-6%200l0-4'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=doc]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M14%203v4a1%201%200%200%200%201%201h4'/%3E%3Cpath%20d='M17%2021h-10a2%202%200%200%201-2-2v-14a2%202%200%200%201%202-2h7l5%205v11a2%202%200%200%201-2%202'/%3E%3Cpath%20d='M9%209l1%200'/%3E%3Cpath%20d='M9%2013l6%200'/%3E%3Cpath%20d='M9%2017l6%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M14%203v4a1%201%200%200%200%201%201h4'/%3E%3Cpath%20d='M17%2021h-10a2%202%200%200%201-2-2v-14a2%202%200%200%201%202-2h7l5%205v11a2%202%200%200%201-2%202'/%3E%3Cpath%20d='M9%209l1%200'/%3E%3Cpath%20d='M9%2013l6%200'/%3E%3Cpath%20d='M9%2017l6%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=dot]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%207.5a4.5%204.5%200%201%200%200%209%204.5%204.5%200%200%200%200-9z'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%207.5a4.5%204.5%200%201%200%200%209%204.5%204.5%200%200%200%200-9z'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=edit]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%2020h4l10.5-10.5a2.83%202.83%200%201%200-4-4l-10.5%2010.5v4'/%3E%3Cpath%20d='M13.5%206.5l4%204'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%2020h4l10.5-10.5a2.83%202.83%200%201%200-4-4l-10.5%2010.5v4'/%3E%3Cpath%20d='M13.5%206.5l4%204'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=enter]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%206v6a3%203%200%200%201-3%203h-10l4-4m0%208l-4-4'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%206v6a3%203%200%200%201-3%203h-10l4-4m0%208l-4-4'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=eye]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M10%2012a2%202%200%201%200%204%200a2%202%200%200%200-4%200'/%3E%3Cpath%20d='M21%2012c-2.4%204-5.4%206-9%206c-3.6%200-6.6-2-9-6c2.4-4%205.4-6%209-6c3.6%200%206.6%202%209%206'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M10%2012a2%202%200%201%200%204%200a2%202%200%200%200-4%200'/%3E%3Cpath%20d='M21%2012c-2.4%204-5.4%206-9%206c-3.6%200-6.6-2-9-6c2.4-4%205.4-6%209-6c3.6%200%206.6%202%209%206'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=flask]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.1%2015h11.8'/%3E%3Cpath%20d='M14%203v7.34a6%206%200%200%201%201.32%2010.66h-6.63a6%206%200%200%201%201.32-10.66v-7.34h4'/%3E%3Cpath%20d='M9%203h6'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.1%2015h11.8'/%3E%3Cpath%20d='M14%203v7.34a6%206%200%200%201%201.32%2010.66h-6.63a6%206%200%200%201%201.32-10.66v-7.34h4'/%3E%3Cpath%20d='M9%203h6'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=folder]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%204h4l3%203h7a2%202%200%200%201%202%202v8a2%202%200%200%201-2%202h-14a2%202%200%200%201-2-2v-11a2%202%200%200%201%202-2'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%204h4l3%203h7a2%202%200%200%201%202%202v8a2%202%200%200%201-2%202h-14a2%202%200%200%201-2-2v-11a2%202%200%200%201%202-2'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=gamepad]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205h3.5a5%205%200%200%201%200%2010h-5.5l-4.01%204.23a2.3%202.3%200%200%201-3.92-2.04l1.63-8.17a5%205%200%200%201%204.9-4.02h3.4'/%3E%3Cpath%20d='M14%2015l4.07%204.28a2.3%202.3%200%200%200%203.92-2.02l-1.6-8.23'/%3E%3Cpath%20d='M8%209v2'/%3E%3Cpath%20d='M7%2010h2'/%3E%3Cpath%20d='M14%2010h2'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205h3.5a5%205%200%200%201%200%2010h-5.5l-4.01%204.23a2.3%202.3%200%200%201-3.92-2.04l1.63-8.17a5%205%200%200%201%204.9-4.02h3.4'/%3E%3Cpath%20d='M14%2015l4.07%204.28a2.3%202.3%200%200%200%203.92-2.02l-1.6-8.23'/%3E%3Cpath%20d='M8%209v2'/%3E%3Cpath%20d='M7%2010h2'/%3E%3Cpath%20d='M14%2010h2'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=gear]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M10.32%204.32c.426-1.76%202.92-1.76%203.35%200a1.72%201.72%200%200%200%202.57%201.07c1.54-.94%203.31%20.826%202.37%202.37a1.72%201.72%200%200%200%201.06%202.57c1.76%20.426%201.76%202.92%200%203.35a1.72%201.72%200%200%200-1.07%202.57c.94%201.54-.826%203.31-2.37%202.37a1.72%201.72%200%200%200-2.57%201.06c-.426%201.76-2.92%201.76-3.35%200a1.72%201.72%200%200%200-2.57-1.07c-1.54%20.94-3.31-.826-2.37-2.37a1.72%201.72%200%200%200-1.06-2.57c-1.76-.426-1.76-2.92%200-3.35a1.72%201.72%200%200%200%201.07-2.57c-.94-1.54%20.826-3.31%202.37-2.37c1%20.608%202.3%20.07%202.57-1.06'/%3E%3Cpath%20d='M9%2012a3%203%200%201%200%206%200a3%203%200%200%200-6%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M10.32%204.32c.426-1.76%202.92-1.76%203.35%200a1.72%201.72%200%200%200%202.57%201.07c1.54-.94%203.31%20.826%202.37%202.37a1.72%201.72%200%200%200%201.06%202.57c1.76%20.426%201.76%202.92%200%203.35a1.72%201.72%200%200%200-1.07%202.57c.94%201.54-.826%203.31-2.37%202.37a1.72%201.72%200%200%200-2.57%201.06c-.426%201.76-2.92%201.76-3.35%200a1.72%201.72%200%200%200-2.57-1.07c-1.54%20.94-3.31-.826-2.37-2.37a1.72%201.72%200%200%200-1.06-2.57c-1.76-.426-1.76-2.92%200-3.35a1.72%201.72%200%200%200%201.07-2.57c-.94-1.54%20.826-3.31%202.37-2.37c1%20.608%202.3%20.07%202.57-1.06'/%3E%3Cpath%20d='M9%2012a3%203%200%201%200%206%200a3%203%200%200%200-6%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=gift]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%209a1%201%200%200%201%201-1h16a1%201%200%200%201%201%201v2a1%201%200%200%201-1%201h-16a1%201%200%200%201-1-1l0-2'/%3E%3Cpath%20d='M12%208l0%2013'/%3E%3Cpath%20d='M19%2012v7a2%202%200%200%201-2%202h-10a2%202%200%200%201-2-2v-7'/%3E%3Cpath%20d='M7.5%208a2.5%202.5%200%200%201%200-5a4.8%208%200%200%201%204.5%205a4.8%208%200%200%201%204.5-5a2.5%202.5%200%200%201%200%205'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%209a1%201%200%200%201%201-1h16a1%201%200%200%201%201%201v2a1%201%200%200%201-1%201h-16a1%201%200%200%201-1-1l0-2'/%3E%3Cpath%20d='M12%208l0%2013'/%3E%3Cpath%20d='M19%2012v7a2%202%200%200%201-2%202h-10a2%202%200%200%201-2-2v-7'/%3E%3Cpath%20d='M7.5%208a2.5%202.5%200%200%201%200-5a4.8%208%200%200%201%204.5%205a4.8%208%200%200%201%204.5-5a2.5%202.5%200%200%201%200%205'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=globe]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%200%200-18%200'/%3E%3Cpath%20d='M3.6%209h16.8'/%3E%3Cpath%20d='M3.6%2015h16.8'/%3E%3Cpath%20d='M11.5%203a17%2017%200%200%200%200%2018'/%3E%3Cpath%20d='M12.5%203a17%2017%200%200%201%200%2018'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%200%200-18%200'/%3E%3Cpath%20d='M3.6%209h16.8'/%3E%3Cpath%20d='M3.6%2015h16.8'/%3E%3Cpath%20d='M11.5%203a17%2017%200%200%200%200%2018'/%3E%3Cpath%20d='M12.5%203a17%2017%200%200%201%200%2018'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=heart]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M19.5%2012.57l-7.5%207.43l-7.5-7.43a5%205%200%201%201%207.5-6.57a5%205%200%201%201%207.5%206.57'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M19.5%2012.57l-7.5%207.43l-7.5-7.43a5%205%200%201%201%207.5-6.57a5%205%200%201%201%207.5%206.57'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=help]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3Cpath%20d='M12%2017l0%20.01'/%3E%3Cpath%20d='M12%2013.5a1.5%201.5%200%200%201%201-1.5a2.6%202.6%200%201%200-3-4'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3Cpath%20d='M12%2017l0%20.01'/%3E%3Cpath%20d='M12%2013.5a1.5%201.5%200%200%201%201-1.5a2.6%202.6%200%201%200-3-4'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=hourglass]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.5%207h11'/%3E%3Cpath%20d='M6.5%2017h11'/%3E%3Cpath%20d='M6%2020v-2a6%206%200%201%201%2012%200v2a1%201%200%200%201-1%201h-10a1%201%200%200%201-1-1'/%3E%3Cpath%20d='M6%204v2a6%206%200%201%200%2012%200v-2a1%201%200%200%200-1-1h-10a1%201%200%200%200-1%201'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.5%207h11'/%3E%3Cpath%20d='M6.5%2017h11'/%3E%3Cpath%20d='M6%2020v-2a6%206%200%201%201%2012%200v2a1%201%200%200%201-1%201h-10a1%201%200%200%201-1-1'/%3E%3Cpath%20d='M6%204v2a6%206%200%201%200%2012%200v-2a1%201%200%200%200-1-1h-10a1%201%200%200%200-1%201'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=key]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M16.55%203.84l3.6%203.6a2.88%202.88%200%200%201%200%204.07l-2.64%202.64a2.88%202.88%200%200%201-4.07%200l-.301-.301l-6.56%206.56a2%202%200%200%201-1.24%20.578l-.175%20.008h-1.17a1%201%200%200%201-.993-.883l-.007-.117v-1.17a2%202%200%200%201%20.467-1.28l.119-.13l.414-.414h2v-2h2v-2l2.14-2.14l-.301-.301a2.88%202.88%200%200%201%200-4.07l2.64-2.64a2.88%202.88%200%200%201%204.07%200'/%3E%3Cpath%20d='M15%209h.01'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M16.55%203.84l3.6%203.6a2.88%202.88%200%200%201%200%204.07l-2.64%202.64a2.88%202.88%200%200%201-4.07%200l-.301-.301l-6.56%206.56a2%202%200%200%201-1.24%20.578l-.175%20.008h-1.17a1%201%200%200%201-.993-.883l-.007-.117v-1.17a2%202%200%200%201%20.467-1.28l.119-.13l.414-.414h2v-2h2v-2l2.14-2.14l-.301-.301a2.88%202.88%200%200%201%200-4.07l2.64-2.64a2.88%202.88%200%200%201%204.07%200'/%3E%3Cpath%20d='M15%209h.01'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=link]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2015l6-6'/%3E%3Cpath%20d='M11%206l.463-.536a5%205%200%200%201%207.07%207.07l-.534%20.464'/%3E%3Cpath%20d='M13%2018l-.397%20.534a5.07%205.07%200%200%201-7.13%200a4.97%204.97%200%200%201%200-7.07l.524-.463'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2015l6-6'/%3E%3Cpath%20d='M11%206l.463-.536a5%205%200%200%201%207.07%207.07l-.534%20.464'/%3E%3Cpath%20d='M13%2018l-.397%20.534a5.07%205.07%200%200%201-7.13%200a4.97%204.97%200%200%201%200-7.07l.524-.463'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=list]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%206l11%200'/%3E%3Cpath%20d='M9%2012l11%200'/%3E%3Cpath%20d='M9%2018l11%200'/%3E%3Cpath%20d='M5%206l0%20.01'/%3E%3Cpath%20d='M5%2012l0%20.01'/%3E%3Cpath%20d='M5%2018l0%20.01'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%206l11%200'/%3E%3Cpath%20d='M9%2012l11%200'/%3E%3Cpath%20d='M9%2018l11%200'/%3E%3Cpath%20d='M5%206l0%20.01'/%3E%3Cpath%20d='M5%2012l0%20.01'/%3E%3Cpath%20d='M5%2018l0%20.01'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=lock]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2013a2%202%200%200%201%202-2h10a2%202%200%200%201%202%202v6a2%202%200%200%201-2%202h-10a2%202%200%200%201-2-2v-6'/%3E%3Cpath%20d='M11%2016a1%201%200%201%200%202%200a1%201%200%200%200-2%200'/%3E%3Cpath%20d='M8%2011v-4a4%204%200%201%201%208%200v4'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2013a2%202%200%200%201%202-2h10a2%202%200%200%201%202%202v6a2%202%200%200%201-2%202h-10a2%202%200%200%201-2-2v-6'/%3E%3Cpath%20d='M11%2016a1%201%200%201%200%202%200a1%201%200%200%200-2%200'/%3E%3Cpath%20d='M8%2011v-4a4%204%200%201%201%208%200v4'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=map]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%207l6-3l6%203l6-3v13l-6%203l-6-3l-6%203v-13'/%3E%3Cpath%20d='M9%204v13'/%3E%3Cpath%20d='M15%207v13'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%207l6-3l6%203l6-3v13l-6%203l-6-3l-6%203v-13'/%3E%3Cpath%20d='M9%204v13'/%3E%3Cpath%20d='M15%207v13'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=megaphone]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%208a3%203%200%200%201%200%206'/%3E%3Cpath%20d='M10%208v11a1%201%200%200%201-1%201h-1a1%201%200%200%201-1-1v-5'/%3E%3Cpath%20d='M12%208l4.52-3.77a.9%20.9%200%200%201%201.48%20.692v12.16a.9%20.9%200%200%201-1.48%20.692l-4.52-3.77h-8a1%201%200%200%201-1-1v-4a1%201%200%200%201%201-1h8'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%208a3%203%200%200%201%200%206'/%3E%3Cpath%20d='M10%208v11a1%201%200%200%201-1%201h-1a1%201%200%200%201-1-1v-5'/%3E%3Cpath%20d='M12%208l4.52-3.77a.9%20.9%200%200%201%201.48%20.692v12.16a.9%20.9%200%200%201-1.48%20.692l-4.52-3.77h-8a1%201%200%200%201-1-1v-4a1%201%200%200%201%201-1h8'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=menu]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%206l16%200'/%3E%3Cpath%20d='M4%2012l16%200'/%3E%3Cpath%20d='M4%2018l16%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%206l16%200'/%3E%3Cpath%20d='M4%2012l16%200'/%3E%3Cpath%20d='M4%2018l16%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=microscope]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2021h14'/%3E%3Cpath%20d='M6%2018h2'/%3E%3Cpath%20d='M7%2018v3'/%3E%3Cpath%20d='M9%2011l3%203l6-6l-3-3l-6%206'/%3E%3Cpath%20d='M10.5%2012.5l-1.5%201.5'/%3E%3Cpath%20d='M17%203l3%203'/%3E%3Cpath%20d='M12%2021a6%206%200%200%200%203.71-10.71'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%2021h14'/%3E%3Cpath%20d='M6%2018h2'/%3E%3Cpath%20d='M7%2018v3'/%3E%3Cpath%20d='M9%2011l3%203l6-6l-3-3l-6%206'/%3E%3Cpath%20d='M10.5%2012.5l-1.5%201.5'/%3E%3Cpath%20d='M17%203l3%203'/%3E%3Cpath%20d='M12%2021a6%206%200%200%200%203.71-10.71'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=monitor]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%205a1%201%200%200%201%201-1h16a1%201%200%200%201%201%201v10a1%201%200%200%201-1%201h-16a1%201%200%200%201-1-1v-10'/%3E%3Cpath%20d='M7%2020h10'/%3E%3Cpath%20d='M9%2016v4'/%3E%3Cpath%20d='M15%2016v4'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%205a1%201%200%200%201%201-1h16a1%201%200%200%201%201%201v10a1%201%200%200%201-1%201h-16a1%201%200%200%201-1-1v-10'/%3E%3Cpath%20d='M7%2020h10'/%3E%3Cpath%20d='M9%2016v4'/%3E%3Cpath%20d='M15%2016v4'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=moon]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%203c.132%200%20.263%200%20.393%200a7.5%207.5%200%200%200%207.92%2012.45a9%209%200%201%201-8.31-12.45l0%20.008'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%203c.132%200%20.263%200%20.393%200a7.5%207.5%200%200%200%207.92%2012.45a9%209%200%201%201-8.31-12.45l0%20.008'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=note]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M13%2020l7-7'/%3E%3Cpath%20d='M13%2020v-6a1%201%200%200%201%201-1h6v-7a2%202%200%200%200-2-2h-12a2%202%200%200%200-2%202v12a2%202%200%200%200%202%202h7'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M13%2020l7-7'/%3E%3Cpath%20d='M13%2020v-6a1%201%200%200%201%201-1h6v-7a2%202%200%200%200-2-2h-12a2%202%200%200%200-2%202v12a2%202%200%200%200%202%202h7'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=palette]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%2021a9%209%200%200%201%200-18c4.97%200%209%203.58%209%208c0%201.06-.474%202.08-1.32%202.83c-.844%20.75-1.99%201.17-3.18%201.17h-2.5a2%202%200%200%200-1%203.75a1.3%201.3%200%200%201-1%202.25'/%3E%3Cpath%20d='M7.5%2010.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M11.5%207.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M15.5%2010.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%2021a9%209%200%200%201%200-18c4.97%200%209%203.58%209%208c0%201.06-.474%202.08-1.32%202.83c-.844%20.75-1.99%201.17-3.18%201.17h-2.5a2%202%200%200%200-1%203.75a1.3%201.3%200%200%201-1%202.25'/%3E%3Cpath%20d='M7.5%2010.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M11.5%207.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M15.5%2010.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=pause]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%206a1%201%200%200%201%201-1h2a1%201%200%200%201%201%201v12a1%201%200%200%201-1%201h-2a1%201%200%200%201-1-1l0-12'/%3E%3Cpath%20d='M14%206a1%201%200%200%201%201-1h2a1%201%200%200%201%201%201v12a1%201%200%200%201-1%201h-2a1%201%200%200%201-1-1l0-12'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%206a1%201%200%200%201%201-1h2a1%201%200%200%201%201%201v12a1%201%200%200%201-1%201h-2a1%201%200%200%201-1-1l0-12'/%3E%3Cpath%20d='M14%206a1%201%200%200%201%201-1h2a1%201%200%200%201%201%201v12a1%201%200%200%201-1%201h-2a1%201%200%200%201-1-1l0-12'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=phone]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%205a2%202%200%200%201%202-2h8a2%202%200%200%201%202%202v14a2%202%200%200%201-2%202h-8a2%202%200%200%201-2-2v-14'/%3E%3Cpath%20d='M11%204h2'/%3E%3Cpath%20d='M12%2017v.01'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%205a2%202%200%200%201%202-2h8a2%202%200%200%201%202%202v14a2%202%200%200%201-2%202h-8a2%202%200%200%201-2-2v-14'/%3E%3Cpath%20d='M11%204h2'/%3E%3Cpath%20d='M12%2017v.01'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=pin]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2011a3%203%200%201%200%206%200a3%203%200%200%200-6%200'/%3E%3Cpath%20d='M17.66%2016.66l-4.24%204.24a2%202%200%200%201-2.83%200l-4.24-4.24a8%208%200%201%201%2011.31%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2011a3%203%200%201%200%206%200a3%203%200%200%200-6%200'/%3E%3Cpath%20d='M17.66%2016.66l-4.24%204.24a2%202%200%200%201-2.83%200l-4.24-4.24a8%208%200%201%201%2011.31%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=plug]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9.79%206l8.21%208.21l-2.05%202.05a5.81%205.81%200%201%201-8.21-8.21l2.05-2.05'/%3E%3Cpath%20d='M4%2020l3.5-3.5'/%3E%3Cpath%20d='M15%204l-3.5%203.5'/%3E%3Cpath%20d='M20%209l-3.5%203.5'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9.79%206l8.21%208.21l-2.05%202.05a5.81%205.81%200%201%201-8.21-8.21l2.05-2.05'/%3E%3Cpath%20d='M4%2020l3.5-3.5'/%3E%3Cpath%20d='M15%204l-3.5%203.5'/%3E%3Cpath%20d='M20%209l-3.5%203.5'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=plus]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205l0%2014'/%3E%3Cpath%20d='M5%2012l14%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%205l0%2014'/%3E%3Cpath%20d='M5%2012l14%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=puzzle]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%207h3a1%201%200%200%200%201-1v-1a2%202%200%200%201%204%200v1a1%201%200%200%200%201%201h3a1%201%200%200%201%201%201v3a1%201%200%200%200%201%201h1a2%202%200%200%201%200%204h-1a1%201%200%200%200-1%201v3a1%201%200%200%201-1%201h-3a1%201%200%200%201-1-1v-1a2%202%200%200%200-4%200v1a1%201%200%200%201-1%201h-3a1%201%200%200%201-1-1v-3a1%201%200%200%201%201-1h1a2%202%200%200%200%200-4h-1a1%201%200%200%201-1-1v-3a1%201%200%200%201%201-1'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%207h3a1%201%200%200%200%201-1v-1a2%202%200%200%201%204%200v1a1%201%200%200%200%201%201h3a1%201%200%200%201%201%201v3a1%201%200%200%200%201%201h1a2%202%200%200%201%200%204h-1a1%201%200%200%200-1%201v3a1%201%200%200%201-1%201h-3a1%201%200%200%201-1-1v-1a2%202%200%200%200-4%200v1a1%201%200%200%201-1%201h-3a1%201%200%200%201-1-1v-3a1%201%200%200%201%201-1h1a2%202%200%200%200%200-4h-1a1%201%200%200%201-1-1v-3a1%201%200%200%201%201-1'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=refresh]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M20%2011a8.1%208.1%200%200%200-15.5-2m-.5-4v4h4'/%3E%3Cpath%20d='M4%2013a8.1%208.1%200%200%200%2015.5%202m.5%204v-4h-4'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M20%2011a8.1%208.1%200%200%200-15.5-2m-.5-4v4h4'/%3E%3Cpath%20d='M4%2013a8.1%208.1%200%200%200%2015.5%202m.5%204v-4h-4'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=rewind]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%208l0%204l2%202'/%3E%3Cpath%20d='M3.05%2011a9%209%200%201%201%20.5%204m-.5%205v-5h5'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%208l0%204l2%202'/%3E%3Cpath%20d='M3.05%2011a9%209%200%201%201%20.5%204m-.5%205v-5h5'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=ring]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=robot]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%206a2%202%200%200%201%202-2h8a2%202%200%200%201%202%202v4a2%202%200%200%201-2%202h-8a2%202%200%200%201-2-2l0-4'/%3E%3Cpath%20d='M12%202v2'/%3E%3Cpath%20d='M9%2012v9'/%3E%3Cpath%20d='M15%2012v9'/%3E%3Cpath%20d='M5%2016l4-2'/%3E%3Cpath%20d='M15%2014l4%202'/%3E%3Cpath%20d='M9%2018h6'/%3E%3Cpath%20d='M10%208v.01'/%3E%3Cpath%20d='M14%208v.01'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%206a2%202%200%200%201%202-2h8a2%202%200%200%201%202%202v4a2%202%200%200%201-2%202h-8a2%202%200%200%201-2-2l0-4'/%3E%3Cpath%20d='M12%202v2'/%3E%3Cpath%20d='M9%2012v9'/%3E%3Cpath%20d='M15%2012v9'/%3E%3Cpath%20d='M5%2016l4-2'/%3E%3Cpath%20d='M15%2014l4%202'/%3E%3Cpath%20d='M9%2018h6'/%3E%3Cpath%20d='M10%208v.01'/%3E%3Cpath%20d='M14%208v.01'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=search]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2010a7%207%200%201%200%2014%200a7%207%200%201%200-14%200'/%3E%3Cpath%20d='M21%2021l-6-6'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%2010a7%207%200%201%200%2014%200a7%207%200%201%200-14%200'/%3E%3Cpath%20d='M21%2021l-6-6'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=send]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M10%2014l11-11'/%3E%3Cpath%20d='M21%203l-6.5%2018a.55%20.55%200%200%201-1%200l-3.5-7l-7-3.5a.55%20.55%200%200%201%200-1l18-6.5'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M10%2014l11-11'/%3E%3Cpath%20d='M21%203l-6.5%2018a.55%20.55%200%200%201-1%200l-3.5-7l-7-3.5a.55%20.55%200%200%201%200-1l18-6.5'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=server]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%207a3%203%200%200%201%203-3h12a3%203%200%200%201%203%203v2a3%203%200%200%201-3%203h-12a3%203%200%200%201-3-3v-2'/%3E%3Cpath%20d='M3%2015a3%203%200%200%201%203-3h12a3%203%200%200%201%203%203v2a3%203%200%200%201-3%203h-12a3%203%200%200%201-3-3l0-2'/%3E%3Cpath%20d='M7%208l0%20.01'/%3E%3Cpath%20d='M7%2016l0%20.01'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3%207a3%203%200%200%201%203-3h12a3%203%200%200%201%203%203v2a3%203%200%200%201-3%203h-12a3%203%200%200%201-3-3v-2'/%3E%3Cpath%20d='M3%2015a3%203%200%200%201%203-3h12a3%203%200%200%201%203%203v2a3%203%200%200%201-3%203h-12a3%203%200%200%201-3-3l0-2'/%3E%3Cpath%20d='M7%208l0%20.01'/%3E%3Cpath%20d='M7%2016l0%20.01'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=shield]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%203a12%2012%200%200%200%208.5%203a12%2012%200%200%201-8.5%2015a12%2012%200%200%201-8.5-15a12%2012%200%200%200%208.5-3'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%203a12%2012%200%200%200%208.5%203a12%2012%200%200%201-8.5%2015a12%2012%200%200%201-8.5-15a12%2012%200%200%200%208.5-3'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=spark]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M16%2018a2%202%200%200%201%202%202a2%202%200%200%201%202-2a2%202%200%200%201-2-2a2%202%200%200%201-2%202m0-12a2%202%200%200%201%202%202a2%202%200%200%201%202-2a2%202%200%200%201-2-2a2%202%200%200%201-2%202m-7%2012a6%206%200%200%201%206-6a6%206%200%200%201-6-6a6%206%200%200%201-6%206a6%206%200%200%201%206%206'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M16%2018a2%202%200%200%201%202%202a2%202%200%200%201%202-2a2%202%200%200%201-2-2a2%202%200%200%201-2%202m0-12a2%202%200%200%201%202%202a2%202%200%200%201%202-2a2%202%200%200%201-2-2a2%202%200%200%201-2%202m-7%2012a6%206%200%200%201%206-6a6%206%200%200%201-6-6a6%206%200%200%201-6%206a6%206%200%200%201%206%206'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=star]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%2017.75l-6.17%203.25l1.18-6.87l-5-4.87l6.9-1l3.09-6.25l3.09%206.25l6.9%201l-5%204.87l1.18%206.87l-6.16-3.25'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%2017.75l-6.17%203.25l1.18-6.87l-5-4.87l6.9-1l3.09-6.25l3.09%206.25l6.9%201l-5%204.87l1.18%206.87l-6.16-3.25'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=steth]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%204h-1a2%202%200%200%200-2%202v3.5a5.5%205.5%200%200%200%2011%200v-3.5a2%202%200%200%200-2-2h-1'/%3E%3Cpath%20d='M8%2015a6%206%200%201%200%2012%200v-3'/%3E%3Cpath%20d='M11%203v2'/%3E%3Cpath%20d='M6%203v2'/%3E%3Cpath%20d='M18%2010a2%202%200%201%200%204%200a2%202%200%201%200-4%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%204h-1a2%202%200%200%200-2%202v3.5a5.5%205.5%200%200%200%2011%200v-3.5a2%202%200%200%200-2-2h-1'/%3E%3Cpath%20d='M8%2015a6%206%200%201%200%2012%200v-3'/%3E%3Cpath%20d='M11%203v2'/%3E%3Cpath%20d='M6%203v2'/%3E%3Cpath%20d='M18%2010a2%202%200%201%200%204%200a2%202%200%201%200-4%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=stop]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%207a2%202%200%200%201%202-2h10a2%202%200%200%201%202%202v10a2%202%200%200%201-2%202h-10a2%202%200%200%201-2-2l0-10'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%207a2%202%200%200%201%202-2h10a2%202%200%200%201%202%202v10a2%202%200%200%201-2%202h-10a2%202%200%200%201-2-2l0-10'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=sun]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M8%2012a4%204%200%201%200%208%200a4%204%200%201%200-8%200'/%3E%3Cpath%20d='M3%2012h1m8-9v1m8%208h1m-9%208v1m-6.4-15.4l.7%20.7m12.1-.7l-.7%20.7m0%2011.4l.7%20.7m-12.1-.7l-.7%20.7'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M8%2012a4%204%200%201%200%208%200a4%204%200%201%200-8%200'/%3E%3Cpath%20d='M3%2012h1m8-9v1m8%208h1m-9%208v1m-6.4-15.4l.7%20.7m12.1-.7l-.7%20.7m0%2011.4l.7%20.7m-12.1-.7l-.7%20.7'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=tag]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.5%207.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M3%206v5.17a2%202%200%200%200%20.586%201.41l7.71%207.71a2.41%202.41%200%200%200%203.41%200l5.59-5.59a2.41%202.41%200%200%200%200-3.41l-7.71-7.71a2%202%200%200%200-1.41-.586h-5.17a3%203%200%200%200-3%203'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6.5%207.5a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M3%206v5.17a2%202%200%200%200%20.586%201.41l7.71%207.71a2.41%202.41%200%200%200%203.41%200l5.59-5.59a2.41%202.41%200%200%200%200-3.41l-7.71-7.71a2%202%200%200%200-1.41-.586h-5.17a3%203%200%200%200-3%203'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=target]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M11%2012a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M7%2012a5%205%200%201%200%2010%200a5%205%200%201%200-10%200'/%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M11%2012a1%201%200%201%200%202%200a1%201%200%201%200-2%200'/%3E%3Cpath%20d='M7%2012a5%205%200%201%200%2010%200a5%205%200%201%200-10%200'/%3E%3Cpath%20d='M3%2012a9%209%200%201%200%2018%200a9%209%200%201%200-18%200'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=toolbox]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M8%209l3%203l-3%203'/%3E%3Cpath%20d='M13%2015l3%200'/%3E%3Cpath%20d='M3%206a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202v12a2%202%200%200%201-2%202h-14a2%202%200%200%201-2-2l0-12'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M8%209l3%203l-3%203'/%3E%3Cpath%20d='M13%2015l3%200'/%3E%3Cpath%20d='M3%206a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202v12a2%202%200%200%201-2%202h-14a2%202%200%200%201-2-2l0-12'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=trash]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%207l16%200'/%3E%3Cpath%20d='M10%2011l0%206'/%3E%3Cpath%20d='M14%2011l0%206'/%3E%3Cpath%20d='M5%207l1%2012a2%202%200%200%200%202%202h8a2%202%200%200%200%202-2l1-12'/%3E%3Cpath%20d='M9%207v-3a1%201%200%200%201%201-1h4a1%201%200%200%201%201%201v3'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%207l16%200'/%3E%3Cpath%20d='M10%2011l0%206'/%3E%3Cpath%20d='M14%2011l0%206'/%3E%3Cpath%20d='M5%207l1%2012a2%202%200%200%200%202%202h8a2%202%200%200%200%202-2l1-12'/%3E%3Cpath%20d='M9%207v-3a1%201%200%200%201%201-1h4a1%201%200%200%201%201%201v3'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=tri-d]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%209l6%206l6-6'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%209l6%206l6-6'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=tri-r]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%204v16l13-8l-13-8'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%204v16l13-8l-13-8'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=undo]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2014l-4-4l4-4'/%3E%3Cpath%20d='M5%2010h11a4%204%200%201%201%200%208h-1'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2014l-4-4l4-4'/%3E%3Cpath%20d='M5%2010h11a4%204%200%201%201%200%208h-1'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=upload]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%2017v2a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2v-2'/%3E%3Cpath%20d='M7%209l5-5l5%205'/%3E%3Cpath%20d='M12%204l0%2012'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%2017v2a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2v-2'/%3E%3Cpath%20d='M7%209l5-5l5%205'/%3E%3Cpath%20d='M12%204l0%2012'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=user]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M8%207a4%204%200%201%200%208%200a4%204%200%200%200-8%200'/%3E%3Cpath%20d='M6%2021v-2a4%204%200%200%201%204-4h4a4%204%200%200%201%204%204v2'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M8%207a4%204%200%201%200%208%200a4%204%200%200%200-8%200'/%3E%3Cpath%20d='M6%2021v-2a4%204%200%200%201%204-4h4a4%204%200%200%201%204%204v2'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=users]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%207a4%204%200%201%200%208%200a4%204%200%201%200-8%200'/%3E%3Cpath%20d='M3%2021v-2a4%204%200%200%201%204-4h4a4%204%200%200%201%204%204v2'/%3E%3Cpath%20d='M16%203.13a4%204%200%200%201%200%207.75'/%3E%3Cpath%20d='M21%2021v-2a4%204%200%200%200-3-3.85'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M5%207a4%204%200%201%200%208%200a4%204%200%201%200-8%200'/%3E%3Cpath%20d='M3%2021v-2a4%204%200%200%201%204-4h4a4%204%200%200%201%204%204v2'/%3E%3Cpath%20d='M16%203.13a4%204%200%200%201%200%207.75'/%3E%3Cpath%20d='M21%2021v-2a4%204%200%200%200-3-3.85'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=warn]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%209v4'/%3E%3Cpath%20d='M10.36%203.59l-8.11%2013.53a1.91%201.91%200%200%200%201.64%202.87h16.21a1.91%201.91%200%200%200%201.64-2.87l-8.11-13.54a1.91%201.91%200%200%200-3.27%200'/%3E%3Cpath%20d='M12%2016h.01'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%209v4'/%3E%3Cpath%20d='M10.36%203.59l-8.11%2013.53a1.91%201.91%200%200%200%201.64%202.87h16.21a1.91%201.91%200%200%200%201.64-2.87l-8.11-13.54a1.91%201.91%200%200%200-3.27%200'/%3E%3Cpath%20d='M12%2016h.01'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=wrench]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%2010h3v-3l-3.5-3.5a6%206%200%200%201%208%208l6%206a2%202%200%200%201-3%203l-6-6a6%206%200%200%201-8-8l3.5%203.5'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%2010h3v-3l-3.5-3.5a6%206%200%200%201%208%208l6%206a2%202%200%200%201-3%203l-6-6a6%206%200%200%201-8-8l3.5%203.5'/%3E%3C/svg%3E");background-color:currentColor}
+.gm-ico[data-ic=x]{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%206l-12%2012'/%3E%3Cpath%20d='M6%206l12%2012'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='black'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M18%206l-12%2012'/%3E%3Cpath%20d='M6%206l12%2012'/%3E%3C/svg%3E");background-color:currentColor}
+</style>
+
     <script>
         /* 主题预设：在样式生效前套用，避免刷新时闪白/闪黑 */
         (function () {
@@ -21,48 +108,45 @@
 <nav class="sidebar" id="sidebar">
     <div class="side-head">
         <!--__GM_BRAND:side-brand__-->
-        <button class="side-close" type="button" onclick="gmCloseSidebar()" aria-label="收起侧边栏">✕</button>
+        <button class="side-close" type="button" onclick="gmCloseSidebar()" aria-label="收起侧边栏"><i class=gm-ico data-ic=x></i></button>
     </div>
-    <!-- 原「🗒️ 日志中心」板块已并入「📊 服务器信息」，故导航项删除、
+    <!-- 原「<i class=gm-ico data-ic=note></i> 日志中心」板块已并入「<i class=gm-ico data-ic=chart></i> 服务器信息」，故导航项删除、
          data-scope 合并（players,logs,console,detail）。
          只保留这一个入口，避免列表里出现两个指向同一 section 的项。 -->
-    <a href="javascript:void(0)" class="active" onclick="showSection('sec-players', this)" data-scope="players,logs,console,detail">📊 服务器信息</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-gamerules', this)" data-scope="gamerules">🎮 游戏规则</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-bans', this)" data-scope="bans">🚫 封禁管理</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-whitelist', this)" data-scope="whitelist">🛡 白名单审核</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-properties', this)" data-scope="worlds,gamerules">⚙️ server.properties</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-worlds', this)" data-scope="worlds">🌍 多存档切换</a>
-    <!-- 原「🔐 权限管理」「📊 记分板」已并入「🧰 操作控制台」，
-         原「🩺 诊断」已并入「🔑 账户与安全」，故导航项删除。
+    <a href="javascript:void(0)" class="active" onclick="showSection('sec-players', this)" data-scope="players,logs,console,detail"><i class=gm-ico data-ic=chart></i> 服务器信息</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-gamerules', this)" data-scope="gamerules"><i class=gm-ico data-ic=gamepad></i> 游戏规则</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-bans', this)" data-scope="bans"><i class=gm-ico data-ic=ban></i> 封禁管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-whitelist', this)" data-scope="whitelist"><i class=gm-ico data-ic=shield></i> 白名单审核</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-properties', this)" data-scope="worlds,gamerules"><i class=gm-ico data-ic=gear></i> server.properties</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-worlds', this)" data-scope="worlds"><i class=gm-ico data-ic=globe></i> 多存档切换</a>
+    <!-- 原「<i class=gm-ico data-ic=lock></i> 权限管理」「<i class=gm-ico data-ic=chart></i> 记分板」已并入「<i class=gm-ico data-ic=toolbox></i> 操作控制台」，
+         原「<i class=gm-ico data-ic=steth></i> 诊断」已并入「<i class=gm-ico data-ic=key></i> 账户与安全」，故导航项删除。
          授权 scope 也同步合并为 console / account，避免出现
          「页面没了但授权项还在」的幽灵 scope。 -->
-    <a href="javascript:void(0)" onclick="showSection('sec-console', this)" data-scope="console">🧰 操作控制台</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-bots', this)" data-scope="qqbot">🤖 机器人管理</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-regex', this)" data-scope="qqbot">🧩 正则触发器</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-cross', this)" data-scope="cross">🔗 跨服互联</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-backup', this)" data-scope="backup">📦 自动备份</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-cloud', this)" data-scope="cloud">☁️ 云黑名单</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-gametools', this)" data-scope="gametools">🎁 签到与绑定</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-trust', this)" data-scope="trust">🛡️ 玩家可信度</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-ai', this)" data-scope="ai">🧠 AI 自动管理</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-mods', this)" data-scope="mods">🧩 模组管理器</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-gmods', this)" data-scope="mods">🔌 子插件</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-files', this)" data-scope="files">🗂️ 文件管理</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-region', this)" data-scope="region">🧱 区块日志与恢复</a>
-    <!-- ★ 这个导航项默认**不显示**：只有真的有插件把自己的面板挂进来时，
-         JS 才会把它（和对应板块）放出来。常驻一个常年空白的板块比没有
-         这个板块更让人困惑 —— 见 admin.js 的 extRefreshNav()。 -->
-    <a href="javascript:void(0)" class="hidden" id="nav-ext" onclick="showSection('sec-ext', this)" data-scope="ext">🧩 插件面板</a>
-    <a href="javascript:void(0)" onclick="showSection('sec-account', this)" data-scope="account">🔑 账户与安全</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-console', this)" data-scope="console"><i class=gm-ico data-ic=toolbox></i> 操作控制台</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-bots', this)" data-scope="qqbot"><i class=gm-ico data-ic=robot></i> 机器人管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-regex', this)" data-scope="qqbot"><i class=gm-ico data-ic=puzzle></i> 正则触发器</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-cross', this)" data-scope="cross"><i class=gm-ico data-ic=link></i> 跨服互联</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-backup', this)" data-scope="backup"><i class=gm-ico data-ic=box></i> 自动备份</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-cloud', this)" data-scope="cloud"><i class=gm-ico data-ic=cloud></i> 云黑名单</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-gametools', this)" data-scope="gametools"><i class=gm-ico data-ic=gift></i> 签到与绑定</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-trust', this)" data-scope="trust"><i class=gm-ico data-ic=shield></i> 玩家可信度</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-ai', this)" data-scope="ai"><i class=gm-ico data-ic=cpu></i> AI 自动管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-mods', this)" data-scope="mods"><i class=gm-ico data-ic=puzzle></i> 模组管理器</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-gmods', this)" data-scope="mods"><i class=gm-ico data-ic=plug></i> 子插件</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-ext', this)" data-scope="ext"><i class=gm-ico data-ic=list></i> 第三方插件面板</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-files', this)" data-scope="files"><i class=gm-ico data-ic=folder></i> 文件管理</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-region', this)" data-scope="region"><i class=gm-ico data-ic=cube></i> 区块日志与恢复</a>
+    <a href="javascript:void(0)" onclick="showSection('sec-account', this)" data-scope="account"><i class=gm-ico data-ic=key></i> 账户与安全</a>
 </nav>
 <div class="main">
     <!-- 悬浮固定在左上角，不随滚动移动；始终显示（含侧栏展开时），点击可开可合 -->
-    <button class="side-toggle" type="button" id="side-toggle" onclick="gmToggleSidebar()" aria-label="展开/收起侧边栏">☰</button>
+    <button class="side-toggle" type="button" id="side-toggle" onclick="gmToggleSidebar()" aria-label="展开/收起侧边栏"><i class=gm-ico data-ic=menu></i></button>
     <div class="page-head">
         <!--__GM_BRAND:page-brand__-->
     </div>
     <div class="section" id="sec-players">
-        <h2>📊 服务器信息</h2>
+        <h2><i class=gm-ico data-ic=chart></i> 服务器信息<span class="help-q" data-help="服务器概览：在线人数、TPS、内存与 CPU、运行环境、最近日志。<br>全部为<b>只读</b>，不会改动任何数据。" role="button" tabindex="0">?</span></h2>
         <div class="server-pane" id="pane-status">
             <h3>系统状态</h3>
             <div class="metrics" id="metrics-row">
@@ -95,7 +179,7 @@
                 <div class="env-dl-label">下载第三方库时请选择与此匹配的包：</div>
                 <div class="env-dl-row">
                     <code class="env-tag" id="env-pip-target">—</code>
-                    <button class="env-copy" type="button" onclick="copyEnvTag('env-pip-target')">📋 复制</button>
+                    <button class="env-copy" type="button" onclick="copyEnvTag('env-pip-target')"><i class=gm-ico data-ic=list></i> 复制</button>
                     <span class="status" id="env-copy-status"></span>
                 </div>
                 <div class="env-dl-hint" id="env-hint"></div>
@@ -103,7 +187,7 @@
         </div>
 
         <div class="server-pane" id="pane-online">
-            <h3>在线玩家 <button onclick="refreshPlayers()">🔄 刷新</button></h3>
+            <h3>在线玩家 <button onclick="refreshPlayers()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h3>
             <div class="table-wrap">
 <table id="player-table">
             <thead><tr><th>玩家</th><th>位置</th><th>维度</th><th>生命值</th><th>OP</th><th>操作</th></tr></thead>
@@ -121,18 +205,18 @@
         </div>
 
         <div class="server-pane" id="pane-logs">
-            <h3>聊天与日志<span class="help-q" data-help="集中查看服务器运行日志与局内聊天，只读，不会改动任何数据。<br><b>局内聊天</b>：玩家发言、系统广播等；<b>控制台日志</b>：服务端标准输出与报错。<br>日志每 2 秒自动刷新，最多保留最近 1000 条。" role="button" tabindex="0">?</span> <button onclick="refreshLogsCenter()">🔄 刷新</button> <span id="logs-status" class="status"></span></h3>
+            <h3>聊天与日志<span class="help-q" data-help="集中查看服务器运行日志与局内聊天，只读，不会改动任何数据。<br><b>局内聊天</b>：玩家发言、系统广播等；<b>控制台日志</b>：服务端标准输出与报错。<br>日志每 2 秒自动刷新，最多保留最近 1000 条。" role="button" tabindex="0">?</span> <button onclick="refreshLogsCenter()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="logs-status" class="status"></span></h3>
             <div class="tabs">
-                <button class="tab active" id="tab-chat" onclick="switchLogTab('chat')">💬 局内聊天</button>
-                <button class="tab" id="tab-console" onclick="switchLogTab('console')">🖥 控制台日志</button>
+                <button class="tab active" id="tab-chat" onclick="switchLogTab('chat')"><i class=gm-ico data-ic=chat></i> 局内聊天</button>
+                <button class="tab" id="tab-console" onclick="switchLogTab('console')"><i class=gm-ico data-ic=monitor></i> 控制台日志</button>
             </div>
             <div class="log-pane" id="chat-pane">
                 <div class="mb-sm"><button onclick="clearMessagesUI()">清空聊天</button> <label class="ios"><input type="checkbox" id="msg-autoscroll" checked><i></i> 自动滚动</label></div>
                 <div id="message-panel"></div>
             </div>
-            <!-- ★ 初始隐藏只靠内联 style，不要再加 .hidden 类。
+            <!-- <i class=gm-ico data-ic=star></i> 初始隐藏只靠内联 style，不要再加 .hidden 类。
                  历史上这里同时挂了 .hidden 和 style="display:none" 两套机制，
-                 而 switchLogTab 只改内联样式 → 清空后 .hidden 立刻接管，
+                 而 switchLogTab 只改内联样式 <i class=gm-ico data-ic=arrow-r></i> 清空后 .hidden 立刻接管，
                  表现成「点控制台标签内容就消失」。
                  聊天栏（chat-pane）一直只用内联 style，所以没问题。
                  现在两边写法保持一致，JS 侧也会两个都设。 -->
@@ -140,7 +224,7 @@
                 <div class="mb-sm"><button onclick="clearConsoleUI()">清空控制台</button> <label class="ios"><input type="checkbox" id="console-autoscroll" checked><i></i> 自动滚动</label></div>
                 <div class="row mb-sm">
                     <input type="text" id="console-cmd" placeholder="输入控制台指令（如 give Steve diamond 1），按回车或点按钮执行" class="flex-input">
-                    <button class="ok" onclick="sendConsoleCommand()">⏎ 执行指令</button>
+                    <button class="ok" onclick="sendConsoleCommand()"><i class=gm-ico data-ic=enter></i> 执行指令</button>
                     <span id="console-cmd-status" class="status"></span>
                 </div>
                 <div id="console-panel"></div>
@@ -149,14 +233,14 @@
     </div>
 
     <div class="section" id="sec-gamerules">
-        <h2>🎮 游戏规则</h2>
-        <button onclick="loadGamerules()">🔄 刷新规则</button>
+        <h2><i class=gm-ico data-ic=gamepad></i> 游戏规则<span class="help-q" data-help="直接读写存档的 gamerule（是否保留物品、是否生成怪物、随机刻速度等）。<br>修改<b>即时生效</b>，部分规则需要重进世界或重启才会完全应用。<br>开关状态会持久化到存档。" role="button" tabindex="0">?</span></h2>
+        <button onclick="loadGamerules()"><i class=gm-ico data-ic=refresh></i> 刷新规则</button>
         <span id="gamerule-status" class="ml-sm"></span>
         <div id="gamerule-area" class="grid-auto mt"></div>
     </div>
 
     <div class="section" id="sec-bans">
-        <h2>🚫 封禁管理 <button onclick="loadBans()">🔄 刷新</button></h2>
+        <h2><i class=gm-ico data-ic=ban></i> 封禁管理<span class="help-q" data-help="按<b>玩家名 / XUID</b> 或 <b>IP</b> 封禁，可设置原因与到期时间。<br>封禁会写入服务器 ban 列表、立即踢出在线玩家；勾选「同步到云黑」会异步上报。<br>被封玩家若已绑定 QQ，会联动把其 QQ 档位降到最低档。" role="button" tabindex="0">?</span> <button onclick="loadBans()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h2>
         <div class="grid-2">
             <div class="col">
                 <h3>封禁玩家</h3>
@@ -197,7 +281,7 @@
     </div>
 
     <div class="section" id="sec-whitelist">
-        <h2>🛡 白名单审核<span class="help-q" data-help="玩家公开申请页：<b>whitelist</b>（相对地址 /whitelist）。<br>审核前请确认已在 server.properties 中开启 <code>allow-list=true</code>，否则白名单不会实际生效。" role="button" tabindex="0">?</span> <button onclick="loadWhitelist()">🔄 刷新</button></h2>
+        <h2><i class=gm-ico data-ic=shield></i> 白名单审核<span class="help-q" data-help="玩家公开申请页：<b>whitelist</b>（相对地址 /whitelist）。<br>审核前请确认已在 server.properties 中开启 <code>allow-list=true</code>，否则白名单不会实际生效。" role="button" tabindex="0">?</span> <button onclick="loadWhitelist()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h2>
         
         <div class="table-wrap">
 <table>
@@ -208,17 +292,17 @@
     </div>
 
     <div class="section" id="sec-properties">
-        <h2>⚙️ server.properties 管理<span class="help-q" data-help="每次快捷修改都会自动备份为 <code>server.properties.bak</code>。<br>修改端口、难度、白名单开关等通常需要<b>重启后生效</b>。" role="button" tabindex="0">?</span> <button onclick="loadProperties()">🔄 刷新</button></h2>
+        <h2><i class=gm-ico data-ic=gear></i> server.properties 管理<span class="help-q" data-help="每次快捷修改都会自动备份为 <code>server.properties.bak</code>。<br>修改端口、难度、白名单开关等通常需要<b>重启后生效</b>。" role="button" tabindex="0">?</span> <button onclick="loadProperties()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h2>
         <p id="props-path" class="hint"></p>
         <div class="mt-sm mb-sm">
-            <input type="text" id="props-filter" placeholder="🔍 筛选配置项…" oninput="renderProperties()" class="max-w-260">
+            <input type="text" id="props-filter" placeholder="筛选配置项（中文名 / 键名 / 值）…" oninput="renderProperties()" class="max-w-260">
         </div>
         <div id="props-quick" class="grid-auto-lg mt-sm"></div>
         <details class="mt-xs">
-            <summary class="text-accent pointer">📄 原始文本编辑（高级）</summary>
+            <summary class="text-accent pointer"><i class=gm-ico data-ic=doc></i> 原始文本编辑（高级）</summary>
             <textarea id="props-content" rows="16" class="mt-sm"></textarea>
             <div class="row mt-sm">
-                <button class="ok" onclick="saveProperties()">💾 保存原始文本</button>
+                <button class="ok" onclick="saveProperties()"><i class=gm-ico data-ic=disk></i> 保存原始文本</button>
                 <span id="props-status" class="status"></span>
             </div>
         </details>
@@ -226,35 +310,35 @@
     </div>
 
     <div class="section" id="sec-worlds">
-        <h2>🌍 多存档切换<span class="help-q" data-help="切换存档会修改 server.properties 的 <code>level-name</code>。<br><b>必须重启服务器后才会生效。</b>" role="button" tabindex="0">?</span> <button onclick="loadWorlds()">🔄 刷新</button></h2>
+        <h2><i class=gm-ico data-ic=globe></i> 多存档切换<span class="help-q" data-help="切换存档会修改 server.properties 的 <code>level-name</code>。<br><b>必须重启服务器后才会生效。</b>" role="button" tabindex="0">?</span> <button onclick="loadWorlds()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h2>
         <p class="hint">当前存档：<b id="world-current" class="text-ok">加载中…</b></p>
         <div id="world-list"></div>
     </div>
 
-    <!-- 「🔐 权限管理」原为独立 section，现已并入「🧰 操作控制台」尾部。
+    <!-- 「<i class=gm-ico data-ic=lock></i> 权限管理」原为独立 section，现已并入「<i class=gm-ico data-ic=toolbox></i> 操作控制台」尾部。
          独立入口删除，授权 scope perm 合并进 console。 -->
 
-    <!-- 「📊 记分板」原为独立 section，现已并入「🧰 操作控制台」尾部。
+    <!-- 「<i class=gm-ico data-ic=chart></i> 记分板」原为独立 section，现已并入「<i class=gm-ico data-ic=toolbox></i> 操作控制台」尾部。
          独立入口删除，授权 scope scoreboard 合并进 console。 -->
 
     <div class="section" id="sec-console">
-        <h2>🧰 操作控制台<span class="help-q" data-help="对在线玩家执行即时操作，以及管理权限与记分板。<br><br><b>即时操作</b>：发消息、给物、调血量、加标签、改分数、踢人、给/撤 OP、传送、发地图画。<br><br><b>权限管理</b>：给单个玩家授予或拒绝某个权限节点（如 <code>endstone.command.gamemode</code>）。这是比 OP 更细的粒度。<br><br><b>记分板管理</b>：创建 / 删除记分项（objective）。改分数在左边的「记分板分数」里操作。<br><br>所有操作<b>立即生效</b>，不经确认，请谨慎使用。" role="button" tabindex="0">?</span></h2>
+        <h2><i class=gm-ico data-ic=toolbox></i> 操作控制台<span class="help-q" data-help="对在线玩家执行即时操作，以及管理权限与记分板。<br><br><b>即时操作</b>：发消息、给物、调血量、加标签、改分数、踢人、给/撤 OP、传送、发地图画。<br><br><b>权限管理</b>：给单个玩家授予或拒绝某个权限节点（如 <code>endstone.command.gamemode</code>）。这是比 OP 更细的粒度。<br><br><b>记分板管理</b>：创建 / 删除记分项（objective）。改分数在左边的「记分板分数」里操作。<br><br>所有操作<b>立即生效</b>，不经确认，请谨慎使用。" role="button" tabindex="0">?</span></h2>
         <div class="grid-3">
             <div>
-                <h3>💬 发送聊天消息</h3>
+                <h3><i class=gm-ico data-ic=chat></i> 发送聊天消息</h3>
                 <select id="msg-player"><option value="">-- 玩家 --</option></select>
                 <input type="text" id="msg-text" placeholder="消息内容">
                 <button onclick="sendMessage()">发送</button>
             </div>
             <div>
-                <h3>🎁 给予物品</h3>
+                <h3><i class=gm-ico data-ic=gift></i> 给予物品</h3>
                 <select id="give-player"><option value="">-- 玩家 --</option></select>
                 <input type="text" id="give-item" placeholder="物品ID (如 diamond)">
                 <input type="number" id="give-amount" value="1" min="1" class="w-60">
                 <button onclick="giveItem()">给予</button>
             </div>
             <div>
-                <h3>❤️ 调整生命值</h3>
+                <h3><i class=gm-ico data-ic=heart></i> 调整生命值</h3>
                 <select id="health-player"><option value="">-- 玩家 --</option></select>
                 <div class="gmselect" id="health-op" data-value="set"
                      data-options='[["set","设置"],["add","增加"],["sub","减少"]]'></div>
@@ -262,14 +346,14 @@
                 <button onclick="adjustHealth()">应用</button>
             </div>
             <div>
-                <h3>🏷️ 标签管理</h3>
+                <h3><i class=gm-ico data-ic=tag></i> 标签管理</h3>
                 <select id="tag-player"><option value="">-- 玩家 --</option></select>
                 <input type="text" id="tag-name" placeholder="标签名">
                 <button onclick="addTag()">添加</button>
                 <button onclick="removeTag()">移除</button>
             </div>
             <div>
-                <h3>📊 记分板分数</h3>
+                <h3><i class=gm-ico data-ic=chart></i> 记分板分数</h3>
                 <select id="score-player"><option value="">-- 玩家 --</option></select>
                 <select id="score-objective"><option value="">-- 目标 --</option></select>
                 <div class="gmselect" id="score-op" data-value="set"
@@ -279,20 +363,20 @@
                 <button onclick="loadScoreboards()">刷新目标</button>
             </div>
             <div>
-                <h3>🚫 踢出玩家</h3>
+                <h3><i class=gm-ico data-ic=ban></i> 踢出玩家</h3>
                 <select id="kick-player"><option value="">-- 玩家 --</option></select>
                 <input type="text" id="kick-reason" placeholder="原因 (可选)" value="被管理员踢出">
                 <button onclick="kickPlayer()">踢出</button>
             </div>
             <div>
-                <h3>🔑 OP 权限管理</h3>
+                <h3><i class=gm-ico data-ic=key></i> OP 权限管理</h3>
                 <select id="op-player"><option value="">-- 玩家 --</option></select>
                 <div class="gmselect" id="op-value" data-value="true"
                      data-options='[["true","给予 OP"],["false","移除 OP"]]'></div>
                 <button onclick="setOp()">应用</button>
             </div>
             <div>
-                <h3>📍 传送玩家</h3>
+                <h3><i class=gm-ico data-ic=pin></i> 传送玩家</h3>
                 <select id="tp-player"><option value="">-- 玩家 --</option></select>
                 <input type="number" id="tp-x" placeholder="X" step="any">
                 <input type="number" id="tp-y" placeholder="Y" step="any">
@@ -302,7 +386,7 @@
                 <button onclick="teleportPlayer()">传送</button>
             </div>
             <div>
-                <h3>🗺️ 发送地图画</h3>
+                <h3><i class=gm-ico data-ic=map></i> 发送地图画</h3>
                 <select id="map-player"><option value="">-- 玩家 --</option></select>
                 <input type="file" id="map-image" accept="image/*">
                 <button onclick="sendMap()">生成并发送</button>
@@ -310,10 +394,10 @@
             </div>
         </div>
 
-        <!-- ↓↓↓ 以下两块原为独立板块「🔐 权限管理」「📊 记分板」，
-             现并入本页。保留原有全部元素 ID，JS 逻辑无需改动。 ↓↓↓ -->
+        <!-- <i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i> 以下两块原为独立板块「<i class=gm-ico data-ic=lock></i> 权限管理」「<i class=gm-ico data-ic=chart></i> 记分板」，
+             现并入本页。保留原有全部元素 ID，JS 逻辑无需改动。 <i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i> -->
 
-        <h3 class="mt">🔐 权限管理
+        <h3 class="mt"><i class=gm-ico data-ic=lock></i> 权限管理
             <span class="help-q" data-help="给<b>单个玩家</b>授予或拒绝某个权限节点，比 OP 更细。<br>节点名格式如 <code>endstone.command.gamemode</code>。<br>点「撤销」是不再单独设置该节点，回落到默认判定。" role="button" tabindex="0">?</span>
         </h3>
         <div class="row">
@@ -328,8 +412,7 @@
         </div>
         <div id="perm-info" class="mt-sm"></div>
 
-        <h3 class="mt">📊 记分板管理 <button onclick="loadScoreboardsFull()">🔄 刷新</button></h3>
-        <div class="hint-sm mb-sm">这里创建 / 删除<b>记分项</b>本身；给玩家加减分数在左边「📊 记分板分数」里。</div>
+        <h3 class="mt"><i class=gm-ico data-ic=chart></i> 记分板管理<span class="help-q" data-help="这里创建 / 删除<b>记分项</b>本身；给玩家加减分数在左边「记分板分数」里。" role="button" tabindex="0">?</span> <button onclick="loadScoreboardsFull()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h3>
         <div class="row">
             <input type="text" id="obj-name" placeholder="目标名称 (英文)">
             <input type="text" id="obj-display" placeholder="显示名称">
@@ -346,9 +429,9 @@
     </div>
 
     <div class="section hidden" id="sec-bots">
-        <h2>🤖 机器人管理<span class="help-q" data-help="管理所有已接入的机器人实例，支持 QQ 官方 与 WebSocket (OneBot v11) 两种类型。<br>每张卡片独立启停、独立收发消息；点卡片上的「编辑」可配置连接参数、群绑定与群服互通。<br><br><b>用途</b>：给每个机器人指定一个角色 —— 「群服互通」负责转发消息、「AI 播报」接收面板 AI 的分析结果、「空着」预留给第三方插件。用途只影响<b>谁能收到什么</b>，不影响连接本身。" role="button" tabindex="0">?</span> <button onclick="loadBots()">🔄 刷新</button> <span id="bots-status-badge" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=robot></i> 机器人管理<span class="help-q" data-help="管理所有已接入的机器人实例，支持 QQ 官方 与 WebSocket (OneBot v11) 两种类型。<br>每张卡片独立启停、独立收发消息；点卡片上的「编辑」可配置连接参数、群绑定与群服互通。<br><br><b>用途</b>：给每个机器人指定一个角色 —— 「群服互通」负责转发消息、「AI 播报」接收面板 AI 的分析结果、「空着」预留给第三方插件。用途只影响<b>谁能收到什么</b>，不影响连接本身。" role="button" tabindex="0">?</span> <button onclick="loadBots()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="bots-status-badge" class="status"></span></h2>
 
-        <h3>🎯 用途分布
+        <h3><i class=gm-ico data-ic=target></i> 用途分布
             <span class="help-q" data-help="<b>群服互通</b>：机器人负责在游戏与群之间转发消息，是跨服互联的通道。<br><b>AI 播报</b>：接收管理面板 AI 的分析结果与操作提议通知。<br><b>空着（等第三方插件）</b>：本插件不碰，留给别的子插件接管。<br><br>点卡片上的「编辑」可修改用途。" role="button" tabindex="0">?</span>
         </h3>
         <div class="hint-sm" id="bots-purpose-summary"></div>
@@ -359,14 +442,13 @@
                 <option value="qqofficial">QQ 官方机器人</option>
                 <option value="websocket">WebSocket (OneBot v11)</option>
             </select>
-            <button onclick="qrOpen()">📱 扫码登录</button>
+            <button onclick="qrOpen()"><i class=gm-ico data-ic=phone></i> 扫码登录</button>
             <span id="bots-op-status" class="status"></span>
         </div>
 
         <!-- 扫码登录：手机 QQ 扫一下就把 AppID / AppSecret 写进卡片 -->
         <div id="qr-box" class="hidden card mb">
-            <h3>📱 扫码绑定 QQ 官方机器人</h3>
-            <p class="hint">用<b>手机 QQ</b> 扫描下方二维码并确认授权，机器人凭据会自动写入卡片。</p>
+            <h3><i class=gm-ico data-ic=phone></i> 扫码绑定 QQ 官方机器人<span class="help-q" data-help="用<b>手机 QQ</b> 扫描下方二维码并确认授权，机器人凭据会自动写入卡片。<br><br>二维码有效期约 5 分钟，过期请重新获取。系统不会显示 AppSecret 明文，只在你确认后直接写入卡片。" role="button" tabindex="0">?</span></h3>
             <div class="row">
                 <label>绑定到卡片</label>
                 <select id="qr-card"></select>
@@ -377,17 +459,36 @@
                 <div id="qr-img-box"></div>
                 <div id="qr-status" class="status"></div>
             </div>
-            <p class="hint mt">⚠ 二维码有效期约 5 分钟，过期请重新获取。系统不会显示 AppSecret 明文，只在你确认后直接写入卡片。</p>
         </div>
 
         <div id="bots-create-box" class="hidden card mb"></div>
         <div id="bots-list" class="grid-auto-lg">
             <p class="hint">正在加载机器人列表…</p>
         </div>
+
+        <!-- QQ 分档（机器人成员档位）：已并入「机器人管理」板块，不再作为独立面板 -->
+        <div class="mb">
+            <h3><i class=gm-ico data-ic=users></i> 机器人成员档位（QQ 分档）<span class="help-q" data-help="本功能已并入「<i class=gm-ico data-ic=robot></i> 机器人管理」板块，不再单独成块。<br><b>档位规则</b>：服主（绑定码发起人）最高；其余成员<b>默认自动为「普通人」</b>；一旦在面板被<b>封禁</b>，系统会联动把其绑定 QQ 自动降到最低档「沙币/熊孩」（冷漠讲规则、不替其动手）。需要手动微调时仍可用下方下拉框设置，修改即时生效。" role="button" tabindex="0">?</span> <button onclick="loadQQTiers()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h3>
+            <p class="hint">当前服主（绑定码发起人）：<b id="qq-owner">—</b></p>
+            <div class="row mb">
+                <input id="tier-openid" placeholder="QQ openid / member_openid">
+                <select id="tier-select">
+                    <option value="newbie">萌新</option>
+                    <option value="normal" selected>普通人</option>
+                    <option value="brat">沙币/熊孩</option>
+                    <option value="owner">服主</option>
+                </select>
+                <button class="ok" onclick="saveQQTier()">设置档位</button>
+            </div>
+            <table class="tbl" id="tier-table">
+                <thead><tr><th>openid</th><th>档位</th><th>操作</th></tr></thead>
+                <tbody id="tier-rows"><tr><td colspan="3" class="hint">加载中…</td></tr></tbody>
+            </table>
+        </div>
     </div>
 
     <div class="section hidden" id="sec-regex">
-        <h2>🧩 正则触发器<span class="help-q" data-help="按正则表达式匹配群消息或游戏事件，命中后执行一串动作（回复文本 / @成员 / 发图 / 撤回 / 禁言 / 执行服务器指令）。<br>规则优先于机器人卡片里的「自定义关键词」：<b>阻断</b>开启时命中即终止后续处理，关闭时继续往下走。<br>⚠ 正则执行在服务器主线程上，含嵌套量词或超大重复限定的写法会被拒绝。" role="button" tabindex="0">?</span> <button onclick="loadRegex()">🔄 刷新</button> <span id="regex-status-badge" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=puzzle></i> 正则触发器<span class="help-q" data-help="按正则表达式匹配群消息或游戏事件，命中后执行一串动作（回复文本 / @成员 / 发图 / 撤回 / 禁言 / 执行服务器指令）。<br>规则优先于机器人卡片里的「自定义关键词」：<b>阻断</b>开启时命中即终止后续处理，关闭时继续往下走。<br><i class=gm-ico data-ic=warn></i> 正则执行在服务器主线程上，含嵌套量词或超大重复限定的写法会被拒绝。" role="button" tabindex="0">?</span> <button onclick="loadRegex()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="regex-status-badge" class="status"></span></h2>
 
         <div class="card mb">
             <h3>引擎开关</h3>
@@ -399,26 +500,15 @@
             <div class="row mt">
                 <label>命令等待超时（秒）</label>
                 <input type="number" id="regex-timeout" min="0.1" max="30" step="0.5" style="width:90px">
-                <button class="ok" onclick="saveRegexConfig()">💾 保存开关</button>
+                <button class="ok" onclick="saveRegexConfig()"><i class=gm-ico data-ic=disk></i> 保存开关</button>
                 <span id="regex-cfg-status" class="status"></span>
             </div>
             <hr>
-            <h4>🖥 控制台日志采集</h4>
-            <p class="hint">
-                让规则能匹配服务器控制台日志（事件类型选 <b>server.log_line</b>）。<br>
-                BDS 的原生输出不进插件，只能读取 <code>logs/latest.log</code>；
-                面板日志和它是两回事。<br>
-                日志的级别（<code>[Server/ERROR]</code> 里的 ERROR）放在独立字段里，
-                用规则的 <b>条件过滤</b> 选 <code>level</code> 即可，不需要写转义正则。
-            </p>
+            <h4><i class=gm-ico data-ic=monitor></i> 控制台日志采集<span class="help-q" data-help="让规则能匹配服务器控制台日志（事件类型选 <b>server.log_line</b>）。<br>BDS 的原生输出不进插件，只能读取 <code>logs/latest.log</code>；面板日志和它是两回事。<br>日志的级别（<code>[Server/ERROR]</code> 里的 ERROR）放在独立字段里，用规则的 <b>条件过滤</b> 选 <code>level</code> 即可，不需要写转义正则。<br><br><b>只跟新增行</b>：关闭后会把历史日志整段重放一遍，一开启可能刷屏几百条 —— 仅在排障时临时用。" role="button" tabindex="0">?</span></h4>
             <div class="row">
                 <label><input type="checkbox" id="regex-log-enabled"> 启用日志采集</label>
                 <label><input type="checkbox" id="regex-log-start-end"> 只跟新增行（推荐）</label>
             </div>
-            <p class="hint">
-                关闭「只跟新增行」会把历史日志整段重放一遍，一开启可能刷屏几百条 ——
-                仅在排障时临时用。
-            </p>
         </div>
 
         <div class="card mb">
@@ -434,14 +524,14 @@
             </div>
             <div class="row mt">
                 <label>测试文本</label><input id="regex-test-text" placeholder="查服" style="width:280px">
-                <button onclick="regexTest()">▶ 测试</button>
+                <button onclick="regexTest()"><i class=gm-ico data-ic=tri-r></i> 测试</button>
             </div>
             <pre id="regex-test-result" class="hint"></pre>
         </div>
     </div>
 
     <div class="section" id="sec-cross">
-        <h2>🔗 跨服互联 <button onclick="loadCross()">🔄 刷新</button> <span id="cross-status-badge" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=link></i> 跨服互联<span class="help-q" data-help="让多台服务器之间转发聊天与玩家数据。<br>一台设为<b>主服务器</b>，其余填主服地址作为<b>副服务器</b>；主副服连接密码必须一致。<br>互通内容可单独开关（聊天 / 玩家数据 / 白名单）。" role="button" tabindex="0">?</span> <button onclick="loadCross()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="cross-status-badge" class="status"></span></h2>
         <div class="grid-2">
             <div class="col">
                 <h3>主从角色设置</h3>
@@ -477,17 +567,16 @@
                     <input type="password" id="cross-password" placeholder="输入连接密码" class="block-input">
                 </div>
                 <div class="mt-sm hidden" id="cross-row-master">
-                    <label class="hint">主服地址（填写主服务器的 web UI 连接网址，例如 http://192.168.1.10:8080）</label>
+                    <label class="hint">主服地址<span class="help-q" data-help="填主服务器的 Web UI 连接网址，例如 <code>http://192.168.1.10:8080</code> —— 就是你在主服务器上用浏览器打开管理后台时，地址栏里的那个网址。" role="button" tabindex="0">?</span></label>
                     <input type="text" id="cross-master-url" placeholder="http://host:port" class="block-input">
-                    <div class="hint-sm mt-xs">就是「你在主服务器上用浏览器打开管理后台时，地址栏里的那个网址」。</div>
                 </div>
                 <div class="mt-sm hidden" id="cross-row-sync">
                     <label class="hint">同步间隔（秒，副服轮询主服的频率）</label>
                     <input type="number" id="cross-sync" min="3" value="8" class="w-140">
                 </div>
                 <div class="row mt" id="cross-row-actions">
-                    <button class="ok" onclick="saveCross()">💾 保存跨服设置</button>
-                    <button id="cross-test-btn" class="hidden" onclick="testCross()">🧪 测试连接</button>
+                    <button class="ok" onclick="saveCross()"><i class=gm-ico data-ic=disk></i> 保存跨服设置</button>
+                    <button id="cross-test-btn" class="hidden" onclick="testCross()"><i class=gm-ico data-ic=flask></i> 测试连接</button>
                     <span id="cross-save-status" class="status"></span>
                 </div>
             </div>
@@ -498,14 +587,14 @@
                 <label class="ios status"><input type="checkbox" id="cross-it-wl"><i></i> 白名单同步</label>
                 <label class="ios status"><input type="checkbox" id="cross-it-ban"><i></i> 封禁同步</label>
 
-                <h3 class="mt">🧪 实验板</h3>
+                <h3 class="mt"><i class=gm-ico data-ic=flask></i> 实验板<span class="help-q" data-help="<b>默认关闭</b>，保持原版行为。<br><br><b>开启后额外同步</b>：<br>· 疾跑 / 潜行 / 飞行状态；<br>· 药水效果（buff / debuff）；<br>并启用<b>掉线保护</b>（玩家掉线后短时间内重连，背包与状态不会丢）与<b>收纳袋诊断</b>。<br><br><b>原理与风险</b>：这些状态原版协议不会跨服传递，本功能通过<b>拦截并解析网络封包</b>补齐。不同服务端 / 客户端版本封包结构可能变化，出现掉线、状态错乱、物品异常时请<b>先关闭本开关</b>并反馈。<br><br><b>建议</b>：先在测试服验证，再在主服开启；主副服的插件版本应保持一致。" role="button" tabindex="0">?</span></h3>
                 <label class="ios status"><input type="checkbox" id="cross-experimental"><i></i> 启用实验功能</label>
                 <div class="hint-sm mt-xs" id="cross-exp-hint">
                     默认关闭（原版行为）。开启后额外同步：<b>疾跑/潜行/飞行状态</b>、
                     <b>药水效果（buff/debuff）</b>，并启用<b>掉线保护</b>与收纳袋诊断。
                 </div>
                 <div class="hint-sm mt-xs text-warn" id="cross-exp-warn">
-                    ⚠ 实验功能通过拦截网络封包实现，若出现异常请关闭本开关并反馈。
+                    <i class=gm-ico data-ic=warn></i> 实验功能通过拦截网络封包实现，若出现异常请关闭本开关并反馈。
                 </div>
                 <h3 class="mt">运行状态</h3>
                 <div id="cross-status-box" class="mt-xs"><p class="hint">尚未加载</p></div>
@@ -514,7 +603,7 @@
     </div>
 
     <div class="section" id="sec-backup">
-        <h2>📦 自动备份 <button onclick="loadToolsConfig()">🔄 刷新</button> <span id="backup-state-badge" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=box></i> 自动备份<span class="help-q" data-help="按设定间隔自动打包世界与配置，并只保留最近若干份，避免占满磁盘。<br>下方列出已生成的备份，可下载或删除。<br>备份源留空时自动备份当前运行的世界。" role="button" tabindex="0">?</span> <button onclick="loadToolsConfig()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="backup-state-badge" class="status"></span></h2>
         <div class="mb-sm" id="backup-state-box"></div>
         <div class="grid-2">
             <div class="col">
@@ -533,8 +622,8 @@
                     <textarea id="backup-sources" rows="3" placeholder="留空则自动备份当前世界&#10;例如：world&#10;world_nether&#10;permissions.json"></textarea>
                 </div>
                 <div class="mt-sm">
-                    <button class="ok" onclick="saveToolsConfig()">💾 保存备份设置</button>
-                    <button onclick="triggerBackup()">▶️ 立即备份</button>
+                    <button class="ok" onclick="saveToolsConfig()"><i class=gm-ico data-ic=disk></i> 保存备份设置</button>
+                    <button onclick="triggerBackup()"><i class=gm-ico data-ic=tri-r></i> 立即备份</button>
                     <span id="backup-save-status" class="status ml-sm"></span>
                 </div>
             </div>
@@ -546,7 +635,7 @@
     </div>
 
     <div class="section" id="sec-cloud">
-        <h2>☁️ 云黑名单 (UniteBan) <button onclick="loadToolsConfig()">🔄 刷新</button> <span id="cloud-state-badge" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=cloud></i> 云黑名单 (UniteBan)<span class="help-q" data-help="接入云端黑名单：玩家进服自动查黑，本地封禁可同步上报。<br>需要填写云黑服务地址与 Key；只读 Key 只能查、不能封。<br>所有请求在后台线程执行，不阻塞服务器。" role="button" tabindex="0">?</span> <button onclick="loadToolsConfig()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="cloud-state-badge" class="status"></span></h2>
         <div class="grid-2">
             <div class="col">
                 <h3>接入设置</h3>
@@ -578,18 +667,18 @@
                     <input type="text" id="cloud-kick-message" placeholder="§c你在云黑名单中">
                 </div>
                 <div class="mt-sm">
-                    <button class="ok" onclick="saveToolsConfig()">💾 保存云黑设置</button>
-                    <button onclick="testCloud()">🧪 测试连接</button>
+                    <button class="ok" onclick="saveToolsConfig()"><i class=gm-ico data-ic=disk></i> 保存云黑设置</button>
+                    <button onclick="testCloud()"><i class=gm-ico data-ic=flask></i> 测试连接</button>
                     <span id="cloud-save-status" class="status ml-sm"></span>
                 </div>
             </div>
             <div class="col">
                 <h3>接入状态<span class="help-q" data-help="「接口协议」与「身份」由测试连接时探测得出。<br>只读 Key 只能查黑，不能封禁/解封 —— 若这里显示只读，请换成管理员 Token。" role="button" tabindex="0">?</span>
-                    <button class="ml-sm" onclick="testCloud()">🔍 检测</button>
+                    <button class="ml-sm" onclick="testCloud()"><i class=gm-ico data-ic=search></i> 检测</button>
                 </h3>
-                <div id="cloud-status-card" class="card"><p class="hint">尚未检测。点「🧪 测试连接」获取状态。</p></div>
+                <div id="cloud-status-card" class="card"><p class="hint">尚未检测。点「<i class=gm-ico data-ic=flask></i> 测试连接」获取状态。</p></div>
 
-                <h3 class="mt">云黑总览 <button class="ml-sm" onclick="loadCloudStats()">🔄 刷新</button>
+                <h3 class="mt">云黑总览 <button class="ml-sm" onclick="loadCloudStats()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
                     <span id="cloud-stats-status" class="status"></span></h3>
                 <div id="cloud-stats-box"><p class="hint">尚未加载</p></div>
 
@@ -597,11 +686,11 @@
                 <div class="row mt-sm">
                     <input type="text" id="cloud-lookup-xuid" placeholder="XUID" class="max-w-210">
                     <input type="text" id="cloud-lookup-ip" placeholder="IP（可选）" class="max-w-140">
-                    <button onclick="cloudLookup()">🔎 查询</button>
+                    <button onclick="cloudLookup()"><i class=gm-ico data-ic=search></i> 查询</button>
                 </div>
                 <div id="cloud-lookup-result" class="hint-sm mt-xs"></div>
 
-                <h3 class="mt">云黑明细 <button class="ml-sm" onclick="loadCloudBans()">🔄 刷新</button>
+                <h3 class="mt">云黑明细 <button class="ml-sm" onclick="loadCloudBans()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
                     <span id="cloud-bans-status" class="status"></span></h3>
                 <div class="scroll-box">
                     <table><thead><tr>
@@ -615,10 +704,10 @@
     </div>
 
     <div class="section" id="sec-gametools">
-        <h2>🎁 签到与绑定 <button onclick="loadGameTools()">🔄 刷新</button> <span id="gametools-status" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=gift></i> 签到与绑定<span class="help-q" data-help="玩家在 QQ 群发送触发指令完成签到，奖励记入延迟任务、上线时自动发放。<br>账号绑定：玩家进服会拿到绑定码，在群里发送即完成 <b>MC ↔ QQ</b> 绑定（仅启动 QQ 网关时生效）。" role="button" tabindex="0">?</span> <button onclick="loadGameTools()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="gametools-status" class="status"></span></h2>
         <div class="grid-2">
             <div class="col">
-                <h3>账号绑定（MC ↔ QQ）<span class="help-q" data-help="玩家进服后游戏内会提示一个绑定码；玩家到 QQ 群里发送该码即可完成绑定。<br><b>仅启动 QQ 机器人网关时生效。</b>" role="button" tabindex="0">?</span></h3>
+                <h3>账号绑定（MC <i class=gm-ico data-ic=arrow-lr></i> QQ）<span class="help-q" data-help="玩家进服后游戏内会提示一个绑定码；玩家到 QQ 群里发送该码即可完成绑定。<br><b>仅启动 QQ 机器人网关时生效。</b>" role="button" tabindex="0">?</span></h3>
                 <label class="ios status"><input type="checkbox" id="bind-enabled"><i></i> 启用绑定</label>
                 <label class="ios status"><input type="checkbox" id="bind-require"><i></i> 进服时提示绑定码</label>
                 <div class="row mt-sm">
@@ -644,7 +733,7 @@
                 </div>
                 
                 <div class="mt-sm">
-                    <button class="ok" onclick="saveGameTools()">💾 保存设置</button>
+                    <button class="ok" onclick="saveGameTools()"><i class=gm-ico data-ic=disk></i> 保存设置</button>
                     <span id="gametools-save-status" class="status ml-sm"></span>
                 </div>
                 <h3 class="mt">今日待发放奖励（延迟任务 <span id="delayed-count">0</span>）</h3>
@@ -656,18 +745,14 @@
     </div>
 
     <div class="section" id="sec-trust">
-        <h2>🛡️ 玩家可信度
-            <button onclick="loadTrust()">🔄 刷新</button>
-            <button onclick="trustRecalc()">⚙️ 立即结算</button>
-            <button onclick="trustExport()">📤 导出</button>
-            <button class="danger" onclick="trustClear()">🗑️ 清空</button>
+        <h2><i class=gm-ico data-ic=shield></i> 玩家可信度<span class="help-q" data-help="用加权方式给玩家算「可信度」。判定依据是<b>设备指纹</b>（客户端自报的持久设备 ID），<b>与 IP 无关</b> —— 换 Wi-Fi、开移动流量跑到外省都不会被当成新设备。" role="button" tabindex="0">?</span>
+            <button onclick="loadTrust()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
+            <button onclick="trustRecalc()"><i class=gm-ico data-ic=gear></i> 立即结算</button>
+            <button onclick="trustExport()"><i class=gm-ico data-ic=upload></i> 导出</button>
+            <button class="danger" onclick="trustClear()"><i class=gm-ico data-ic=trash></i> 清空</button>
             <span id="trust-status" class="status"></span>
         </h2>
 
-        <p class="hint">
-            用加权方式给玩家算「可信度」。判定依据是<b>设备指纹</b>（客户端自报的持久设备 ID），
-            <b>与 IP 无关</b> —— 换 Wi-Fi、开移动流量跑到外省都不会被当成新设备。
-        </p>
 
         <div class="grid-2">
             <div class="col">
@@ -686,7 +771,7 @@
                 <h3 class="mt">权限组联动<span class="help-q" data-help="达到分数后自动给玩家套上对应权限组。<br><b>本系统永远不会给予或剥夺 OP 权限。</b><br>权限组名必须与服务器权限配置里的组名一致，否则不生效。" role="button" tabindex="0">?</span></h3>
                 <label class="ios status"><input type="checkbox" id="trust-perm-enabled"><i></i> 启用权限组联动（默认关闭）</label>
                 <div id="trust-tiers-box" class="mt-sm"></div>
-                <button class="mini mt-sm" onclick="trustAddTier()">➕ 添加档位</button>
+                <button class="mini mt-sm" onclick="trustAddTier()"><i class=gm-ico data-ic=plus></i> 添加档位</button>
 
                 <h3 class="mt">数据位置</h3>
                 <div class="hint mono" id="trust-dirs"></div>
@@ -721,7 +806,7 @@
                 <div class="row"><label class="hint w-190">历史保留条数</label><input type="number" id="trust-history-limit" step="1" class="w-90"></div>
 
                 <div class="mt-sm">
-                    <button class="ok" onclick="saveTrust()">💾 保存设置</button>
+                    <button class="ok" onclick="saveTrust()"><i class=gm-ico data-ic=disk></i> 保存设置</button>
                     <span id="trust-save-status" class="status ml-sm"></span>
                 </div>
             </div>
@@ -732,8 +817,8 @@
         </h3>
         <div class="row mb-sm">
             <input type="text" id="trust-search" placeholder="按玩家名/标识搜索" class="w-230">
-            <button class="mini" onclick="loadTrust()">🔍 搜索</button>
-            <label class="hint ml-sm">列表按分数从高到低排列；标黄的是降级档案（无 xuid，改名会重置权重）</label>
+            <button class="mini" onclick="loadTrust()"><i class=gm-ico data-ic=search></i> 搜索</button>
+            <label class="hint ml-sm">排序<span class="help-q" data-help="列表按分数从高到低排列；标黄的是降级档案（无 xuid，改名会重置权重）。" role="button" tabindex="0">?</span></label>
         </div>
         <div id="trust-list-box" class="scroll-box tall"><p class="hint">尚未加载</p></div>
 
@@ -741,9 +826,9 @@
     </div>
 
     <div class="section hidden" id="sec-ai">
-        <h2>🧠 AI 自动管理
-            <span class="help-q" data-help="用<b>你自己的</b> LLM API（OpenAI 兼容端点）分析日志、审核白名单、主动巡查。<br>插件<b>不代理</b>请求、也<b>不提供</b>模型服务 —— Key 存在本机，请求直发你填的地址。<br><b>回答质量取决于你选的模型</b>，这不是插件能保证的。<br><br><b>安全边界</b>：模型能做什么，由上面的<b>接管级别</b>决定。<br>· <b>第一/二级</b>：模型只能「建议」——危险操作一律先变成<b>待确认提议</b>，由你点确认才执行；<br>· <b>第三级</b>：模型会直接执行，但会登记<b>撤销记录</b>，窗口内可一键回滚。<br><br>★ 无论哪一级，提权、执行任意命令这类能力<b>根本没有注册为工具</b> —— 那不是靠级别拦的，是结构上不存在。" role="button" tabindex="0">?</span>
-            <button onclick="aiLoad()">🔄 刷新</button>
+        <h2><i class=gm-ico data-ic=cpu></i> AI 自动管理
+            <span class="help-q" data-help="用<b>你自己的</b> LLM API（OpenAI 兼容端点）分析日志、审核白名单、主动巡查。<br>插件<b>不代理</b>请求、也<b>不提供</b>模型服务 —— Key 存在本机，请求直发你填的地址。<br><b>回答质量取决于你选的模型</b>，这不是插件能保证的。<br><br><b>安全边界</b>：模型能做什么，由上面的<b>接管级别</b>决定。<br>· <b>第一/二级</b>：模型只能「建议」——危险操作一律先变成<b>待确认提议</b>，由你点确认才执行；<br>· <b>第三级</b>：模型会直接执行，但会登记<b>撤销记录</b>，窗口内可一键回滚。<br><br><i class=gm-ico data-ic=star></i> 无论哪一级，提权、执行任意命令这类能力<b>根本没有注册为工具</b> —— 那不是靠级别拦的，是结构上不存在。" role="button" tabindex="0">?</span>
+            <button onclick="aiLoad()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
             <span id="ai-status" class="status">尚未加载</span>
         </h2>
 
@@ -756,15 +841,14 @@
                 <h3>总开关</h3>
                 <label class="ios status"><input type="checkbox" id="ai-enabled"><i></i> 启用 AI 自动管理</label>
 
-                <h3 class="mt">接管级别<span class="help-q" data-help="决定 AI 到底能「自己动手」到什么程度。<br><br><b>第一级 · 纯建议</b>：只输出分析与建议，任何工具都不执行，也不生成待确认提议。适合刚接入、先观察几天。<br><br><b>第二级 · 白名单自动</b>（默认）：只读查询与可逆操作（踢人、封禁等）由 AI 直接执行并留审计；白名单的批准/驳回也由 AI 自动完成。危险操作（删档、改 server.properties）依然只生成待确认提议，需要你点确认。<br><br><b>第三级 · 完全放开</b>：包括删档、改服务器属性在内的所有工具都由 AI 直接执行，不再等你确认。<b class='text-warn'>执行后会登记撤销记录</b>，在「撤销窗口」内可以一键回滚；窗口一过就真的不可逆了。<br><br>★ 提权、执行任意命令这类能力<b>任何级别下都没有注册</b> —— 那不是靠级别拦的，是根本不存在。" role="button" tabindex="0">?</span></h3>
+                <h3 class="mt">接管级别<span class="help-q" data-help="决定 AI 到底能「自己动手」到什么程度。<br><br><b>第一级 · 纯建议</b>：只输出分析与建议，任何工具都不执行，也不生成待确认提议。适合刚接入、先观察几天。<br><br><b>第二级 · 白名单自动</b>（默认）：只读查询与可逆操作（踢人、封禁等）由 AI 直接执行并留审计；白名单的批准/驳回也由 AI 自动完成。危险操作（删档、改 server.properties）依然只生成待确认提议，需要你点确认。<br><br><b>第三级 · 完全放开</b>：包括删档、改服务器属性在内的所有工具都由 AI 直接执行，不再等你确认。<b class='text-warn'>执行后会登记撤销记录</b>，在「撤销窗口」内可以一键回滚；窗口一过就真的不可逆了。<br><br><i class=gm-ico data-ic=star></i> 提权、执行任意命令这类能力<b>任何级别下都没有注册</b> —— 那不是靠级别拦的，是根本不存在。" role="button" tabindex="0">?</span></h3>
                 <!-- 自定义下拉宿主：真实 <select> 已移除，内容由 gmSelect 渲染。
                      data-value 作为初始值的兜底，JS 加载后会立即接管。 -->
                 <div id="ai-autonomy" class="gmselect" data-value="1"></div>
                 <div class="hint-sm" id="ai-autonomy-hint"></div>
                 <div class="row mt-sm hidden" id="ai-undo-window-row">
-                    <label class="hint w-110">撤销窗口（秒）</label>
+                    <label class="hint w-110">撤销窗口（秒）<span class="help-q" data-help="0 ~ 600。第三级下不可逆操作执行后，你还有这么久可以回滚。" role="button" tabindex="0">?</span></label>
                     <input type="number" id="ai-undo-window" step="5" class="w-90">
-                    <span class="hint-sm">0 ~ 600。第三级下不可逆操作执行后，你还有这么久可以回滚。</span>
                 </div>
 
                 <h3 class="mt">接口配置<span class="help-q" data-help="填 OpenAI 兼容端点。带不带 /v1 都行，插件会自动补齐。<br>内网地址（127./10./192.168./169.254.）会被拒绝 —— 否则这个功能就成了访问内网的跳板。" role="button" tabindex="0">?</span></h3>
@@ -776,8 +860,8 @@
                     <span class="hint-sm">5 ~ 180</span>
                 </div>
                 <div class="row mt-sm">
-                    <button onclick="aiSave()">💾 保存配置</button>
-                    <button onclick="aiTest()">🔌 测试连接</button>
+                    <button onclick="aiSave()"><i class=gm-ico data-ic=disk></i> 保存配置</button>
+                    <button onclick="aiTest()"><i class=gm-ico data-ic=plug></i> 测试连接</button>
                     <span id="ai-test-status" class="hint-sm"></span>
                 </div>
             </div>
@@ -796,26 +880,47 @@
 
                 <h3 class="mt">手动执行</h3>
                 <div class="row">
-                    <button onclick="aiRun('log_analysis')">🔍 立即分析日志</button>
-                    <button onclick="aiRun('whitelist_review')">📋 审核白名单</button>
-                    <button onclick="aiRun('auto_manage')">🩺 立即巡查</button>
+                    <button onclick="aiRun('log_analysis')"><i class=gm-ico data-ic=search></i> 立即分析日志</button>
+                    <button onclick="aiRun('whitelist_review')"><i class=gm-ico data-ic=list></i> 审核白名单</button>
+                    <button onclick="aiRun('auto_manage')"><i class=gm-ico data-ic=steth></i> 立即巡查</button>
                 </div>
                 <div class="hint-sm" id="ai-run-status"></div>
             </div>
         </div>
 
+        <!-- AI Agent 巡检 -->
+        <div class="card mb">
+            <h3><i class=gm-ico data-ic=robot></i> AI Agent 巡检 <span class="help-q" data-help="让 AI 像 agent 一样：定时检测服务器问题（破坏集群、TPS 骤降），发现问题后做一步、核验结果、写报告发 QQ 群。<br>默认只报告不自动动手；勾选「自动处置」且 AI 接管级别为 2 时才会真正回档。" role="button" tabindex="0">?</span> <button onclick="loadAgentConfig()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h3>
+            <label class="ios status"><input type="checkbox" id="agent-enabled"><i></i> 启用定时巡检</label>
+            <label class="ios status"><input type="checkbox" id="agent-report"><i></i> 发现问题时发报告到 QQ 群</label>
+            <label class="ios status"><input type="checkbox" id="agent-autofix"><i></i> 自动处置（需 AI 接管级别=2）</label>
+            <div class="row mt-sm">
+                <label class="hint w-190">巡检间隔（分钟）</label>
+                <input type="number" id="agent-interval" step="1" class="w-90">
+            </div>
+            <div class="row mt-sm">
+                <label class="hint w-190">破坏事件阈值（单玩家）</label>
+                <input type="number" id="agent-grief" step="1" class="w-90">
+            </div>
+            <div class="row mt-sm">
+                <label class="hint w-190">TPS 报警阈值</label>
+                <input type="number" id="agent-tps" step="0.5" class="w-90">
+            </div>
+            <div class="row mt-sm"><button class="ok" onclick="saveAgentConfig()">保存</button> <span id="agent-save-status" class="hint-sm"></span></div>
+        </div>
+
         <!-- ============ 高级设置（提示词 + 聊天）============ -->
-        <h3 class="mt">⚙️ 高级设置
+        <h3 class="mt"><i class=gm-ico data-ic=gear></i> 高级设置
             <button onclick="aiToggleAdvanced()" id="ai-advanced-toggle">展开</button>
             <span class="help-q" data-help="这里能改 AI 的提示词，以及群友 @AI 聊天的参数。<br><br><b>提示词</b>：留空 = 用内置默认。<b>一旦你填了内容，就完全替换内置提示词</b>（包括里面的安全约束）。<br>内置默认是经过调校的，除非你很清楚要改什么，否则建议保持留空。改坏了也不怕 —— 点「恢复默认」即可清空、回到内置版本。<br><br><b>给群友的约束</b>：内置的聊天提示词里写死了「与你对话的是普通群友、不是管理员」。用户选择了「真·完全交给服主」，所以你<b>可以</b>把这段删掉。但请知悉：即便删掉，AI 手上依然只有只读工具、返回结果依然脱敏、发言依然限频 —— <b>能说错话 ≠ 能动手</b>。" role="button" tabindex="0">?</span>
         </h3>
         <div id="ai-advanced-box" class="hidden">
 
-            <h4>提示词<span class="help-q" data-help="两个提示词互相独立。<br><b>分析任务</b>：日志分析、白名单审核、自动巡查时用。<br><b>群聊</b>：群友 @AI 时用。<br><br>输入框里<b>预填的就是内置默认提示词</b>，方便你直接看到 AI 一开始收到的是什么。<br>· <b>保持原样不动</b> = 用内置默认（推荐）；<br>· <b>改了</b> = 完全替换，包括里面写死的安全约束；<br>· <b>点「恢复默认」</b> = 把框里内容重新填回内置默认。<br><br>★ 工具白名单 / 结果脱敏 / 发言限频是<b>代码防线</b>，不受提示词影响。" role="button" tabindex="0">?</span></h4>
+            <h4>提示词<span class="help-q" data-help="两个提示词互相独立。<br><b>分析任务</b>：日志分析、白名单审核、自动巡查时用。<br><b>群聊</b>：群友 @AI 时用。<br><br>输入框里<b>预填的就是内置默认提示词</b>，方便你直接看到 AI 一开始收到的是什么。<br>· <b>保持原样不动</b> = 用内置默认（推荐）；<br>· <b>改了</b> = 完全替换，包括里面写死的安全约束；<br>· <b>点「恢复默认」</b> = 把框里内容重新填回内置默认。<br><br><i class=gm-ico data-ic=star></i> 工具白名单 / 结果脱敏 / 发言限频是<b>代码防线</b>，不受提示词影响。" role="button" tabindex="0">?</span></h4>
             <div class="row">
                 <label class="hint w-190">分析任务提示词</label>
                 <span class="hint-sm" id="ai-prompt-tag-analysis"></span>
-                <button onclick="aiResetPrompt('ai-system-prompt-custom')">↺ 恢复默认</button>
+                <button onclick="aiResetPrompt('ai-system-prompt-custom')"><i class=gm-ico data-ic=refresh></i> 恢复默认</button>
             </div>
             <textarea id="ai-system-prompt-custom" class="ai-prompt-area" rows="8"
                       data-default-baked="1"
@@ -824,16 +929,15 @@
             <div class="row mt-sm">
                 <label class="hint w-190">群聊提示词</label>
                 <span class="hint-sm" id="ai-prompt-tag-chat"></span>
-                <button onclick="aiResetPrompt('ai-chat-system-prompt-custom')">↺ 恢复默认</button>
+                <button onclick="aiResetPrompt('ai-chat-system-prompt-custom')"><i class=gm-ico data-ic=refresh></i> 恢复默认</button>
             </div>
             <textarea id="ai-chat-system-prompt-custom" class="ai-prompt-area" rows="8"
                       data-default-baked="1"
                       placeholder="加载中…（此处会显示内置默认提示词）"></textarea>
             <div class="hint-sm text-warn" id="ai-prompt-warn"></div>
 
-            <h4 class="mt">群友 @AI 聊天<span class="help-q" data-help="这是唯一一条「外部陌生人能触达 LLM 并拿到回答」的链路，所以默认关闭。<br><br>开启后，群友在群里 @AI 即可获得回答。四道防线自动生效：<br>① 提示词写死「对方是普通群友」<br>② AI 手上<b>只有只读工具</b>（看状态、看在线玩家）<br>③ 返回结果自动脱敏（IP / 路径 / xuid / 手机号都打码）<br>④ 按人限频 + 每日上限<br><br>花的是你的额度，所以限频和上限请按自己的承受能力设置。" role="button" tabindex="0">?</span></h4>
+            <h4 class="mt">群友 @AI 聊天<span class="help-q" data-help="这是唯一一条「外部陌生人能触达 LLM 并拿到回答」的链路，所以默认关闭。<br><br>开启后，群友在群里 @AI 即可获得回答。四道防线自动生效：<br>① 提示词写死「对方是普通群友」<br>② AI 手上<b>只有只读工具</b>（看状态、看在线玩家）<br>③ 返回结果自动脱敏（IP / 路径 / xuid / 手机号都打码）<br>④ 按人限频 + 每日上限<br><br>花的是你的额度，所以限频和上限请按自己的承受能力设置。<br><br><b>默认关闭</b>：开启后群友 @AI 会真的调用你的 LLM（消耗你的额度）。" role="button" tabindex="0">?</span></h4>
             <label class="ios status"><input type="checkbox" id="ai-chat-enabled"><i></i> 允许群友 @AI 聊天</label>
-            <div class="hint-sm">默认关闭。开启后群友 @AI 会真的调用你的 LLM（消耗你的额度）。</div>
 
             <div class="grid-2 mt-sm">
                 <div class="col">
@@ -850,60 +954,73 @@
                 </div>
             </div>
 
-            <!-- 「玩家行为记录」已搬到「🧱 区块日志与恢复」板块 ——
+            <!-- 「玩家行为记录」已搬到「<i class=gm-ico data-ic=cube></i> 区块日志与恢复」板块 ——
                  它并不属于 AI，只是"被 AI 查询"的一份数据。挂在这里会让
                  服主以为"关掉 AI 就不用记了"，也让两套记录系统的配置
                  分散在两处。现在它与「方块日志」并列为记录系统，统一在
                  那个板块里配置。（配置键也已迁到 behavior_record 段。） -->
 
             <div class="mt-sm">
-                <button onclick="aiSaveAdvanced()">💾 保存高级设置</button>
+                <button onclick="aiSaveAdvanced()"><i class=gm-ico data-ic=disk></i> 保存高级设置</button>
                 <span id="ai-advanced-status" class="hint-sm"></span>
             </div>
         </div>
 
         <!-- ============ 撤销窗口 ============ -->
-        <h3 class="mt">↩️ 可撤销的操作
-            <button onclick="aiLoadUndo()">🔄 刷新</button>
+        <h3 class="mt"><i class=gm-ico data-ic=undo></i> 可撤销的操作
+            <button onclick="aiLoadUndo()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
             <span class="help-q" data-help="第三级下 AI 执行的不可逆操作（删档、改服务器属性等）会在这里留下记录 —— 这是「放开了但留后悔药」的兑现。<br><br>窗口内可以一键回滚；窗口一过就真的不可逆了。<br><b>撤不回来的操作也会列出来</b>，并说明为什么 —— 一个假的好消息比一个真的坏消息危险得多。" role="button" tabindex="0">?</span>
-            <span class="hint-sm">第三级执行不可逆操作后的后悔药，窗口内可回滚</span>
         </h3>
         <div id="ai-undo-box" class="scroll-box"><p class="hint">点「刷新」查看</p></div>
 
-        <!-- 「机器人用途分布」已移至「🤖 机器人管理」板块 —— 那是机器人自己的
+        <!-- 「机器人用途分布」已移至「<i class=gm-ico data-ic=robot></i> 机器人管理」板块 —— 那是机器人自己的
              属性，放在 AI 页让人以为要在两处配置。这里的播报按钮仍然只发给
              用途为「AI 播报」的机器人，实际归属在机器人卡片上设置。 -->
 
         <h3 class="mt">最近一次分析结果
-            <button onclick="aiBroadcast()">📢 播报到群</button>
-            <span class="help-q" data-help="AI 播报只发给用途为「AI 播报」的机器人。<br>一个都没有的话，播报会明确告诉你没地方发，而不是悄悄失败。<br>用途在「🤖 机器人管理」里给机器人卡片设置。" role="button" tabindex="0">?</span>
+            <button onclick="aiBroadcast()"><i class=gm-ico data-ic=megaphone></i> 播报到群</button>
+            <span class="help-q" data-help="AI 播报只发给用途为「AI 播报」的机器人。<br>一个都没有的话，播报会明确告诉你没地方发，而不是悄悄失败。<br>用途在「<i class=gm-ico data-ic=robot></i> 机器人管理」里给机器人卡片设置。" role="button" tabindex="0">?</span>
             <span id="ai-broadcast-status" class="hint-sm"></span>
         </h3>
         <div id="ai-last-result" class="scroll-box"><p class="hint">还没有分析结果</p></div>
 
-        <h3 class="mt">⏳ 待确认的操作提议
-            <button onclick="aiLoadAudit()">🔄 刷新</button>
-            <span class="hint-sm">这些是模型<b>想做但还没做</b>的事，只有你点确认才会执行</span>
+        <h3 class="mt"><i class=gm-ico data-ic=hourglass></i> 待确认的操作提议<span class="help-q" data-help="这些是模型<b>想做但还没做</b>的事，只有你点确认才会执行。" role="button" tabindex="0">?</span>
+            <button onclick="aiLoadAudit()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
         </h3>
         <div id="ai-audit-box" class="scroll-box tall"><p class="hint">尚未加载</p></div>
 
-        <h3 class="mt">🔧 工具权限
-            <button onclick="aiLoadTools()">🔄 加载</button>
-            <span class="help-q" data-help="决定模型能调用哪些工具。<br><br><b>开关逻辑</b>：默认全部可用；取消任意一项的勾选，就切换到<b>白名单模式</b> —— 此后只有勾上的才可用。<br><br><b>与接管级别的关系</b>：两者是 <b>AND</b>。接管级别是<b>硬闸门</b>，工具权限只在允许范围内再收窄：<br>· 第一级：任何工具都不执行，勾了也没用；<br>· 第二级：不可逆工具仍只提议，勾了也不会直接执行；<br>· 第三级：不可逆工具会直接执行（但登记在撤销窗口里）。<br><b>不可逆工具</b>：只有在第三级下才会真正执行；其余级别下勾选它只代表「允许模型提议」。" role="button" tabindex="0">?</span>
-            <span class="hint-sm">模型能调用的能力，以及各自的风险等级</span>
+        <h3 class="mt"><i class=gm-ico data-ic=wrench></i> 工具权限
+            <button onclick="aiLoadTools()"><i class=gm-ico data-ic=refresh></i> 加载</button>
+            <span class="help-q" data-help="模型能调用的能力，以及各自的风险等级。<br><br>决定模型能调用哪些工具。<br><br><b>开关逻辑</b>：默认全部可用；取消任意一项的勾选，就切换到<b>白名单模式</b> —— 此后只有勾上的才可用。<br><br><b>与接管级别的关系</b>：两者是 <b>AND</b>。接管级别是<b>硬闸门</b>，工具权限只在允许范围内再收窄：<br>· 第一级：任何工具都不执行，勾了也没用；<br>· 第二级：不可逆工具仍只提议，勾了也不会直接执行；<br>· 第三级：不可逆工具会直接执行（但登记在撤销窗口里）。<br><b>不可逆工具</b>：只有在第三级下才会真正执行；其余级别下勾选它只代表「允许模型提议」。" role="button" tabindex="0">?</span>
         </h3>
         <div id="ai-tools-box" class="scroll-box"><p class="hint">点「加载」查看</p></div>
+
+        <!-- 服主对话：面板里直接以最高权限给 AI 下指令 -->
+        <div class="card mt" id="aiweb-card">
+            <h3><i class=gm-ico data-ic=spark></i> 与 AI 对话（服主）<span class="help-q" data-help="以<b>服主（最高权限）</b>身份直接和 AI 对话，可以让它立即动手。<br><br>与群里群友 @AI 的区别：<br>· 这里<b>不受群聊开关与按人限频</b>约束；<br>· 可用<b>全部工具</b>（含回档、封禁），而群聊只有只读工具；<br>· 结果<b>不脱敏</b>，服主有权看原始坐标 / 路径 / XUID。<br><br><b>仍然生效的三道闸门</b>（任何身份都绕不过）：<br>· 全局每日额度 —— 防止面板点几下就把额度烧光；<br>· 工具权限白名单 —— 你在「工具权限」里没勾的照样不可用；<br>· 接管级别 —— 不可逆操作在级别 2 才直执行，否则只生成待确认提议。<br><br>作为快捷键：<b>回车</b>发送；<b>Shift + 回车</b>换行不发送。" role="button" tabindex="0">?</span>
+                <button onclick="aiWebClear()"><i class=gm-ico data-ic=trash></i> 清空</button></h3>
+            <div id="aiweb-log" class="scroll-box tall"></div>
+            <div class="row mt-sm">
+                <textarea id="aiweb-input" rows="2" class="flex-input"
+                          placeholder="直接下指令，例如：恢复今天下午被炸的地方"
+                          autocomplete="off" onkeydown="aiWebKey(event)"
+                          aria-label="给 AI 的指令"></textarea>
+                <button class="ok" onclick="aiWebSend()" id="aiweb-send"><i class=gm-ico data-ic=send></i> 发送</button>
+            </div>
+            <div class="row mt-sm">
+                <span id="aiweb-status" class="hint-sm"></span>
+            </div>
+        </div>
     </div>
 
     <div class="section" id="sec-mods">
-        <h2>🧩 模组管理器 <button onclick="scanMods()">🔄 刷新</button> <span id="mods-status" class="status">未扫描</span></h2>
-        <p class="hint-sm mb-sm">为避免反复遍历磁盘，本页<b>不会自动扫描</b>：上传、安装、开关包之后会自动刷新，其余时候请点「🔄 刷新」。</p>
+        <h2><i class=gm-ico data-ic=puzzle></i> 模组管理器<span class="help-q" data-help="首次打开会自动扫描一次；上传、安装、开关包之后也会自动刷新，其余时候请点「刷新」。<br>上传上限 <b>64 MB</b>，更大的包请放进页面提示的 <code>mods/inbox</code> 目录。" role="button" tabindex="0">?</span> <button onclick="scanMods()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="mods-status" class="status">未扫描</span></h2>
         <div class="grid-2">
             <div class="col">
                 <h3>上传模组（.mcaddon / .mcpack）</h3>
                 <input type="file" id="mod-file" accept=".mcaddon,.mcpack">
                 <div class="mt-sm">
-                    <button onclick="uploadMod()">📤 上传到服务器</button>
+                    <button onclick="uploadMod()"><i class=gm-ico data-ic=upload></i> 上传到服务器</button>
                     <span id="mod-upload-status" class="status ml-sm"></span>
                 </div>
                 <p class="hint-sm mt-sm mb-sm" id="mod-inbox-hint"></p>
@@ -911,7 +1028,7 @@
                 <div id="mod-library-box" class="scroll-box"><p class="hint">尚未加载</p></div>
             </div>
             <div class="col">
-                <h3>存档启用状态<span class="help-q" data-help="读取目标存档目录下的两个文件：<br>· <code>world_resource_packs.json</code> → 资源包<br>· <code>world_behavior_packs.json</code> → 行为包<br><br>开关会直接改写这两个 JSON，<b>需要重启服务器生效</b>。改写前会自动备份为 <code>.bak</code>。" role="button" tabindex="0">?</span></h3>
+                <h3>存档启用状态<span class="help-q" data-help="读取目标存档目录下的两个文件：<br>· <code>world_resource_packs.json</code> <i class=gm-ico data-ic=arrow-r></i> 资源包<br>· <code>world_behavior_packs.json</code> <i class=gm-ico data-ic=arrow-r></i> 行为包<br><br>开关会直接改写这两个 JSON，<b>需要重启服务器生效</b>。改写前会自动备份为 <code>.bak</code>。" role="button" tabindex="0">?</span></h3>
                 <div class="row mb-sm">
                     <label class="hint-sm mr-sm" for="mod-world-select">目标存档</label>
                     <select id="mod-world-select" class="block-input" onchange="scanMods({world: this.value})"></select>
@@ -926,14 +1043,14 @@
     </div>
 
     <div class="section" id="sec-gmods">
-        <h2>🔌 子插件 <button onclick="loadGmods()">🔄 刷新</button> <span id="gmods-status" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=plug></i> 子插件<span class="help-q" data-help="管理第三方子插件包（<b>.gmmod</b>）与依赖库（<b>.gmlib</b>）：导入、启用/停用、查看日志与设置。<br>子插件可以接管官网首页、管理后台，或直接跑 Python 代码。<br>导入前请确认来源可信 —— 子插件与主插件同权限运行。" role="button" tabindex="0">?</span> <button onclick="loadGmods()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="gmods-status" class="status"></span></h2>
         <p class="hint-sm mb-sm" id="gmod-page-state"></p>
         <div class="grid-2">
             <div class="col">
-                <h3>导入包（.gmmod / .gmlib）<span class="help-q" data-help="<b>.gmmod</b> 是子插件包，按 manifest.json 的 <code>type</code> 解压到不同目录：<br>· <code>index</code> → 接管官网首页<br>· <code>admin</code> → 接管管理后台<br>· <code>py</code> → 执行 <code>main/main.py</code>，可用 <code>gm</code> API<br><br><b>.gmlib</b> 是依赖库包，解出的 whl 供子插件与本插件共用。<br>加载器仅使用 Python 标准库。" role="button" tabindex="0">?</span></h3>
+                <h3>导入包（.gmmod / .gmlib）<span class="help-q" data-help="<b>.gmmod</b> 是子插件包，按 manifest.json 的 <code>type</code> 解压到不同目录：<br>· <code>index</code> <i class=gm-ico data-ic=arrow-r></i> 接管官网首页<br>· <code>admin</code> <i class=gm-ico data-ic=arrow-r></i> 接管管理后台<br>· <code>py</code> <i class=gm-ico data-ic=arrow-r></i> 执行 <code>main/main.py</code>，可用 <code>gm</code> API<br><br><b>.gmlib</b> 是依赖库包，解出的 whl 供子插件与本插件共用。<br>加载器仅使用 Python 标准库。" role="button" tabindex="0">?</span></h3>
                 <input type="file" id="gmod-file" accept=".gmmod,.gmlib">
                 <div class="mt-sm">
-                    <button onclick="uploadGmod()">📤 上传并导入</button>
+                    <button onclick="uploadGmod()"><i class=gm-ico data-ic=upload></i> 上传并导入</button>
                     <span id="gmod-upload-status" class="status ml-sm"></span>
                 </div>
                 <h3 class="mt">已入库依赖 <span id="gmod-lib-count">0</span></h3>
@@ -946,7 +1063,7 @@
         </div>
         <div id="gmod-viewer-wrap" class="mt hidden">
             <h3>包内文件 <span id="gmod-viewer-name" class="text-accent"></span>
-                <button class="ml-sm" onclick="closeGmodViewer()">✖ 关闭</button>
+                <button class="ml-sm" onclick="closeGmodViewer()"><i class=gm-ico data-ic=x></i> 关闭</button>
             </h3>
             <div class="grid-2">
                 <div class="col">
@@ -956,7 +1073,7 @@
                     <div id="gmod-file-head" class="hint-sm mb-xs"></div>
                     <textarea id="gmod-file-body" class="block-input" rows="16" spellcheck="false"></textarea>
                     <div class="mt-sm">
-                        <button class="ok" onclick="saveGmodFile()">💾 保存文件</button>
+                        <button class="ok" onclick="saveGmodFile()"><i class=gm-ico data-ic=disk></i> 保存文件</button>
                         <span id="gmod-file-status" class="status ml-sm"></span>
                     </div>
                 </div>
@@ -966,24 +1083,38 @@
         <p class="hint-sm" id="gmod-paths"></p>
     </div>
 
+    <!-- ============================================================
+         第三方插件面板（sec-ext）
+         别的 Endstone 插件经 gm.panel.register() / HTTP 远程注册 把设置项挂到这里。
+         v11 曾移除该板块的 UI（仅保留后端 /api/ext/*），此处恢复渲染，
+         让外部插件的配置界面重新可见。
+         ============================================================ -->
+    <div class="section" id="sec-ext">
+        <h2><i class=gm-ico data-ic=list></i> 第三方插件面板<span class="help-q" data-help="别的 Endstone 插件可以把自己的设置项挂进这里，服主在一个后台配置所有插件。<br>插件通过 <code>from gm import panel</code>（同进程）或 <code>POST /api/ext/register</code>（远程）注册。<br>当前账号需拥有 <code>ext</code> 权限才能查看与修改。" role="button" tabindex="0">?</span>
+            <button onclick="loadExtPanels()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
+        </h2>
+        <p class="hint">已接入 <b id="ext-panel-count">0</b> 个插件面板。没有插件接入时此板块为空属正常。</p>
+        <div id="ext-panel-list"></div>
+    </div>
+
     <div class="section" id="sec-files">
-        <h2>🗂️ 文件管理<span class="help-q" data-help="文件管理基于<b>服务器根目录</b>（即 server.properties 所在目录）。<br>删除 / 覆盖 / 移动会直接作用于服务器文件，请谨慎操作。<br>在线编辑仅支持 UTF-8 文本（≤1MB），其余文件请下载后处理。" role="button" tabindex="0">?</span> <button onclick="loadFiles()">🔄 刷新</button> <span id="files-status" class="status"></span></h2>
+        <h2><i class=gm-ico data-ic=folder></i> 文件管理<span class="help-q" data-help="文件管理基于<b>服务器根目录</b>（即 server.properties 所在目录）。<br>删除 / 覆盖 / 移动会直接作用于服务器文件，请谨慎操作。<br>在线编辑仅支持 UTF-8 文本（≤1MB），其余文件请下载后处理。" role="button" tabindex="0">?</span> <button onclick="loadFiles()"><i class=gm-ico data-ic=refresh></i> 刷新</button> <span id="files-status" class="status"></span></h2>
 
         <!-- 工具栏：导航行 + 操作行（操作按钮需先勾选文件才可用） -->
         <div class="fs-toolbar">
             <div class="row">
-                <button type="button" onclick="filesGoUp()">⬆️ 上级目录</button>
-                <button type="button" onclick="filesNewFolder()">📁 新建文件夹</button>
-                <label class="file-btn">📤 选择文件上传<input type="file" id="files-upload" multiple class="hidden" onchange="filesUpload()"></label>
+                <button type="button" onclick="filesGoUp()"><i class=gm-ico data-ic=arrow-u></i> 上级目录</button>
+                <button type="button" onclick="filesNewFolder()"><i class=gm-ico data-ic=folder></i> 新建文件夹</button>
+                <label class="file-btn"><i class=gm-ico data-ic=upload></i> 选择文件上传<input type="file" id="files-upload" multiple class="hidden" onchange="filesUpload()"></label>
                 <span class="fs-sel-count" id="files-sel-count">未选择</span>
             </div>
             <div class="row">
-                <button type="button" data-fs-act="view" onclick="filesApplyAction('view')" disabled>👁 查看</button>
-                <button type="button" data-fs-act="download" onclick="filesApplyAction('download')" disabled>⬇️ 下载</button>
-                <button type="button" data-fs-act="rename" onclick="filesApplyAction('rename')" disabled>✏️ 重命名</button>
-                <button type="button" data-fs-act="copy" onclick="filesApplyAction('copy')" disabled>📋 复制</button>
-                <button type="button" data-fs-act="move" onclick="filesApplyAction('move')" disabled>➡️ 移动</button>
-                <button type="button" class="danger" data-fs-act="delete" onclick="filesApplyAction('delete')" disabled>🗑 删除</button>
+                <button type="button" data-fs-act="view" onclick="filesApplyAction('view')" disabled><i class=gm-ico data-ic=eye></i> 查看</button>
+                <button type="button" data-fs-act="download" onclick="filesApplyAction('download')" disabled><i class=gm-ico data-ic=arrow-d></i> 下载</button>
+                <button type="button" data-fs-act="rename" onclick="filesApplyAction('rename')" disabled><i class=gm-ico data-ic=edit></i> 重命名</button>
+                <button type="button" data-fs-act="copy" onclick="filesApplyAction('copy')" disabled><i class=gm-ico data-ic=list></i> 复制</button>
+                <button type="button" data-fs-act="move" onclick="filesApplyAction('move')" disabled><i class=gm-ico data-ic=arrow-r></i> 移动</button>
+                <button type="button" class="danger" data-fs-act="delete" onclick="filesApplyAction('delete')" disabled><i class=gm-ico data-ic=trash></i> 删除</button>
             </div>
         </div>
 
@@ -1003,11 +1134,11 @@
                 <b id="files-editor-name" class="break text-strong"></b>
                 <span class="hint-sm" id="files-editor-path"></span>
                 <div class="spacer"></div>
-                <button class="ok" onclick="filesSaveEditor()">💾 保存</button>
-                <button onclick="filesCloseEditor()">✖ 关闭</button>
+                <span class="help-q" data-help="保存时将按 UTF-8 覆写该文件。" role="button" tabindex="0">?</span>
+                <button class="ok" onclick="filesSaveEditor()"><i class=gm-ico data-ic=disk></i> 保存</button>
+                <button onclick="filesCloseEditor()"><i class=gm-ico data-ic=x></i> 关闭</button>
             </div>
             <textarea id="files-editor-area" rows="18" spellcheck="false" aria-label="文件内容编辑器" class="mt-sm"></textarea>
-            <div class="hint-sm mt-xs">保存时将按 UTF-8 覆写该文件。</div>
         </div>
     </div>
 
@@ -1021,8 +1152,8 @@
            · 同样的接口 AI 也在用，所以人做的每一步都有据可查。
          ============================================================ -->
     <div class="section" id="sec-region">
-        <h2>🧱 区块日志与恢复<span class="help-q" data-help="记录全服方块变更，支持把某个区域<b>恢复到指定时间之前</b>。<br>回档会保留现场快照，因此在<b>撤销窗口内</b>可以反悔。<br>本板块与 AI 的回档工具共用同一套接口与限制。" role="button" tabindex="0">?</span>
-            <button onclick="regionRefresh()">🔄 刷新</button>
+        <h2><i class=gm-ico data-ic=cube></i> 区块日志与恢复<span class="help-q" data-help="记录全服方块变更，支持把某个区域<b>恢复到指定时间之前</b>。<br>回档会保留现场快照，因此在<b>撤销窗口内</b>可以反悔。<br>本板块与 AI 的回档工具共用同一套接口与限制。" role="button" tabindex="0">?</span>
+            <button onclick="regionRefresh()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
             <span id="region-status" class="status"></span></h2>
 
         <div id="region-off" class="card mt hidden">
@@ -1030,15 +1161,15 @@
             <div class="hint-sm mt-xs">开启后才会开始记录方块变更（会有持续的磁盘写入），
             并启用「把区域恢复到过去某个时刻」的能力。</div>
             <div class="row mt-sm">
-                <button class="ok" id="region-btn-enable" onclick="regionToggle(true)">▶ 开启区块记录</button>
+                <button class="ok" id="region-btn-enable" onclick="regionToggle(true)"><i class=gm-ico data-ic=tri-r></i> 开启区块记录</button>
             </div>
         </div>
 
         <!-- 设置项：只改 block_record 一节，不暴露别的分区。
-             ★ 后端在 /api/region/settings 里做了 section 白名单，
+             <i class=gm-ico data-ic=star></i> 后端在 /api/region/settings 里做了 section 白名单，
                前端即使被改也无从越权。 -->
         <details class="card mt" id="region-settings-box">
-            <summary>⚙ 区块记录设置</summary>
+            <summary><i class=gm-ico data-ic=gear></i> 区块记录设置<span class="help-q" data-help="批大小越大回档越快，但单次占用服务器主线程更久；默认 400 在多数服上是安全的。<br><br>回档按批推进，每批之间让出主线程，因此单次回档耗时与方块数、批大小都有关。" role="button" tabindex="0">?</span></summary>
 
             <!-- 记录颗粒度：0 关闭 / 1 仅破坏 / 2 破坏 + 放置 -->
             <div class="mt-sm">
@@ -1071,27 +1202,20 @@
                 <input type="number" id="region-cfg-maxrows" min="1" class="num-input">
             </div>
             <div class="row mt-sm">
-                <button class="ok" onclick="regionSaveSettings()">💾 保存设置</button>
-                <button class="danger" onclick="regionToggle(false)">⏹ 关闭区块记录</button>
+                <button class="ok" onclick="regionSaveSettings()"><i class=gm-ico data-ic=disk></i> 保存设置</button>
+                <button class="danger" onclick="regionToggle(false)"><i class=gm-ico data-ic=stop></i> 关闭区块记录</button>
                 <span class="hint-sm" id="region-cfg-msg"></span>
             </div>
-            <div class="hint-sm mt-xs">批大小越大回档越快，但单次占用服务器主线程更久；
-            默认 400 在多数服上是安全的。</div>
         </details>
 
         <!-- ═══ 玩家行为记录 ═══════════════════════════════════════════
-             原在「🧠 AI 自动管理」板块下。搬到这里是因为它**不属于 AI** ——
+             原在「<i class=gm-ico data-ic=cpu></i> AI 自动管理」板块下。搬到这里是因为它**不属于 AI** ——
              它是一份独立的数据，AI 只是它的查询者之一。两套记录系统
              （方块日志 + 玩家行为）放在同一个板块里，服主才不用记
              "哪个开关在哪个页面"。
              配置键也同步迁到了 behavior_record 段（旧位置仍兼容）。 -->
         <details class="card mt" id="region-bh-box">
-            <summary>👤 玩家行为记录（谁做了什么）</summary>
-            <div class="hint-sm mt-sm">
-                记录玩家在服务器里的行为，供服主在群里问 AI（例如「谁刚才放 TNT 了」）。
-                与上面的「方块日志」是**两套独立数据**：方块日志记"哪一格变成了什么"（给回档用），
-                这里记"谁做了什么"（给人看）。
-            </div>
+            <summary><i class=gm-ico data-ic=user></i> 玩家行为记录（谁做了什么）<span class="help-q" data-help="记录玩家在服务器里的行为，供服主在群里问 AI（例如「谁刚才放 TNT 了」）。<br>与上面的「方块日志」是<b>两套独立数据</b>：方块日志记「哪一格变成了什么」（给回档用），这里记「谁做了什么」（给人看）。<br><br>共四档：<b>仅聊天</b> → <b>聊天 + 敏感行为</b>（TNT 放置/点燃、床与重生锚爆炸、打火石、岩浆桶等）→ <b>全记录</b>（再加上进出服、方块增删、命令、死亡、传送、攻击、拾取物品、打开容器）。<br><br>记录会按<b>天数</b>和<b>条数</b>双重上限自动清理。AI 在群里回答时，精确坐标会被自动隐藏（只显示「地下」「高空」这类大范围描述）。" role="button" tabindex="0">?</span></summary>
             <div class="grid-2 mt-sm">
                 <div class="col">
                     <div class="row"><label class="hint w-190">记录档位</label>
@@ -1113,12 +1237,8 @@
                     <div class="row mt-sm"><label class="hint w-190">单次查询上限</label><input type="number" id="region-bh-query-limit" step="10" min="1" max="500" class="w-90"></div>
                 </div>
             </div>
-            <div class="hint-sm">共四档：<b>仅聊天</b> → <b>聊天 + 敏感行为</b>（TNT 放置/点燃、床与重生锚爆炸、打火石、岩浆桶等）
-                → <b>全记录</b>（再加上进出服、方块增删、命令、死亡、传送、攻击、拾取物品、打开容器）。</div>
-            <div class="hint-sm">记录会按<b>天数</b>和<b>条数</b>双重上限自动清理。AI 在群里回答时，精确坐标会被自动隐藏
-                （只显示「地下」「高空」这类大范围描述）。</div>
             <div class="row mt-sm">
-                <button class="ok" onclick="regionSaveBehavior()">💾 保存</button>
+                <button class="ok" onclick="regionSaveBehavior()"><i class=gm-ico data-ic=disk></i> 保存</button>
                 <span class="hint-sm" id="region-bh-msg"></span>
             </div>
         </details>
@@ -1143,11 +1263,23 @@
             </div>
         </div>
 
-        <h3 class="mt">回档 / 撤销</h3>
+        <h3 class="mt">回档 / 撤销<span class="help-q" data-help="先<b>预览</b>再执行：预览会告诉你会动多少个方块、主要涉及谁，<b>不会改动世界</b>。回档一旦执行，可在下方「回档会话」里撤销。<br><br>区域有三种填法：<b>中心点 + 半径</b>，或<b>对角两点</b>；维度用下拉选<b>主世界 / 下界 / 末地</b>，装了模组有自定义维度就手填（填了以手填为准）。<br>「恢复到 N 分钟之前」表示把区域内方块还原成 N 分钟前的样子。" role="button" tabindex="0">?</span></h3>
         <div class="card mt-sm">
+            <!-- 维度改成「下拉选 + 手填」两处（改进 #6）：
+                 下拉给三个内置维度（主世界 / 下界 / 末地），绝大多数服用它最省事
+                 也不会拼错；手填留给装了模组/附加包、有自定义维度的服。
+                 两者并存时**以手填为准**（见 admin.js 的 regionDim()）——
+                 否则用户填了自定义维度却一直被下拉值顶掉，等于填了没用。 -->
             <div class="row">
                 <label class="nowrap">维度</label>
-                <input type="text" id="region-dim" placeholder="overworld" class="flex-input">
+                <div class="gmselect" id="region-dim-sel" data-value="overworld"
+                     data-options='[["overworld","主世界"],["nether","下界"],["the_end","末地"]]'></div>
+                <input type="text" id="region-dim-custom"
+                       placeholder="自定义维度（留空则用左边选择）"
+                       class="flex-input" aria-label="自定义维度名称">
+            </div>
+            <div class="hint-sm" id="region-dim-hint">填了就以<b>填写</b>的为准；留空则用左侧下拉选择的维度。</div>
+            <div class="row mt-sm">
                 <label class="nowrap">中心点</label>
                 <input type="text" id="region-center" placeholder="100,64,200" class="flex-input">
                 <label class="nowrap">半径</label>
@@ -1163,19 +1295,17 @@
                 <input type="number" id="region-minutes" value="60" min="1" class="num-input">
                 <label class="nowrap">分钟之前</label>
                 <div class="spacer"></div>
-                <button onclick="regionPreview()" id="region-btn-preview">🔍 预览影响面</button>
-                <button class="danger" onclick="regionRollback()" id="region-btn-rollback">⏪ 执行回档</button>
+                <button onclick="regionPreview()" id="region-btn-preview"><i class=gm-ico data-ic=search></i> 预览影响面</button>
+                <button class="danger" onclick="regionRollback()" id="region-btn-rollback"><i class=gm-ico data-ic=rewind></i> 执行回档</button>
             </div>
-            <div class="hint-sm mt-xs">先<b>预览</b>再执行：预览会告诉你会动多少个方块、主要涉及谁，
-            不会改动世界。回档一旦执行，可在下方「回档会话」里撤销。</div>
             <div id="region-result" class="mt-sm"></div>
         </div>
 
-        <h3 class="mt">回档会话</h3>
+        <h3 class="mt">回档会话<span class="help-q" data-help="每次回档都会生成一条会话记录，包含发起者、区域、时间窗与影响的方块数。<br><b>撤销</b>会用回档前的快照把区域还原，撤销本身也会留痕。<br>面板、游戏内表单与 AI 发起的回档都会列在这里。" role="button" tabindex="0">?</span></h3>
         <div class="row mt-sm">
-            <button onclick="regionLoadSessions()">🔄 刷新会话</button>
+            <button onclick="regionLoadSessions()"><i class=gm-ico data-ic=refresh></i> 刷新会话</button>
             <div class="spacer"></div>
-            <button class="danger" onclick="regionUndoLast()">↩️ 撤销最近一次回档</button>
+            <button class="danger" onclick="regionUndoLast()"><i class=gm-ico data-ic=undo></i> 撤销最近一次回档</button>
         </div>
         <div class="table-wrap mt-sm">
             <table>
@@ -1190,24 +1320,9 @@
          别的插件把设置项挂到这里，用户就能在一个后台里配所有插件。
          这个板块默认是空的，只有真有插件接入时才显示。
          ============================================================ -->
-    <div class="section hidden" id="sec-ext">
-        <h2>🧩 插件面板<span class="help-q" data-help="其它插件可以把自己的设置项挂到这里，集中配置。<br>一个插件都没接入时，这个板块不会出现。" role="button" tabindex="0">?</span>
-            <button onclick="extLoadPanels()">🔄 刷新</button>
-            <span id="ext-status" class="status"></span></h2>
-        <div id="ext-empty" class="hint-sm mt hidden">
-            当前没有插件接入面板。插件作者可以在 <code>setup()</code> 里调用
-            <code>register_panel(...)</code>，或经 HTTP <code>/api/ext/register</code> 远程注册。
-        </div>
-        <div class="ext-layout mt">
-            <div class="ext-list" id="ext-list"></div>
-            <div class="ext-body" id="ext-body">
-                <p class="empty">从左侧选择一个插件</p>
-            </div>
-        </div>
-    </div>
 
     <div class="section" id="sec-account">
-        <h2>🔑 账户与安全 <button onclick="loadAccount()">🔄 刷新</button></h2>
+        <h2><i class=gm-ico data-ic=key></i> 账户与安全<span class="help-q" data-help="管理面板登录账号密码、临时账户（限权限、限时长）、界面配色与测试模式。<br>临时账户<b>不受</b>主账号密码影响，单独生效。<br>测试模式会开放 <code>hualvyue</code> 动态密码登录，属于绕过管理员密码的通道，<b>用完请立刻关闭</b>。" role="button" tabindex="0">?</span> <button onclick="loadAccount()"><i class=gm-ico data-ic=refresh></i> 刷新</button></h2>
         <div class="grid-2">
             <div class="col">
                 <h3>面板登录账号 / 密码<span class="help-q" data-help="设置后访问管理面板需通过该账号 + 密码（HTTP Basic 认证）。临时账户不受此账号影响，单独生效。" role="button" tabindex="0">?</span></h3>
@@ -1218,13 +1333,12 @@
                 </div>
                 <div class="row mt">
                     <label class="ios status"><input type="checkbox" id="acc-test-mode" onchange="saveTestMode(this.checked)"><i></i> 测试模式</label>
-                    <span class="hint-sm">允许 <code>hualvyue</code> 动态密码登录（<b>默认关闭</b>）</span>
                     <span class="help-q" data-help="开启后可用 <code>hualvyue</code> 动态密码直接登录为管理员 —— 这是一条<b>绕过管理员密码</b>的路径，因此<b>默认关闭</b>。<br>仅在你需要进去调试、又拿不到管理员密码时临时打开；用完请立刻关闭，并建议顺手改一次管理员密码。<br><b>保持关闭是安全的默认状态。</b>" role="button" tabindex="0">?</span>
                 </div>
                 <div class="mt-xs"><span id="tm-status" class="status"></span></div>
                 <div class="mt-xs"><span id="acc-save-status" class="status"></span></div>
 
-                <h3 class="mt">🛡 安全系统 IP 白名单<span class="help-q" data-help="开启后，<b>官网(/)</b> 与 <b>白名单申请页(/whitelist)</b> 仅允许下列 IP / CIDR 访问。<br>管理员面板与跨服 API 不受此限制（依赖登录密码）。" role="button" tabindex="0">?</span></h3>
+                <h3 class="mt"><i class=gm-ico data-ic=shield></i> 安全系统 IP 白名单<span class="help-q" data-help="开启后，<b>官网(/)</b> 与 <b>白名单申请页(/whitelist)</b> 仅允许下列 IP / CIDR 访问。<br>管理员面板与跨服 API 不受此限制（依赖登录密码）。" role="button" tabindex="0">?</span></h3>
                 <div class="row mt-sm">
                     <label class="ios status"><input type="checkbox" id="secwl-enabled"><i></i> 启用安全白名单</label>
                 </div>
@@ -1232,18 +1346,18 @@
                     <textarea id="secwl-ips" rows="3" placeholder="每行一个 IP 或网段，例如：192.168.1.10 或 10.0.0.0/8" class="block-input mono min-h-80"></textarea>
                 </div>
                 <div class="mt-sm">
-                    <button class="ok" onclick="saveSecurityWl()">💾 保存安全白名单</button>
+                    <button class="ok" onclick="saveSecurityWl()"><i class=gm-ico data-ic=disk></i> 保存安全白名单</button>
                     <span id="secwl-status" class="status"></span>
                 </div>
 
-                <h3 class="mt">🎨 外观</h3>
+                <h3 class="mt"><i class=gm-ico data-ic=palette></i> 外观</h3>
                 <div class="setting-row">
                     <span class="setting-txt">界面配色</span>
-                    <button class="theme-toggle" type="button" id="theme-toggle" onclick="gmToggleTheme()" aria-label="切换深浅主题">🌙 深色</button>
+                    <button class="theme-toggle" type="button" id="theme-toggle" onclick="gmToggleTheme()" aria-label="切换深浅主题"><i class=gm-ico data-ic=moon></i> 深色</button>
                 </div>
             </div>
             <div class="col">
-                <h3>🕑 临时账户<span class="help-q" data-help="生成随机账号密码，可设置有效期与可访问板块，随时可撤销。<br><b>密码仅在创建时展示一次</b>，请立即保存。" role="button" tabindex="0">?</span></h3>
+                <h3><i class=gm-ico data-ic=clock></i> 临时账户<span class="help-q" data-help="生成随机账号密码，可设置有效期与可访问板块，随时可撤销。<br><b>密码仅在创建时展示一次</b>，请立即保存。" role="button" tabindex="0">?</span></h3>
                 <div class="row mt-sm">
                     <span class="hint">有效期：</span>
                     <input type="number" id="tmp-days" value="1" min="0" class="w-70" title="天数">
@@ -1253,7 +1367,7 @@
                 </div>
                 <div class="mt-sm" id="tmp-scopes">加载中…</div>
                 <div class="row mt-sm">
-                    <button class="ok" onclick="createTempAccount()">🎲 生成临时账户</button>
+                    <button class="ok" onclick="createTempAccount()"><i class=gm-ico data-ic=dice></i> 生成临时账户</button>
                     <span id="tmp-create-status" class="status"></span>
                 </div>
                 <div id="tmp-result" class="hidden callout-ok mt-sm"></div>
@@ -1264,34 +1378,33 @@
             </div>
         </div>
 
-        <!-- ─── 📖 内置文档与条款 ───────────────────────────────────
+        <!-- ─── <i class=gm-ico data-ic=book></i> 内置文档与条款 ───────────────────────────────────
              文档正文按需从 /api/docs 拉取（内联进 HTML 会把它撑到几百 KB），
              按钮清单由 JS 渲染 —— 以后加新文档不用再动这里。 -->
-        <h3 class="mt">📖 开发文档与使用条款
-            <span class="help-q" data-help="面板内置的<b>离线</b>文档，点开即看，无需外网。<br>· <b>接入 WebUI 指南</b>：第三方插件怎么把设置面板挂进来<br>· <b>子插件 API</b>：gm 模块的能力、权限与示例<br>· <b>使用须知与条款</b>：区块回档 / AI 接管级别的风险说明与免责条款" role="button" tabindex="0">?</span>
-            <button onclick="loadDocs()">🔄 刷新</button>
+        <h3 class="mt"><i class=gm-ico data-ic=book></i> 开发文档与使用条款
+            <span class="help-q" data-help="装了子插件、或想让别人接进面板？先看这两份。要动区块回档或开 AI 前，请先读条款。<br><br>面板内置的<b>离线</b>文档，点开即看，无需外网。<br>· <b>接入 WebUI 指南</b>：第三方插件怎么把设置面板挂进来<br>· <b>子插件 API</b>：gm 模块的能力、权限与示例<br>· <b>使用须知与条款</b>：区块回档 / AI 接管级别的风险说明与免责条款" role="button" tabindex="0">?</span>
+            <button onclick="loadDocs()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
         </h3>
-        <div class="hint mb">装了子插件、或想让别人接进面板？先看这两份。要动区块回档或开 AI 前，请先读条款。</div>
         <div id="docs-buttons" class="row mt-sm"><span class="hint">加载中…</span></div>
         <div id="docs-status" class="status mt-xs"></div>
 
-        <!-- ↓↓↓ 原独立板块「🩺 诊断」已并入本页。
-             保留原有全部元素 ID，JS 逻辑无需改动。 ↓↓↓ -->
+        <!-- <i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i> 原独立板块「<i class=gm-ico data-ic=steth></i> 诊断」已并入本页。
+             保留原有全部元素 ID，JS 逻辑无需改动。 <i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i><i class=gm-ico data-ic=arrow-d></i> -->
 
-        <h3 class="mt">🩺 诊断
+        <h3 class="mt"><i class=gm-ico data-ic=steth></i> 诊断
             <span class="help-q" data-help="用于定位「主线程任务执行超时」。<br>若 <b>tick间隔(tick_gap_ms)</b> 长期明显大于 50ms，说明服务器主线程被拖慢或卡住。<br>完整线程栈会实时打印到服务端控制台（每次超时、主线程 tick&gt;2s 时输出）。" role="button" tabindex="0">?</span>
-            <button onclick="loadDiag()">🔄 刷新</button>
+            <button onclick="loadDiag()"><i class=gm-ico data-ic=refresh></i> 刷新</button>
             <span id="diag-status" class="status"></span>
         </h3>
         <div class="mt-sm">
-            <button class="ok" onclick="dumpstacks()">🔬 立即抓取全部线程栈(去控制台看)</button>
+            <button class="ok" onclick="dumpstacks()"><i class=gm-ico data-ic=microscope></i> 立即抓取全部线程栈(去控制台看)</button>
         </div>
         <div class="row row-lg mt">
             <label class="ios text-strong"><input type="checkbox" id="diag-enabled" onchange="setDiagToggle('enabled', this.checked)"><i></i> 启用诊断功能</label>
             <label class="ios text-strong"><input type="checkbox" id="diag-detailed" onchange="setDiagToggle('detailed', this.checked)"><i></i> 详细日志（含运行日志与线程栈转储）</label>
         </div>
         <div class="mt-sm">
-            <label class="text-strong" for="diag-min-level">面板日志级别</label>
+            <label class="text-strong" for="diag-min-level">面板日志级别<span class="help-q" data-help="低于此级别的日志不再写入面板日志页，可减少刷屏。服务端 <code>latest.log</code> 始终保留完整日志，不影响事后排障。" role="button" tabindex="0">?</span></label>
             <select id="diag-min-level" onchange="setDiagMinLevel(this.value)"
                     title="只影响面板「日志」页显示的内容，不影响服务端 latest.log 落盘文件。">
                 <option value="">自动（跟随「详细日志」）</option>
@@ -1302,7 +1415,6 @@
                 <option value="error">ERROR — 仅错误及以上</option>
                 <option value="critical">CRITICAL — 仅严重错误</option>
             </select>
-            <div class="hint">低于此级别的日志不再写入面板日志页，可减少刷屏。服务端 <code>latest.log</code> 始终保留完整日志，不影响事后排障。</div>
         </div>
         <div class="mt-sm">
             <pre id="diag-box" class="code-block"></pre>

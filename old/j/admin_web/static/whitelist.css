@@ -1,0 +1,13 @@
+<style>
+        body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; display: flex; justify-content: center; padding: 30px 16px; }
+        .card { background: #16213e; padding: 28px; border-radius: 12px; max-width: 440px; width: 100%; }
+        h1 { color: #4ecca3; font-size: 1.4em; margin-top: 0; }
+        label { display: block; margin: 14px 0 4px; color: #bbb; }
+        input, textarea { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 6px; border: none; background: #0f1626; color: #eee; font-size: 15px; }
+        button { width: 100%; margin-top: 18px; padding: 12px; border-radius: 6px; border: none; background: #0f3460; color: white; font-size: 16px; cursor: pointer; }
+        button:hover { background: #1a4a7a; }
+        #status { margin-top: 14px; font-size: 14px; line-height: 1.6; }
+        .ok { color: #4ecca3; }
+        .err { color: #e94560; }
+        .hint { color: #888; font-size: 12px; margin-top: 4px; }
+    </style>

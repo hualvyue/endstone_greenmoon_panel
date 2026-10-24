@@ -24,6 +24,8 @@ import time
 import zipfile
 import tempfile
 import ipaddress
+import gzip
+import mimetypes
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -147,6 +149,46 @@ def _brand_svg_bytes() -> Optional[bytes]:
         except Exception:
             return None
     return _brand_cache
+
+
+# ------------------------------------------------------------ 页面响应缓存
+#: 页面体的 指纹 → (ETag, gzip 后的字节)。
+#: 页面是内嵌了全部 CSS/JS 的单文件（600 KB 级），不缓存的话每次刷新
+#: 都要实打实做一次 600 KB 的 sha1 + 一次压缩 —— 那笔 CPU 会直接在
+#: 面板主线程上被感知到（尤其是手机上连着面板反复刷新）。
+#: 页面只有固定的几个（login / login_error / index / whitelist / admin），
+#: 上限给到 8，超出按插入顺序淘汰最早的一个。
+_page_cache: "dict" = {}
+
+
+def _page_cache_entry(raw: bytes) -> "tuple":
+    """取（ETag, gzip 字节）。同一份页面只算一次。
+
+    ★ 指纹取「长度 + 前 1 KB 的 sha1」而不是整份 sha1：
+      整份 600 KB 的哈希每个请求都算一遍太贵，
+      而页面只要有改动，长度或开头几乎必定变化 ——
+      指纹撞车的唯一代价是"多传一次"，不会发错内容。
+    """
+    key = (len(raw), hashlib.sha1(raw[:1024]).hexdigest())
+    ent = _page_cache.get(key)
+    if ent is not None:
+        return ent
+    etag = '"' + hashlib.sha1(raw).hexdigest()[:16] + '"'
+    gz = b""
+    try:
+        # 压缩级别 6：再往上换来的体积收益很小，CPU 却要翻几倍。
+        # 面板是单进程 + 线程池，没必要为几 KB 去抢 CPU。
+        gz = gzip.compress(raw, 6)
+    except Exception:
+        gz = b""
+    ent = (etag, gz)
+    _page_cache[key] = ent
+    if len(_page_cache) > 8:
+        try:
+            _page_cache.pop(next(iter(_page_cache)))
+        except Exception:
+            pass
+    return ent
 
 
 def decode_bmp_24bit(data: bytes) -> List[List[Tuple[int, int, int]]]:
@@ -738,6 +780,9 @@ _SCOPE_EXACT: "dict[str, set]" = {
     "/api/whitelist/applications": {"whitelist"},
     "/api/whitelist/review": {"whitelist"},
     "/api/mods": {"mods"},
+    # QQ 三档分档管理 + AI Agent 巡检配置
+    "/api/qq/tiers": {"qqbot"},
+    "/api/agent/config": {"ai"},
     "/files": {"files"},
 }
 
@@ -1404,6 +1449,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_qqbot_qr_create()
             elif path == '/api/qqbot/qr/poll':
                 self._handle_api_qqbot_qr_poll(parsed.query)
+            elif path == '/api/qq/tiers':
+                self._handle_api_qq_tiers()
             elif path == '/api/qqbot/regex/rules':
                 self._handle_api_regex_rules()
             elif path == '/api/bots/list':
@@ -1444,6 +1491,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_ai_undo_list(parsed.query)
             elif path == '/api/ai/prompts':
                 self._handle_api_ai_prompts()
+            elif path == '/api/agent/config':
+                self._handle_api_agent_config()
             elif path == '/api/gmods/list':
                 self._handle_api_gmods_list()
             elif path == '/api/gmods/files':
@@ -1490,7 +1539,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             elif path == '/api/files/download':
                 self._handle_api_files_download(parsed.query)
             else:
-                self.send_error(404, "Not Found")
+                # 未命中任何内置页面 / API：尝试从 data_dir/web 提供静态文件
+                # （含子目录与目录首页）。原先这里直接 404，导致用户在 web
+                # 目录里放的文件夹（如 /文件夹名/）访问不到。
+                self._serve_web_static(path)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
             pass
         except Exception as e:
@@ -1499,6 +1551,63 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self.send_error(500, "Internal Server Error")
             except Exception:
                 pass
+
+    def _serve_web_static(self, path: str) -> None:
+        """兜底静电：从 data_dir/web 提供静态文件（含子目录与目录首页）。
+
+        仅当 do_GET 走到 else（未命中任何内置页面 / API）才调用。
+        设计要点：
+          * web_dir 是插件显式用于「对外提供 Web 内容」的目录
+            （core.py 里 mkdir 出来的 data_dir/web），不是整个 data_dir，
+            所以只在此范围内服务，避免误把配置目录暴露成可下载资源。
+          * 用 resolve() + relative_to() 做严格前缀校验，防目录穿越
+            （/foo/../../etc/passwd 这类会被拦成 404）。
+          * 目录请求尝试 index.html / index.htm；没有首页则 404，
+            不提供目录列表（避免泄露文件结构）。
+        """
+        web_dir = getattr(self.plugin, "web_dir", None)
+        if web_dir is None:
+            self.send_error(404, "Not Found")
+            return
+        try:
+            web_dir = web_dir.resolve()
+        except Exception:
+            self.send_error(404, "Not Found")
+            return
+        rel = path.lstrip("/")
+        if not rel:
+            self.send_error(404, "Not Found")
+            return
+        target = (web_dir / rel).resolve()
+        # 严格前缀校验：解析后必须仍落在 web_dir 内，否则视为穿越 → 404
+        try:
+            target.relative_to(web_dir)
+        except ValueError:
+            self.send_error(404, "Not Found")
+            return
+        try:
+            if target.is_dir():
+                for idx in ("index.html", "index.htm"):
+                    cand = (target / idx).resolve()
+                    try:
+                        cand.relative_to(web_dir)
+                    except ValueError:
+                        continue
+                    if cand.is_file():
+                        self._serve_file(cand)
+                        return
+                # 目录但无首页：不列目录，404
+                self.send_error(404, "Not Found")
+                return
+            if target.is_file():
+                self._serve_file(target)
+                return
+        except Exception as e:  # 读取/判定异常统一回落 404，不泄露内部错误
+            try:
+                self.plugin.logger.warning(f"静态文件服务异常 {path}: {e}")
+            except Exception:
+                pass
+        self.send_error(404, "Not Found")
 
     def do_POST(self):
         path0 = ""
@@ -1624,6 +1733,10 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_regex_delete(data)
             elif path == '/api/qqbot/regex/test':
                 self._handle_api_regex_test(data)
+            elif path == '/api/qq/tiers':
+                self._handle_api_qq_tiers_save(data)
+            elif path == '/api/agent/config':
+                self._handle_api_agent_config_save(data)
             elif path == '/api/bots/create':
                 self._handle_api_bots_create(data)
             elif path == '/api/bots/update':
@@ -1676,6 +1789,8 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 self._handle_api_ai_undo_rollback(data)
             elif path == '/api/ai/autonomy':
                 self._handle_api_ai_autonomy(data)
+            elif path == '/api/ai/webchat':
+                self._handle_api_ai_webchat(data)
             elif path == '/api/mod/install':
                 self._handle_api_mod_install(data)
             elif path == '/api/mod/delete':
@@ -1868,16 +1983,71 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         #   HTTP/1.1 keep-alive 下浏览器靠它判断响应体边界。缺了只能等
         #   连接关闭，表现为「面板打开慢 / 偶发白屏 / 响应串了」。
         #   页面是 utf-8，长度必须按**编码后的字节数**算，不能用字符数。
+        #
+        # ★★ 页面体是**内嵌了全部 CSS/JS 的单文件**（见 web_assets），
+        #    一页就是 600 KB 级：CSS 五十多 KB + JS 三百多 KB，全在里头。
+        #    原来它是裸发的 —— 每次打开/刷新面板都要实打实传 600 KB，
+        #    在手机网络或异地访问时就是"点一下转半天"的直接来源。
+        #    这里做两件标准的事，收益最大且不改任何画风：
+        #      ① ETag / If-None-Match → 内容没变就回 304（连响应体都不发）
+        #      ② Accept-Encoding: gzip → 压缩后只有原来的 ~1/5
+        #    页面内容由常量拼成（无 per-request 动态内容），
+        #    因此缓存是安全的 —— 前端文件一改，指纹立刻变，不会发旧页。
         try:
             raw = str(html_content).encode('utf-8')
+            etag, gz = _page_cache_entry(raw)
+            if self._client_fresh(etag):
+                self._send_not_modified(etag)
+                return
+            body = b""
+            if gz and self._accepts_gzip():
+                body, enc = gz, "gzip"
+            else:
+                body, enc = raw, None
             self.send_response(status)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(raw)))
-            self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-            self.send_header('Pragma', 'no-cache')
-            self.send_header('Expires', '0')
+            if enc:
+                self.send_header('Content-Encoding', enc)
+            self.send_header('Content-Length', str(len(body)))
+            # 有 ETag 就必须 Vary 掉压缩与否：否则中间缓存会把 gzip 版本
+            # 发给不支持的客户端，页面直接变成一坨乱码。
+            self.send_header('Vary', 'Accept-Encoding')
+            self.send_header('ETag', etag)
+            # no-cache（不是 no-store）：允许本地留副本，但每次必须来问。
+            # 于是"刷新"变成一次 304 握手，代价从 600KB 降到几百字节。
+            self.send_header('Cache-Control', 'no-cache')
             self.end_headers()
-            self.wfile.write(raw)
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
+            pass
+
+    # ---------------------------------------------------- 缓存协商辅助
+    def _accepts_gzip(self) -> bool:
+        try:
+            ae = str(self.headers.get('Accept-Encoding') or "")
+        except Exception:
+            return False
+        return 'gzip' in ae.lower()
+
+    def _client_fresh(self, etag: str) -> bool:
+        """客户端手里的副本还是最新的吗（If-None-Match）。"""
+        try:
+            inm = str(self.headers.get('If-None-Match') or "").strip()
+        except Exception:
+            return False
+        if not inm:
+            return False
+        # 可能带 W/ 前缀、也可能是 * ；只认精确匹配，宁可重发也不猜错。
+        return inm.lstrip('W/').strip('"') == etag.strip('"')
+
+    def _send_not_modified(self, etag: str):
+        try:
+            self.send_response(304)
+            self.send_header('ETag', etag)
+            self.send_header('Vary', 'Accept-Encoding')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
             pass
 
@@ -1902,15 +2072,47 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.error):
             pass
 
+    @staticmethod
+    def _guess_mime(filepath: Path) -> str:
+        """按扩展名推断 Content-Type。
+
+        内置一份 Web 静态资源常用覆盖表（带 charset），其余交给
+        stdlib mimetypes 兜底。未知类型回落到 octet-stream，浏览器会
+        触发下载而非乱解析——比猜一个错的 text/* 安全。
+        """
+        suffix = (filepath.suffix or '').lower()
+        overrides = {
+            '.html': 'text/html; charset=utf-8',
+            '.htm':  'text/html; charset=utf-8',
+            '.css':  'text/css; charset=utf-8',
+            '.js':   'application/javascript; charset=utf-8',
+            '.mjs':  'application/javascript; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.map':  'application/json; charset=utf-8',
+            '.xml':  'application/xml; charset=utf-8',
+            '.txt':  'text/plain; charset=utf-8',
+            '.csv':  'text/csv; charset=utf-8',
+            '.svg':  'image/svg+xml',
+            '.png':  'image/png',
+            '.jpg':  'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif':  'image/gif',
+            '.webp': 'image/webp',
+            '.ico':  'image/x-icon',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.ttf':  'font/ttf',
+        }
+        if suffix in overrides:
+            return overrides[suffix]
+        guessed = mimetypes.guess_type(str(filepath))[0]
+        return guessed or 'application/octet-stream'
+
     def _serve_file(self, filepath: Path):
         try:
             with open(filepath, 'rb') as f:
                 content = f.read()
-            if filepath.suffix == '.html':
-                content_type = 'text/html; charset=utf-8'
-            else:
-                content_type = 'application/octet-stream'
-            self._serve_bytes(content, content_type)
+            self._serve_bytes(content, self._guess_mime(filepath))
         except FileNotFoundError:
             self.send_error(404, "File not found")
         except IsADirectoryError:
@@ -2131,6 +2333,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.plugin._cross_push_bans()
             self.plugin._run_async_on_server_thread(self._kick_if_online, name, reason)
             if name:
+                self._link_ban_to_qq_tier(name)
                 return True, f"已封禁 {name}（在线，已按 XUID 解析）"
             return True, f"已封禁 XUID {xuid_value}（重连后可拦截）"
 
@@ -2140,7 +2343,42 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return False, f"封禁失败: {e}"
         self.plugin._cross_push_bans()
         self.plugin._run_async_on_server_thread(self._kick_if_online, target, reason)
+        self._link_ban_to_qq_tier(target)
         return True, f"已封禁 {target}"
+
+    # 封禁系统 → QQ 分档 联动：被封玩家若已绑定 QQ，自动降到最低档（沙币/熊孩）。
+    _BAN_LINK_LOWEST_TIER = "brat"
+
+    def _link_ban_to_qq_tier(self, mc_name):
+        """封禁联动：被封玩家若已绑定 QQ，则把其绑定 QQ 的档位自动设为最低（沙币/熊孩）。
+
+        仅对按玩家名/XUID 封禁生效；IP 封禁无对应 MC 账号，跳过。
+        服主不会被降档（owner 优先级最高）。
+        """
+        mc = str(mc_name or "").strip()
+        if not mc:
+            return
+        try:
+            entry = self.plugin._qq_for_mc(mc)
+        except Exception:
+            entry = None
+        if not isinstance(entry, dict):
+            return
+        qq = str(entry.get("qq") or "").strip()
+        if not qq:
+            return
+        gw = self._qq_primary_gateway()
+        if gw is None or not hasattr(gw, "set_tier"):
+            return
+        try:
+            if getattr(gw, "is_owner", None) and gw.is_owner(qq):
+                self.plugin.logger.info(f"[QQ分档] 被封玩家 {mc} 的绑定 QQ {qq} 是服主，跳过降档")
+                return
+            gw.set_tier(qq, self._BAN_LINK_LOWEST_TIER)
+            self.plugin.logger.info(
+                f"[QQ分档] 玩家 {mc} 被封禁，已将绑定 QQ {qq} 档位联动设为最低（沙币/熊孩）")
+        except Exception as e:
+            self.plugin.logger.warning(f"[QQ分档] 封禁联动降档失败: {e}")
 
     def _kick_if_online(self, player_name: str, reason: str):
         if not player_name:
@@ -2519,8 +2757,11 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 new_pass = str(data.get("password", "") or "")
                 if new_pass and not (set(new_pass) == {"*"}):
                     cfg["password"] = new_pass
-                cfg["master_url"] = str(data.get("master_url", cfg.get("master_url", "")) or "").strip()
-                cfg["self_url"] = str(data.get("self_url", cfg.get("self_url", "")) or "").strip()
+                raw_master = str(data.get("master_url", cfg.get("master_url", "")) or "").strip()
+                norm_master = cross._normalize_url(raw_master)
+                cfg["master_url"] = norm_master
+                raw_self = str(data.get("self_url", cfg.get("self_url", "")) or "").strip()
+                cfg["self_url"] = cross._normalize_url(raw_self)
                 try:
                     cfg["sync_seconds"] = int(float(data.get("sync_seconds", cfg.get("sync_seconds", 8)) or 8))
                 except Exception:
@@ -2541,7 +2782,18 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 cross.save()
                 cross.stop()
                 cross.start()
-            self._send_json({"ok": True})
+            out = {"ok": True}
+            # 地址被自动纠正时明确说出来 —— 静默改写会让人以为自己填对了，
+            # 下次换服又踩同一个坑。
+            fixed = []
+            if raw_master and norm_master and raw_master.rstrip("/") != norm_master:
+                fixed.append(f"主服地址「{raw_master}」→「{norm_master}」")
+            if raw_self and cfg["self_url"] and raw_self.rstrip("/") != cfg["self_url"]:
+                fixed.append(f"本服地址「{raw_self}」→「{cfg['self_url']}」")
+            if fixed:
+                out["notice"] = ("跨服接口路径固定为 /api/cross/hub，多余的路径已去掉："
+                                 + "；".join(fixed))
+            self._send_json(out)
         except Exception as e:
             self.plugin.logger.error(f"[跨服] 保存配置失败: {e}")
             self._send_json({"error": f"保存配置失败: {e}"}, 500)
@@ -2564,7 +2816,28 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
                 return
             r = cross._hub(base, {"action": "ping", "server_name": cross.cfg.get("server_name")})
             if r is None:
-                self._send_json({"error": f"连接失败: {cross.last_error or '无响应'}"})
+                # ★ 别再把 "HTTP Error 404: Not Found" 原样甩给用户。
+                #   404 的绝大多数成因是「主服地址填错了半截」，
+                #   而这句话里既没有"地址"也没有"怎么改"，用户只能干瞪眼。
+                code = int(getattr(cross, "last_error_code", 0) or 0)
+                detail = str(cross.last_error or "无响应")
+                if code == 404:
+                    hint = ("主服在该地址下没有 /api/cross/hub。请检查："
+                            "①「主服地址」只填 http://IP:端口（不要带 /admin 之类的路径，"
+                            "多余路径会被自动去掉，但端口写错仍会连到别的服务）；"
+                            "②主服面板版本与本服一致；"
+                            "③主服已启用跨服并把自己设为「主服务器」")
+                elif code == 401:
+                    hint = "主副服的「连接密码」必须完全一致（区分大小写）"
+                elif code == 403:
+                    hint = "主服拒绝提供服务：可能未启用跨服，或被反代/防火墙拦截"
+                elif code == 0:
+                    hint = ("连不上主服：确认填的是主服**面板的 Web 端口**（不是游戏端口 19132）、"
+                            "主服 Web 服务已开启、防火墙放行该端口")
+                else:
+                    hint = f"主服返回 HTTP {code}"
+                self._send_json({"ok": False, "error": f"连接失败：{detail}",
+                                 "hint": hint, "http_code": code})
                 return
             if not r.get("ok"):
                 self._send_json({"error": r.get("error") or "连接失败"})
@@ -3315,6 +3588,40 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             self.plugin.logger.error(f"POST /api/ai/autonomy 异常: {e}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
+    def _handle_api_ai_webchat(self, data):
+        """POST /api/ai/webchat —— 面板「服主对话」。
+
+        ★ 这个端点会**同步等到 LLM 回答才返回**（几十秒级）。
+          那不是偷懒：对话框就是要拿到回答才能显示，异步那一套
+          （提交 + 轮询）放在这里只会让前端多写一堆状态机。
+          代价由两层措施兜住：
+          · 面板是 ThreadingHTTPServer，这个请求只占一个线程，
+            不会把其它请求堵住；
+          · LLM 请求本身有超时（见 client 的 timeout），
+            不会无限挂住 —— 超时会以错误返回，而不是卡死。
+
+        ★ 权限仍按 AI scope 判定（``/api/ai`` 前缀）。对话能力
+          与 AI 板块是同一个权限面，不该单独开一道口子。
+        """
+        try:
+            text = str((data or {}).get("message") or "").strip()
+            if not text:
+                self._send_json({"ok": False, "error": "消息为空"}, 400)
+                return
+            hist = (data or {}).get("history")
+            if not isinstance(hist, list):
+                hist = []
+            # 历史条数硬上限：前端怎么传都不管，后端再收一道，
+            # 否则一条 2000 轮的 history 能把上下文撑爆。
+            hist = hist[:12]
+            res = self.plugin._ai_owner_chat(text, hist)
+            ok = bool((res or {}).get("ok"))
+            res["actor"] = str(getattr(self, "_auth_user", "") or "admin")
+            self._send_json(res, 200 if ok else 400)
+        except Exception as e:
+            self.plugin.logger.error(f"POST /api/ai/webchat 异常: {e}")
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
     def _handle_api_ai_prompts(self):
         """GET /api/ai/prompts —— 内置默认提示词全文。
 
@@ -3410,8 +3717,15 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
             return
         boundary = boundary_match.group(1).encode('ascii')
         length = int(self.headers.get("Content-Length", 0))
-        if length <= 0 or length > MAX_BODY_BYTES:
-            self._send_json({"ok": False, "error": "请求体过大或非法"}, 400)
+        # ★ 这里绝不能用全局的 MAX_BODY_BYTES（1MB）：那只是 JSON 请求体的
+        #   上限，而 .mcaddon / .mcpack 动辄几 MB 到几十 MB。用错的后果是
+        #   「任何正常模组都传不上来」，前端只看到「请求体过大或非法」。
+        if length <= 0 or length > self._MOD_UPLOAD_LIMIT:
+            self._send_json({
+                "ok": False,
+                "error": (f"文件过大（上限 {self._MOD_UPLOAD_LIMIT // 1024 // 1024} MB）；"
+                          "更大的包请用文件管理器放进 mods/inbox 目录后刷新"),
+            }, 400)
             return
         body = self.rfile.read(length)
         self._body_consumed = True
@@ -3463,7 +3777,7 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
     def _handle_api_mod_install(self, data):
         fname = (data or {}).get("file", "")
-        target_type = (data or {}).get("target", "global")
+        target_type = "world" if str((data or {}).get("target", "")).strip() == "world" else "global"
         world_name = (data or {}).get("world", "")
         if not fname:
             self._send_json({"ok": False, "error": "缺少文件名"}, 400)
@@ -3471,34 +3785,51 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         pl = self.plugin
         # ★ 不能写死 _mods_dir()：手动投放到 mods/inbox/ 的文件也在库里，
         #   写死的话界面上能看到、点安装却报「文件已不存在」。
-        src, source = pl._find_mod_source(fname)
+        src, _src = pl._find_mod_source(fname)
         if src is None:
             self._send_json({"ok": False, "error": "文件已不存在（上传库与本目录都没有）"}, 400)
             return
+        # ★ 服务端也要防并发安装：前端只在**当前标签页**记了 installingMods，
+        #   两个标签页 / 两个人同时点同一个包时，会并发往同一个目标目录
+        #   copytree，并且和「装完即删源文件」互相打架（后一次读到已删除的
+        #   文件，或者把前一次刚写好的目录 rmtree 掉）。
+        install_key = os.path.basename(str(fname))
+        with self._mod_install_lock:
+            if install_key in self._mod_installing:
+                self._send_json({"ok": False, "error": "该文件正在安装中，请稍候"}, 409)
+                return
+            self._mod_installing.add(install_key)
+
         def _worker():
-            ok, msg = pl._install_mod_pack(src, target_type, world_name or None)
-            pl.logger.info(f"[模组] 安装{'成功' if ok else '失败'}: {msg}")
-            # 装完把源文件清掉，让它从「待安装」列表里消失。
-            #
-            # ★ 这里必须**两种来源一视同仁**。老代码只清 inbox：
-            #       inbox_file = src if source == "inbox" else None
-            #       if ok and inbox_file is not None: ...
-            #   而网页上传（source == "upload"）是主路径，拿到的永远是 None，
-            #   清理整段被跳过 —— 用户装完刷新，「待安装」里还是同一个包，
-            #   分不清到底装没装过。这就是本轮修复的 bug。
-            #
-            # 失败时**保留**源文件：用户修正后可以直接重试，不用重新上传。
-            # 部分成功也按失败处理（ok=False），因为还有包没装进去，
-            # 保留源文件让用户重试更安全。
-            if ok:
-                removed, note = pl._cleanup_installed_source(fname)
-                pl.logger.info(
-                    f"[模组] 清理源文件 {fname}: {'已移除' if removed else '未移除'}"
-                    f"（{note}）"
-                )
+            try:
+                ok, msg = pl._install_mod_pack(src, target_type, world_name or None)
+                pl.logger.info(f"[模组] 安装{'成功' if ok else '失败'}: {msg}")
+                # 装完把源文件清掉，让它从「待安装」列表里消失。
+                #
+                # ★ 这里必须**两种来源一视同仁**。老代码只清 inbox：
+                #       inbox_file = src if source == "inbox" else None
+                #       if ok and inbox_file is not None: ...
+                #   而网页上传（source == "upload"）是主路径，拿到的永远是 None，
+                #   清理整段被跳过 —— 用户装完刷新，「待安装」里还是同一个包，
+                #   分不清到底装没装过。这就是本轮修复的 bug。
+                #
+                # 失败时**保留**源文件：用户修正后可以直接重试，不用重新上传。
+                # 部分成功也按失败处理（ok=False），因为还有包没装进去，
+                # 保留源文件让用户重试更安全。
+                if ok:
+                    removed, note = pl._cleanup_installed_source(fname)
+                    pl.logger.info(
+                        f"[模组] 清理源文件 {fname}: {'已移除' if removed else '未移除'}"
+                        f"（{note}）"
+                    )
+            finally:
+                with self._mod_install_lock:
+                    self._mod_installing.discard(install_key)
         try:
             pl._executor.submit(_worker)
         except Exception as e:
+            with self._mod_install_lock:
+                self._mod_installing.discard(install_key)
             self._send_json({"ok": False, "error": f"提交安装失败: {e}"}, 500)
             return
         self._send_json({"ok": True, "message": "正在后台安装，完成后自动更新清单（一般数秒）"})
@@ -3515,6 +3846,14 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
 
     _FILE_READ_LIMIT = 1024 * 1024
     _FILES_UPLOAD_LIMIT = 100 * 1024 * 1024
+
+    #: 模组包上传上限。与 files 上传保持同一量级；超过它的包走 mods/inbox。
+    _MOD_UPLOAD_LIMIT = 64 * 1024 * 1024
+
+    #: 服务端级的"正在安装"集合：防多标签页 / 多人并发安装同一个包。
+    #: 前端只在自己那一页记 installingMods，管不到别的客户端。
+    _mod_install_lock = threading.Lock()
+    _mod_installing = set()
 
     _GMOD_UPLOAD_LIMIT = 64 * 1024 * 1024
     _GMOD_EXTS = (".gmmod", ".gmlib")
@@ -5886,6 +6225,101 @@ class AdminHTTPHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.plugin.logger.error(f"GET /api/qqbot/qr/create 异常: {e}")
             self._send_json({"ok": False, "error": str(e)}, 500)
+
+    # ------------------------------------------------------------------
+    # QQ 三档分档管理 + AI Agent 巡检配置
+    # ------------------------------------------------------------------
+    def _qq_primary_gateway(self):
+        """取主机器人的网关对象（带 list_tiers/set_tier/owner_openid）。"""
+        pl = self.plugin
+        gw = getattr(pl, "qq_bot", None)
+        if gw is not None and hasattr(gw, "list_tiers"):
+            return gw
+        hub = getattr(pl, "qq_hub", None)
+        if hub is not None:
+            try:
+                cid = hub.primary_card_id()
+            except Exception:
+                cid = None
+            if cid:
+                try:
+                    g = hub.gateway_by_id(cid)
+                except Exception:
+                    g = None
+                if g is not None and hasattr(g, "list_tiers"):
+                    return g
+        return None
+
+    def _handle_api_qq_tiers(self):
+        """GET /api/qq/tiers —— 返回服主 + 当前分档映射。"""
+        gw = self._qq_primary_gateway()
+        if gw is None:
+            self._send_json({"ok": False, "error": "机器人未初始化"}, 200)
+            return
+        try:
+            tiers = gw.list_tiers()
+            owner = gw.owner_openid()
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"读取分档失败：{e}"}, 200)
+            return
+        self._send_json({"ok": True, "owner": owner, "tiers": tiers})
+
+    def _handle_api_qq_tiers_save(self, data):
+        """POST /api/qq/tiers —— 设置某 openid 的档位。
+
+        body: {"openid": "...", "tier": "owner|newbie|normal|brat"}
+        """
+        gw = self._qq_primary_gateway()
+        if gw is None:
+            self._send_json({"ok": False, "error": "机器人未初始化"}, 200)
+            return
+        oid = str((data or {}).get("openid", "") or "").strip()
+        tv = str((data or {}).get("tier", "") or "").strip().lower()
+        if not oid or tv not in ("owner", "newbie", "normal", "brat"):
+            self._send_json({"ok": False, "error": "参数错误（openid/tier）"}, 200)
+            return
+        try:
+            ok = gw.set_tier(oid, tv)
+        except Exception as e:
+            self._send_json({"ok": False, "error": f"设置失败：{e}"}, 200)
+            return
+        if not ok:
+            self._send_json({"ok": False, "error": "设置失败"}, 200)
+            return
+        self._send_json({"ok": True, "owner": gw.owner_openid(),
+                         "tiers": gw.list_tiers()})
+
+    def _handle_api_agent_config(self):
+        """GET /api/agent/config —— AI Agent 巡检配置（与默认合并）。"""
+        try:
+            from .ai.agent import _DEFAULTS
+        except Exception:
+            _DEFAULTS = {"enabled": True, "check_interval_min": 10,
+                         "report_to_group": True, "auto_fix": False,
+                         "grief_event_threshold": 20, "tps_warn": 18.0}
+        raw = {}
+        try:
+            raw = self.plugin._load_config().get("agent") or {}
+        except Exception:
+            raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
+        cfg = dict(_DEFAULTS)
+        for k, v in raw.items():
+            if k in cfg:
+                cfg[k] = v
+        self._send_json({"ok": True, "config": cfg})
+
+    def _handle_api_agent_config_save(self, data):
+        """POST /api/agent/config —— 保存 Agent 巡检配置。"""
+        if not isinstance(data, dict):
+            self._send_json({"ok": False, "error": "数据格式不正确"}, 200)
+            return
+        ok, msg = self.plugin._save_agent_config(data)
+        if not ok:
+            self._send_json({"ok": False, "error": msg}, 200)
+            return
+        self._send_json({"ok": True, "message": msg or "已保存"})
 
     def _handle_api_qqbot_qr_poll(self, query=""):
         """GET /api/qqbot/qr/poll?task_id=... —— 轮询一次绑定结果。

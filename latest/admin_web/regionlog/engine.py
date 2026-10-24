@@ -64,11 +64,13 @@ WebUI（人）与 AI 工具（AI）走的是同一条路径、同一套配额与
 from __future__ import annotations
 
 import json
-import json
 import time
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .store import json_to_states, states_to_json
+
+if TYPE_CHECKING:  # 仅用于类型标注；运行时不导入，测试环境无 endstone 也能加载
+    from endstone.level import Dimension
 
 # place 语义动作：回档时恢复 replaced_* 记录的变化前方块
 _PLACE_LIKE = ("place", "liquid_flow")
@@ -279,6 +281,11 @@ class RollbackEngine:
             "tele_target": None,
             "tele_wait": 0,
             "tele_loaded": 0,
+            # 待恢复队列：区块未加载且当前无法恢复的方块。
+            # 与 "deferred" 的区别：deferred 只在**本次会话内**等传送加载；
+            # 这里落库，跨会话/跨重启存活，等区块真正被加载时补做。
+            "pending_rows": [],
+            "pending": 0,
         }
         self._active[session_id] = state
         self._emit(
@@ -330,6 +337,18 @@ class RollbackEngine:
         # 刚结束的回档其撤销快照可能仍在后台写队列：先排空再读
         if not self.host.wait_db_flush(timeout=10.0):
             return {"error": "数据库写入繁忙，请稍后再试"}
+
+        # ★ 撤销必须同时取消该会话尚未执行的"待恢复项"。
+        #   否则：回档（部分区块未加载）→ 撤销 → 几小时后有人走到那些区块
+        #   → 待恢复项被补做 → 世界又变回"回档后"，而撤销早已结束。
+        try:
+            api = getattr(self.host, "api", None)
+            if api is not None and hasattr(api, "clear_pending_session"):
+                api.clear_pending_session(int(session["id"]))
+            else:
+                self.host.submit_db("pending_clear_session", int(session["id"]))
+        except Exception:
+            pass
 
         if self._get_dimension(session["dimension"]) is None:
             return {"error": f"找不到维度 {session['dimension']}"}
@@ -536,6 +555,8 @@ class RollbackEngine:
         """
         kind = state["kind"]
         session_id = state["session_id"]
+        # 兜底：把还没移交的待恢复项落库（正常批次里已经 flush 过）
+        self._flush_pending(state)
         now = time.strftime("%H:%M:%S")
         actor = str(state.get("player") or "") or "(系统)"
         if kind == "rollback":
@@ -562,9 +583,10 @@ class RollbackEngine:
                 int(state["applied"]), int(state["failed"]), int(state.get("refixed") or 0))
             selected, total = int(state["selected"]), int(state["total"])
             tele_loaded = int(state.get("tele_loaded") or 0)
+            pending = int(state.get("pending") or 0)
 
             # ---- 全程无实际恢复：目标是"已经就是那个样子" ----
-            if applied == 0 and failed == 0 and not refixed:
+            if applied == 0 and failed == 0 and not refixed and pending == 0:
                 self.host.write_daily(
                     "rollback",
                     f"[{now}] {actor} 执行了回档（会话 #{session_id}）："
@@ -586,6 +608,8 @@ class RollbackEngine:
             extra = f"，修正 {refixed} 处批次间隙回流的液体" if refixed else ""
             if tele_loaded:
                 extra += f"，传送加载区块后处理 {tele_loaded} 个方块"
+            if pending:
+                extra += f"，{pending} 个方块待区块加载后自动恢复"
             if cleanup_scheduled:
                 extra += "，掉落物清理已排定（稍后执行）"
             self.host.write_daily(
@@ -600,10 +624,12 @@ class RollbackEngine:
                 "actor": actor, "caller": state.get("caller", "human"),
                 "summary": (
                     f"回档完成：恢复 {applied} 个方块，"
-                    f"失败 {failed} 个（处理 {selected} 条记录）"),
+                    f"失败 {failed} 个（处理 {selected} 条记录）"
+                    + (f"；另有 {pending} 个方块所在区块未加载，"
+                       f"已登记，区块被加载后会自动补做" if pending else "")),
                 "applied": applied, "failed": failed, "refixed": refixed,
                 "records_hit": total, "records_processed": selected,
-                "tele_loaded": tele_loaded,
+                "tele_loaded": tele_loaded, "pending": pending,
                 "drops_cleanup_scheduled": bool(cleanup_scheduled),
                 "undo_hint": f"如需撤销本次回档，请针对会话 #{session_id} 执行撤销",
             })
@@ -676,7 +702,12 @@ class RollbackEngine:
                     (pos[0], pos[1], pos[2], target_type, target_states)
                 )
             else:
-                state["failed"] += 1
+                # 没人在线 / 没开自动传送：不能就这样记成"失败"。
+                # 落待恢复队列，等这些区块以后被加载时补做。
+                self._queue_pending(
+                    state,
+                    [(pos[0], pos[1], pos[2], target_type, target_states)],
+                )
             return
         self._apply_target(state, block, pos, target_type, target_states)
 
@@ -751,7 +782,8 @@ class RollbackEngine:
         返回 True 表示仍在等待（本批不取新记录）。"""
         chunks = state["chunks"]
         if chunks is None:
-            state["failed"] += len(state["deferred"])
+            # 拿不到区块列表：转持久队列，等区块真正加载时补做
+            self._persist_deferred(state, state["deferred"])
             state["deferred"] = []
             return False
         rest = []
@@ -769,8 +801,9 @@ class RollbackEngine:
             return False
         p = self._get_notify(state)
         if p is None:
-            # 发起者已离线：无法传送，剩余按失败收场
-            state["failed"] += len(rest)
+            # 发起者已离线：无法传送。转入持久队列，等区块被加载时补做，
+            # 而不是把这片区域永久记成"失败"。
+            self._persist_deferred(state, rest)
             state["deferred"] = []
             state["tele_target"] = None
             return False
@@ -780,8 +813,8 @@ class RollbackEngine:
             if state["tele_wait"] > 0:
                 state["tele_wait"] -= 1
                 return True
-            # 等待超时：剩余按失败收场，回档继续
-            state["failed"] += len(rest)
+            # 等待超时：转持久队列，回档继续（后续区块加载会补做）
+            self._persist_deferred(state, rest)
             state["deferred"] = []
             state["tele_target"] = None
             return False
@@ -789,7 +822,7 @@ class RollbackEngine:
         cx = sum(c[0] for c in unloaded) // len(unloaded)
         cz = sum(c[1] for c in unloaded) // len(unloaded)
         if not self._teleport_for_load(state, p, cx, cz, rest):
-            state["failed"] += len(rest)
+            self._persist_deferred(state, rest)
             state["deferred"] = []
             state["tele_target"] = None
             return False
@@ -841,6 +874,15 @@ class RollbackEngine:
         if ty is None:
             ys = [y for _, y, _, *_ in items]
             ty = max(ys) + 2 if ys else 64
+        # ★ Location 必须在这里惰性导入：本模块在单测/打包环境里没有
+        #   endstone，顶层导入会让整个 regionlog 加载失败。原先直接写
+        #   Location(...) 却没有导入 —— NameError 被下面的 except 吞掉，
+        #   表现为「观察者传送永远失败」，区块一直加载不出来，回档卡住
+        #   却没有任何日志。这是本次静态检查抓到的真实 bug。
+        try:
+            from endstone.level import Location
+        except Exception:
+            return False
         try:
             if not p.teleport(Location(dim, tx, ty, tz)):
                 return False
@@ -1120,6 +1162,7 @@ class RollbackEngine:
             if removed <= 0:
                 return
             note = f"会话 #{session_id} 掉落物清理完成：移除 {removed} 个残留掉落物"
+            now = time.strftime("%H:%M:%S")
             self.host.write_daily(
                 "rollback",
                 f"[{now}] {note}",
@@ -1184,6 +1227,140 @@ class RollbackEngine:
         except Exception:
             return None
 
+    #: 单次区块加载最多补做多少格。一个区块理论上可有 16*16*384 格，
+    #: 一次性写完会卡 tick；超出部分会在后续 tick 自动继续。
+    _PENDING_CHUNK_BUDGET = 1024
+
+    def apply_pending_chunk(self, cx: int, cz: int,
+                            dimension: str) -> "tuple[int, bool]":
+        """区块加载后，补做登记在该区块的恢复。
+
+        返回 ``(本次处理数, 是否还有剩余)``。
+
+        ★ 这是"人不在线时回档"的兜底：回档当时区块没加载、也没人能传送
+          过去触发加载，那些方块被写进 ``pending_restore``。等以后任何玩家
+          走到这里、区块被加载时，由 ChunkLoadEvent 调到这里补做。
+        ★ 所有写入都在主线程（ChunkLoadEvent 就是主线程），与正常回档一致；
+          撤销快照仍写入**原会话**，所以事后照样能撤销这次回档。
+        """
+        if self.host._stopping:
+            return 0, False
+        dim = self._get_dimension(dimension)
+        if dim is None:
+            return 0, False
+        try:
+            rows = self.host.db.fetch_pending_restore(
+                dimension, cx, cz, limit=self._PENDING_CHUNK_BUDGET)
+        except Exception:
+            return 0, False
+        if not rows:
+            return 0, False
+
+        undo = []
+        done_ids = []
+        solid = []
+        for rid, sid, x, y, z, ttype, tstates in rows:
+            try:
+                block = dim.get_block_at(int(x), int(y), int(z))
+            except Exception:
+                block = None
+            if block is None:
+                continue          # 仍拿不到：留在队列，下次加载再试
+            try:
+                undo.append((int(sid), int(x), int(y), int(z), str(dimension),
+                             block.type,
+                             states_to_json(block.data.block_states)))
+            except Exception:
+                pass
+            liquid_or_air = (
+                ttype == "minecraft:air"
+                or "water" in ttype or "lava" in ttype
+            )
+            if liquid_or_air:
+                if self._apply(block, ttype, tstates or "{}"):
+                    done_ids.append(int(rid))
+            else:
+                # 与正常回档同一套两段式：先无物理置 air 清掉层 1 水，
+                # 下一 tick 再写实体方块，避免"方块里封着水"。
+                try:
+                    block.set_type("minecraft:air", False)
+                    solid.append((int(rid), int(x), int(y), int(z),
+                                  str(ttype), str(tstates or "{}")))
+                except Exception:
+                    continue
+        if undo:
+            try:
+                self.host.submit_db("undo_rows", undo)
+            except Exception:
+                pass
+        if done_ids:
+            try:
+                self.host.db.delete_pending_restore(done_ids)
+            except Exception:
+                pass
+        if solid:
+            self._schedule_pending_solid(dimension, solid)
+
+        applied = len(done_ids) + len(solid)
+        # 还有剩余 = 本批被预算截断，或有格子暂时拿不到
+        more = (len(rows) >= self._PENDING_CHUNK_BUDGET
+                or applied < len(rows))
+        # 大区块：本批有进展就自动续跑，不必等下一次区块加载
+        if more and applied > 0:
+            try:
+                self.host.server.scheduler.run_task(
+                    self.host.host_plugin,
+                    lambda: self.host.api.apply_pending_chunk(
+                        int(cx), int(cz), str(dimension)),
+                    delay=2,
+                )
+            except Exception:
+                pass
+        return applied, more
+
+    def _schedule_pending_solid(self, dimension: str, items) -> None:
+        """实体方块：air 之后隔几 tick 再写，清掉层 1 的水。"""
+        def work() -> None:
+            if self.host._stopping:
+                return
+            dim = self._get_dimension(dimension)
+            if dim is None:
+                return
+            done = []
+            for rid, x, y, z, ttype, tstates in items:
+                try:
+                    block = dim.get_block_at(int(x), int(y), int(z))
+                    if block is None:
+                        continue
+                    data = self.host.server.create_block_data(
+                        str(ttype), json_to_states(tstates or "{}"))
+                    block.set_data(data, True)
+                    done.append(int(rid))
+                except Exception:
+                    continue
+            if done:
+                try:
+                    self.host.db.delete_pending_restore(done)
+                except Exception:
+                    pass
+            if len(done) < len(items):
+                # 第二阶段有失败：把那些区块重新标记，等下次加载再试
+                done_set = {int(i) for i in done}
+                api = getattr(self.host, "api", None)
+                if api is not None and hasattr(api, "mark_pending_chunk"):
+                    for rid, x, y, z, _t, _s in items:
+                        if int(rid) not in done_set:
+                            try:
+                                api.mark_pending_chunk(dimension, x, z)
+                            except Exception:
+                                pass
+
+        try:
+            self.host.server.scheduler.run_task(
+                self.host.host_plugin, work, delay=3)
+        except Exception:
+            work()
+
     def _refresh_chunks(self, state: dict) -> None:
         """刷新已加载区块快照（每批一次）。API 不可用时退化为不检查。"""
         try:
@@ -1201,6 +1378,43 @@ class RollbackEngine:
         except Exception:
             return None
 
+    def _queue_pending(self, state: dict, items) -> None:
+        """把 (x, y, z, 目标类型, 目标状态) 追加到待恢复缓冲。"""
+        if not items:
+            return
+        for x, y, z, ttype, tstates in items:
+            state["pending_rows"].append((
+                state["session_id"], time.time(), state["dimension"],
+                int(x), int(y), int(z), str(ttype), str(tstates or "{}"),
+            ))
+        state["pending"] = int(state.get("pending") or 0) + len(items)
+
+    def _flush_pending(self, state: dict) -> None:
+        """把待恢复缓冲交给 API（入 FIFO 写队列 + 更新区块内存索引）。"""
+        rows = state.get("pending_rows") or []
+        if not rows:
+            return
+        try:
+            api = getattr(self.host, "api", None)
+            if api is not None and hasattr(api, "enqueue_pending_restore"):
+                api.enqueue_pending_restore(rows)
+            else:                      # 兼容旧宿主/测试桩
+                self.host.submit_db("pending_restore", rows)
+        except Exception as e:
+            try:
+                self.host.logger.warning(f"[区块日志] 登记待恢复失败: {e}")
+            except Exception:
+                pass
+            return
+        state["pending_rows"] = []
+
+    def _persist_deferred(self, state: dict, items) -> None:
+        """本次会话等不到区块加载的项 → 转持久队列并立即落库。"""
+        if not items:
+            return
+        self._queue_pending(state, items)
+        self._flush_pending(state)
+
     def _flush_batch(self, state: dict) -> None:
         """本批的会话关联与撤销快照移交后台写队列，随即释放批缓冲。"""
         ids = state["batch_ids"]
@@ -1209,6 +1423,7 @@ class RollbackEngine:
             self.host.submit_db("session_logs", (state["session_id"], ids))
         if undo:
             self.host.submit_db("undo_rows", undo)
+        self._flush_pending(state)
         state["batch_ids"] = []
         state["batch_undo"] = []
 

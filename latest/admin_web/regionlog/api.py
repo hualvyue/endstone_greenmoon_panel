@@ -83,6 +83,11 @@ ACTION_LABELS: Dict[str, str] = {
     "break": "破坏", "place": "放置", "explode": "炸毁",
     "leaves_decay": "树叶凋零", "block_grow": "方块生长",
     "block_form": "方块形成", "liquid_flow": "液体流动",
+    # 活塞推/拉造成的方块位移（actor="(活塞)"）。与 block_form 一样属于
+    # "记变化前"的动作，回档会按 block_type 把每格还原回去。
+    "block_piston": "活塞推拉",
+    # 旧版审计动作（仅历史库可能出现，保留标签以便正常显示）
+    "piston_extend": "活塞伸出", "piston_retract": "活塞收回",
 }
 
 
@@ -305,6 +310,12 @@ class _WriteQueue:
             st.finalize_session(sid, applied)
         elif kind == "finalize_undo":
             st.finalize_undo(payload)
+        elif kind == "pending_restore":
+            # 区块未加载的恢复项：先落库，等 ChunkLoadEvent 补做
+            st.enqueue_pending_restore(payload)
+        elif kind == "pending_clear_session":
+            # 撤销回档时取消该会话尚未执行的待恢复项
+            st.delete_pending_restore_for_session(int(payload))
 
 
 class RegionAPI:
@@ -334,6 +345,13 @@ class RegionAPI:
         self._pending: List[dict] = []
         self._pending_ev: List[dict] = []
         self._pending_lock = threading.Lock()
+
+        # 待恢复队列的内存索引。ChunkLoadEvent 每个区块都会触发，
+        # 不能在那里查库；命中集合才走数据库。首次使用时加载一次。
+        self._restore_lock = threading.Lock()
+        self._restore_chunks: set = set()
+        self._restore_count = 0
+        self._restore_loaded = False
 
     # ------------------------------------------------------------------
     # 引擎惰性装配
@@ -414,6 +432,16 @@ class RegionAPI:
         "break": 1,
         "explode": 1,
         "place": 2,
+        # 2026-05 修复（P0 Bug #2）：自然生成的方块（岩浆/水生成的石头、
+        # 冰、黑曜石）原本完全不被记录，导致这类覆盖无法回档。把它放到
+        # 最低档（与 break 同级），只要区块记录开着（level>=1）就记，
+        # 让"被生成的石头/冰埋掉的东西"也能回档还原。
+        "block_form": 1,
+        # 2026-05 修复（P0 Bug #2）：活塞推/拉的方块位移。事件触发时按
+        # direction 逐格快照"移动前"的方块，回档按 block_type 还原即可
+        # 精确撤销。同样放在最低档：它属于"破坏/变化"这一类，而不是
+        # 玩家主动放置。
+        "block_piston": 1,
     }
 
     def record_block(self, *, actor: str, action: str, block_type: str,
@@ -482,6 +510,125 @@ class RegionAPI:
 
     def wait_write_flush(self, timeout: float = 10.0) -> bool:
         return self.writer.wait_flush(timeout)
+
+    # ------------------------------------------------------------------
+    # 待恢复队列（区块未加载 → 加载后补做）
+    # ------------------------------------------------------------------
+    def _ensure_restore_index(self) -> None:
+        """首次使用时从库里加载"哪些区块有待恢复项"的内存索引。
+
+        ★ 全程持有 ``_restore_lock``，**且 loaded 标记只在数据真正填充
+          之后才置位**。
+
+          之前的写法是"先置 loaded=True → 释放锁 → 再查库 → 回来填充"，
+          中间那几毫秒是个真实的 TOCTOU 窗口：Web 面板的轮询线程（读
+          pending_restore_count）刚把标记置上、还没查完库，服务器主线程
+          的 ChunkLoadEvent 就进来了，一看 loaded 为真便直接放行，结果
+          读到的是**还是空的** ``_restore_chunks`` —— 判定"这个区块没有
+          欠账"，于是该区块的待恢复项被永久跳过，而且没有任何重试。
+
+          有人会觉得"只漏几毫秒而已"。问题是那一瞬间恰好是服务器刚重启、
+          待恢复项最多的时刻，被跳过的往往是最该补的那一批。
+
+          现在改成：并发的第二个线程会在锁上等到第一个线程把数据填完，
+          要么拿到完整索引，要么自己去做这次加载。代价只是首次加载期间
+          其它线程多等几毫秒，而这一切只发生一次。
+        """
+        with self._restore_lock:
+            if self._restore_loaded:
+                return
+            try:
+                keys = self.store.list_pending_chunks()
+                cnt = self.store.count_pending_restore()
+            except Exception:
+                # 库暂时不可用：**不**置位，下一次区块加载再试。
+                # 否则一次瞬时失败会让待恢复项"永远不再被尝试"。
+                return
+            self._restore_chunks = {
+                (str(d), int(cx), int(cz)) for d, cx, cz in keys}
+            self._restore_count = int(cnt)
+            self._restore_loaded = True
+
+    def has_pending_restore(self) -> bool:
+        self._ensure_restore_index()
+        with self._restore_lock:
+            return self._restore_count > 0
+
+    def pending_restore_count(self) -> int:
+        self._ensure_restore_index()
+        with self._restore_lock:
+            return int(self._restore_count)
+
+    def enqueue_pending_restore(self, rows: List[tuple]) -> None:
+        """登记待恢复项（引擎在主线程调用）。
+
+        只进 FIFO 写队列，不在主线程碰磁盘；同时更新内存索引，
+        让后续区块加载能 O(1) 命中。
+        """
+        if not rows:
+            return
+        # ★ 先把基线索引读出来，再往里加。否则可能发生：
+        #   先 enqueue（写队列还没落库）→ 首次区块加载触发 _ensure
+        #   → 用库里的旧数据**覆盖**掉刚加进去的集合 → 这些区块再也
+        #   不会被补做。ensure 只查一次，开销可接受。
+        self._ensure_restore_index()
+        self.writer.put("pending_restore", rows)
+        with self._restore_lock:
+            self._restore_count += len(rows)
+            for r in rows:
+                try:
+                    # (session_id, ts, dimension, x, y, z, type, states)
+                    self._restore_chunks.add(
+                        (str(r[2]), int(r[3]) >> 4, int(r[5]) >> 4))
+                except Exception:
+                    continue
+
+    def clear_pending_session(self, session_id: int) -> None:
+        """撤销回档时取消该会话的待恢复项，并让内存索引下次重载。
+
+        索引重载是必须的：否则 ``has_pending_restore()`` 会在界面上一
+        直显示"还有 N 个待恢复"，实际已经被撤销取消了。
+        """
+        self.writer.put("pending_clear_session", int(session_id))
+        with self._restore_lock:
+            self._restore_loaded = False
+
+    def mark_pending_chunk(self, dimension: str, x: int, z: int) -> None:
+        """把区块重新标记为"有待恢复"（补做失败时的兜底）。
+
+        例如实体方块的两段式写入在第二阶段失败：行还留在库里，但索引
+        已经被移除。重新加回去，下一次区块加载会再试一次。
+        """
+        with self._restore_lock:
+            self._restore_chunks.add(
+                (str(dimension), int(x) >> 4, int(z) >> 4))
+
+    def apply_pending_chunk(self, cx: int, cz: int, dimension: str) -> int:
+        """区块加载后补做该区块的恢复。返回本次处理条数。
+
+        ★ ChunkLoadEvent 对每个加载的区块都会触发，这里第一步查内存集合，
+          没有待办立即返回 —— 绝不能让所有区块加载都去查数据库。
+        """
+        key = (str(dimension), int(cx), int(cz))
+        self._ensure_restore_index()
+        with self._restore_lock:
+            if key not in self._restore_chunks:
+                return 0
+        try:
+            done, more = self.engine.apply_pending_chunk(
+                int(cx), int(cz), str(dimension))
+        except Exception as e:
+            if self.logger is not None:
+                try:
+                    self.logger.warning(f"[区块日志] 补做待恢复失败: {e}")
+                except Exception:
+                    pass
+            return 0
+        with self._restore_lock:
+            self._restore_count = max(0, self._restore_count - int(done))
+            if not more:
+                self._restore_chunks.discard(key)
+        return int(done)
 
     # ------------------------------------------------------------------
     # 事件总线：WebUI / AI / 第三方插件的实时通路
@@ -657,6 +804,10 @@ class RegionAPI:
                 if st.get("oldest_ts") else None,
                 "file_bytes": int(st.get("size_bytes", 0) or 0),
                 "queued_records": len(self._pending) + len(self._pending_ev),
+                # 区块未加载而暂存的恢复项数量（加载后自动补做）。
+                # 面板可以据此显示"还有 N 个方块待恢复"，避免服主以为
+                # 回档失败了。
+                "pending_restore": self.pending_restore_count(),
                 "limits": {
                     "max_records_per_rollback": cfg.get("max_records_per_rollback"),
                     "max_area_blocks": cfg.get("max_area_blocks"),

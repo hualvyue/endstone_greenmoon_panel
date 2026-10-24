@@ -35,6 +35,10 @@ class CrossManager(object):
         self.started = False
         self.last_ping = 0.0
         self.last_error = ""
+        #: 最近一次对端 HTTP 状态码（404/401/…）。0 表示不是 HTTP 错误
+        #: （连接被拒、超时、DNS 失败等）。面板据此给出可操作的提示，
+        #: 而不是把 "HTTP Error 404: Not Found" 原样甩给用户。
+        self.last_error_code = 0
         # ★ 聊天推送的**有界**工作队列。
         #
         # 原先 send_chat 是「每条消息开一个新线程」：
@@ -230,11 +234,31 @@ class CrossManager(object):
 
     @staticmethod
     def _normalize_url(url):
+        """把用户填的地址规整成 ``scheme://host[:port]``。
+
+        ★ 跨服 hub 的路径是**固定**的 ``/api/cross/hub``，由 ``_hub()`` 负责
+          拼接。所以这里必须把多余的路径丢掉 ——
+
+          最常见的填法是把浏览器里整条后台地址粘进来：
+              ``http://1.2.3.4:8080/admin``
+          拼完就变成 ``.../admin/api/cross/hub``，对端当然是 404。
+          而面板只把 ``HTTP Error 404: Not Found`` 原样显示出来，
+          用户看到"404"完全想不到是地址末尾多了半截。
+
+          只保留 scheme + host + port，是让这种填法**自愈**；
+          真正的拼写错误（端口、IP）仍会在连接阶段报出来。
+        """
         s = str(url or "").strip()
         if not s:
             return ""
         if "://" not in s:
             s = "http://" + s
+        try:
+            p = urllib.parse.urlsplit(s)
+        except Exception:
+            return s.rstrip("/")
+        if p.scheme and p.netloc:
+            return f"{p.scheme}://{p.netloc}"
         return s.rstrip("/")
 
     def _hub(self, base_url, packet):
@@ -245,6 +269,12 @@ class CrossManager(object):
             if len(msg) > 160:
                 msg = msg[:160] + "..."
             self.last_error = msg
+            # 保留状态码：面板要据此区分"地址填错"和"密码不对"，
+            # 否则永远只有一句没法行动的 "HTTP Error 404"。
+            try:
+                self.last_error_code = int(getattr(e, "code", 0) or 0)
+            except Exception:
+                self.last_error_code = 0
             return None
 
     def master_base(self):

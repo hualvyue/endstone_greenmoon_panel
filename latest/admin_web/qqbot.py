@@ -2065,6 +2065,8 @@ class QQBotGateway(object):
                     if str(self.config.get("group_openid", "") or "").strip() == str(group_openid):
                         await self._send_qq_text("ℹ️ 本群已经是主群了，无需重复绑定。", msg_id)
                         return
+                    # ★ 绑定码发起人即服主（用户约定）。此刻 sender_openid 已就绪。
+                    self._claim_owner(sender_openid)
                     await asyncio.to_thread(self._complete_binding, group_openid)
                     await self._send_qq_text("✅ 绑定成功！已将本群设为机器人的主群。", msg_id)
                     return
@@ -2149,9 +2151,37 @@ class QQBotGateway(object):
             # ★ 用途不是 reserved 的卡不做任何内置处理（那是第三方插件的地盘）。
             if _purpose == "broadcast":
                 try:
+                    tier = self.tier_of(sender_openid)
+                except Exception:
+                    tier = "normal"
+                # ---- 腐竹直连通道：先处理挂起的封禁追问，再试任务 ----
+                if tier == "owner":
+                    try:
+                        from . import qq_agent
+                        _pend = qq_agent.consume_pending(self.plugin, content)
+                        if _pend is not None:
+                            await self._send_qq_text(_pend, msg_id)
+                            return
+                    except Exception as e:
+                        self.logger.warning(f"[QQ] 处理封禁追问失败: {e}")
+                    try:
+                        _agent = getattr(self.plugin, "agent", None)
+                        if _agent is not None:
+                            # ★ run_task 现在走 LLM（可能耗时数秒到数十秒），
+                            #   绝不能在事件循环里同步调用 —— 否则整个 QQ
+                            #   网关会被堵住：心跳超时、所有群消息排队。
+                            #   与下面 _try_ai_chat 的 mgr.chat 一样丢线程池。
+                            _report = await asyncio.to_thread(
+                                _agent.run_task, content, group_openid)
+                            if _report is not None:
+                                await self._send_qq_text(_report, msg_id)
+                                return
+                    except Exception as e:
+                        self.logger.warning(f"[QQ] 腐竹任务执行失败: {e}")
+                try:
                     if await self._try_ai_chat(
                             content, sender_openid, sender_name,
-                            group_openid, msg_id, data):
+                            group_openid, msg_id, data, tier=tier):
                         return
                 except Exception as e:
                     self.logger.warning(f"[QQ] AI 聊天处理失败: {e}")
@@ -2215,6 +2245,10 @@ class QQBotGateway(object):
                     await self._send_qq_text("⚠️ 你没有权限执行此指令", msg_id)
                     return
                 cmd = content[1:].strip()
+                # ---- /tier 分档管理（腐竹/管理员专用）----
+                if cmd.lower().startswith("tier"):
+                    await self._handle_tier_command(cmd, msg_id)
+                    return
                 if cmd:
                     # 日志里昵称可能为空（部分消息不带 username），
                     # 这里补一个可读兜底，免得打出「管理员  执行指令」。
@@ -2333,7 +2367,7 @@ class QQBotGateway(object):
         return False
 
     async def _try_ai_chat(self, content, sender_openid, sender_name,
-                           group_openid, msg_id, data) -> bool:
+                           group_openid, msg_id, data, tier: str = "") -> bool:
         """尝试走 AI 聊天。返回 True 表示已消费掉这条消息。
 
         ★ 返回 False 的两种情况都要能区分：
@@ -2383,9 +2417,13 @@ class QQBotGateway(object):
             f"（群 {group_openid}，{len(str(content or ''))} 字）")
 
         try:
+            # 熊孩/沙币档：冷漠语气 + 屏蔽破坏工具；腐竹/萌新/普通人：正常。
+            _cold = (tier == "brat")
+            _allow_destructive = (tier != "brat")
             res = await asyncio.to_thread(
                 mgr.chat, str(content or ""), uid=str(sender_openid or ""),
-                name=str(sender_name or ""), group=str(group_openid or ""))
+                name=str(sender_name or ""), group=str(group_openid or ""),
+                tier=tier, cold=_cold, allow_destructive=_allow_destructive)
         except Exception as e:
             self.logger.warning(f"[QQ] AI 聊天调用失败: {e}")
             res = {"ok": False, "error": f"处理失败：{e}"}
@@ -2463,6 +2501,95 @@ class QQBotGateway(object):
         threading.Thread(
             target=lambda: (time.sleep(1.5), self.plugin._restart_qq_gateway()), daemon=True
         ).start()
+
+    # ------------------------------------------------------------------
+    # 服主身份 + QQ 三档分档（纯手动设置）
+    # ------------------------------------------------------------------
+    def _claim_owner(self, openid: str) -> None:
+        """绑定码发起人即服主；首次设置后不再覆盖（除非显式变更）。"""
+        oid = str(openid or "").strip()
+        if not oid:
+            return
+        if self.is_owner(oid):
+            return
+        if self.owner_openid():
+            # 已有服主，不覆盖（避免换群误改）。显式 set_tier owner 另走。
+            return
+        try:
+            self.config["owner_openid"] = oid
+        except Exception:
+            pass
+        try:
+            self.plugin._qqbot_persist_owner_openid(
+                oid, card_id=getattr(self, "_card_id", None))
+        except Exception as e:
+            self.logger.warning(f"[QQ] 记录服主失败: {e}")
+        self.logger.info(f"[QQ] 已记录服主（绑定码发起人）: {oid}")
+
+    def owner_openid(self) -> str:
+        try:
+            return str(self.config.get("owner_openid", "") or "").strip()
+        except Exception:
+            return ""
+
+    def is_owner(self, openid: str) -> bool:
+        oid = str(openid or "").strip()
+        if not oid:
+            return False
+        return oid == self.owner_openid()
+
+    def _tiers(self) -> dict:
+        try:
+            t = self.config.get("qq_tiers")
+            if isinstance(t, dict):
+                return t
+        except Exception:
+            pass
+        return {}
+
+    def tier_of(self, openid: str) -> str:
+        """返回某 QQ openid 的档位。
+
+        owner > 手动标签(萌新/普通人/沙币熊孩) > 默认普通人。
+        """
+        oid = str(openid or "").strip()
+        if self.is_owner(oid):
+            return "owner"
+        tiers = self._tiers()
+        tv = str(tiers.get(oid, "") or "").strip().lower()
+        if tv in ("owner", "newbie", "normal", "brat"):
+            return tv
+        return "normal"
+
+    def set_tier(self, openid: str, tier: str) -> bool:
+        """手工设置某 openid 的档位（owner/newbie/normal/brat）。"""
+        oid = str(openid or "").strip()
+        tv = str(tier or "").strip().lower()
+        if not oid or tv not in ("owner", "newbie", "normal", "brat"):
+            return False
+        tiers = dict(self._tiers())
+        if tv == "owner":
+            # 设为服主：同时走 owner 记录通道
+            self._claim_owner(oid)
+        else:
+            tiers[oid] = tv
+            try:
+                self.config["qq_tiers"] = tiers
+            except Exception:
+                pass
+            try:
+                self.plugin._qqbot_persist_qq_tiers(
+                    tiers, card_id=getattr(self, "_card_id", None))
+            except Exception as e:
+                self.logger.warning(f"[QQ] 持久化分档失败: {e}")
+        return True
+
+    def list_tiers(self) -> dict:
+        out = dict(self._tiers())
+        ow = self.owner_openid()
+        if ow:
+            out[ow] = "owner"
+        return out
 
     def _add_extra_group(self, group_openid, name):
         oid = str(group_openid or "").strip()
@@ -2807,6 +2934,44 @@ class QQBotGateway(object):
             self.server.scheduler.run_task(self.plugin, self._safe_task(fn))
         except Exception as e:
             self.logger.error(f"[QQ] 调度主线程任务失败: {e}")
+
+    async def _handle_tier_command(self, cmd: str, msg_id: str) -> None:
+        """``/tier`` 分档管理。
+
+        用法：
+          /tier                         —— 列出当前分档
+          /tier <openid> <档位>         —— 设置某人的档位
+          /tier <openid> owner          —— 指定服主
+        档位：owner / newbie / normal / brat
+        """
+        parts = str(cmd or "").split()
+        if len(parts) == 1:
+            tiers = self.list_tiers()
+            if not tiers:
+                await self._send_qq_text("当前没有任何手动分档设置。", msg_id)
+                return
+            lines = ["📋 QQ 分档："]
+            labels = {"owner": "服主", "newbie": "萌新", "normal": "普通人", "brat": "沙币/熊孩"}
+            for oid, tv in tiers.items():
+                lines.append(f"· {oid} → {labels.get(tv, tv)}")
+            await self._send_qq_text("\n".join(lines), msg_id)
+            return
+        if len(parts) < 3:
+            await self._send_qq_text(
+                "用法：/tier <openid> <owner|newbie|normal|brat>", msg_id)
+            return
+        oid = parts[1].strip()
+        tv = parts[2].strip().lower()
+        if tv not in ("owner", "newbie", "normal", "brat"):
+            await self._send_qq_text(
+                "档位只能是 owner / newbie / normal / brat", msg_id)
+            return
+        if self.set_tier(oid, tv):
+            labels = {"owner": "服主", "newbie": "萌新", "normal": "普通人", "brat": "沙币/熊孩"}
+            await self._send_qq_text(
+                f"✅ 已将 {oid} 设为「{labels.get(tv, tv)}」", msg_id)
+        else:
+            await self._send_qq_text("⚠️ 设置失败。", msg_id)
 
     def _broadcast_game(self, msg):
         self._run_on_server(lambda: self.server.broadcast_message(str(msg)))

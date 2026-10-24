@@ -140,11 +140,18 @@ def _read(name: str) -> str:
     return (_STATIC / name).read_text(encoding="utf-8")
 
 
+#: 附带脚本的段名，按此顺序拼到业务脚本**之前**。
+#: 段文件都不参与业务逻辑：
+#:   ``morph`` —— morphicons 图标形变库（本包只用到 createMorph）
+#:   ``extra`` —— QRCode 生成库
+#: 缺哪个都不会影响业务，所以全部做成「存在才拼」。
+_JS_EXTRA_PARTS = ("morph", "extra")
+
+
 def _build(key: str) -> str:
     html = _read(key + ".html")
     css_path = _STATIC / (key + ".css")
     js_path = _STATIC / (key + ".js")
-    extra_path = _STATIC / (key + ".extra.js")
     if _BRAND_PREFIX in html:
         html = _fill_brand(html)
     if _CSS_MARK in html and css_path.exists():
@@ -163,8 +170,10 @@ def _build(key: str) -> str:
         #
         # 整段 JS（含 extra）拼好之后再算哈希 —— 只对 js_text 取哈希的话，
         # 改 extra 不会刷新版本戳，浏览器会捧着旧缓存跑新后端。
-        if extra_path.exists():
-            js_text = extra_path.read_text(encoding="utf-8") + "\n" + js_text
+        for part in _JS_EXTRA_PARTS:
+            part_path = _STATIC / f"{key}.{part}.js"
+            if part_path.exists():
+                js_text = part_path.read_text(encoding="utf-8") + "\n" + js_text
         html = html.replace(_JS_MARK, js_text)
         if _JS_REV_MARK in html:
             digest = hashlib.sha1(js_text.encode("utf-8")).hexdigest()[:12]

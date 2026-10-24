@@ -1252,8 +1252,10 @@ class ToolRunner:
         if _unsafe_for_command(name):
             return False, {"name": name}, f"玩家名含特殊字符，出于安全不执行命令"
         try:
-            ok = bool(self.p.server.dispatch_command(
-                self.p.server.command_sender, f'kick "{name}" {reason}'))
+            ok = bool(self._server_call(
+                lambda: self.p.server.dispatch_command(
+                    self.p.server.command_sender, f'kick "{name}" {reason}'),
+                default=False))
         except Exception as e:
             return False, {"name": name}, f"踢出失败：{e}"
         if not ok:
@@ -1285,8 +1287,10 @@ class ToolRunner:
         if secs:
             cmd = f'ban "{name}" {reason} {secs}'
         try:
-            ok = bool(self.p.server.dispatch_command(
-                self.p.server.command_sender, cmd))
+            ok = bool(self._server_call(
+                lambda: self.p.server.dispatch_command(
+                    self.p.server.command_sender, cmd),
+                default=False))
         except Exception as e:
             return False, {"name": name}, f"封禁失败：{e}"
         if not ok:
@@ -1312,8 +1316,10 @@ class ToolRunner:
             except Exception as e:
                 return False, {"name": name}, f"解除云黑异常：{e}"
         try:
-            ok = bool(self.p.server.dispatch_command(
-                self.p.server.command_sender, f'unban "{name}"'))
+            ok = bool(self._server_call(
+                lambda: self.p.server.dispatch_command(
+                    self.p.server.command_sender, f'unban "{name}"'),
+                default=False))
         except Exception as e:
             return False, {"name": name}, f"解封失败：{e}"
         if not ok:
@@ -1413,8 +1419,10 @@ class ToolRunner:
         # 只是需要重启/手动 add；如实说明比回滚更符合预期。
         cmd_ok = True
         try:
-            self.p.server.dispatch_command(
-                self.p.server.command_sender, f'allowlist add "{name}"')
+            self._server_call(
+                lambda: self.p.server.dispatch_command(
+                    self.p.server.command_sender, f'allowlist add "{name}"'),
+                default=False)
         except Exception as e:
             cmd_ok = False
             self._log("warning", f"[AI] 白名单已批准但 allowlist add 失败：{e}")
@@ -1574,8 +1582,10 @@ class ToolRunner:
 
         # 同步从服务器 allowlist 里摘掉（否则白名单文件删了、服务器还认）
         try:
-            self.p.server.dispatch_command(
-                self.p.server.command_sender, f'allowlist remove "{name}"')
+            self._server_call(
+                lambda: self.p.server.dispatch_command(
+                    self.p.server.command_sender, f'allowlist remove "{name}"'),
+                default=False)
         except Exception:
             pass
         return True, {"name": name, "reason": reason,
@@ -1647,11 +1657,41 @@ class ToolRunner:
     # 内部工具
     # ==================================================================
 
+    def _server_call(self, fn, *, timeout: float = 5.0, default=None):
+        """在**服务器主线程**执行 ``fn`` 并把结果取回来。
+
+        ★ 为什么必须这么绕：
+          AI 工具跑在 Web 请求线程 / ``asyncio.to_thread`` 里，而
+          ``server.dispatch_command``、``server.online_players`` 这些
+          接口按 Endstone 的约定应在服务器线程访问（官方调度文档：
+          ``run_task`` 是**在服务器线程上同步执行**）。跨线程直接摸
+          BDS 的 C++ 对象是未定义行为，轻则数据竞争，重则段错误 ——
+          而段错误在 Python 层拦不住。
+        ★ 如果调用点本身就在主线程，``_run_in_server_thread`` 会同步
+          直跑，不会出现"自己等自己"的死锁。
+        """
+        call = getattr(self.p, "_run_in_server_thread", None)
+        if call is None:                 # 单测桩：没有调度器，直接执行
+            try:
+                return fn()
+            except Exception:
+                return default
+        try:
+            res = call(fn, timeout=timeout)
+        except Exception:
+            return default
+        # _run_in_server_thread 失败时返回 (False, 原因)
+        if isinstance(res, tuple) and len(res) == 2 and res[0] is False:
+            return default
+        return res
+
     def _online_player(self, name: str):
         name = str(name or "").strip()
         if not name:
             return None
-        for p in list(self.p.server.online_players or []):
+        players = self._server_call(
+            lambda: list(self.p.server.online_players or []), default=[]) or []
+        for p in list(players):
             try:
                 if str(p.name) == name:
                     return p

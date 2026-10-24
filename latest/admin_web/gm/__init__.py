@@ -58,6 +58,11 @@
 
 from __future__ import annotations
 
+#: 身份标记：``_install_aliases`` 据此判断 ``sys.modules['gm']`` 里那个
+#: 是不是**我们自己**（可能是重载前的旧副本）。是就允许覆盖/移除，
+#: 不是（真·第三方 gm 包）就退让。见 ``_context._install_aliases``。
+__gm_alias__ = True
+
 from ._context import (
     MOD_PREFIX,
     api_version,
@@ -105,3 +110,14 @@ __all__ = [
 ]
 
 __version__ = api_version()
+
+# 包一旦被导入，顶层别名（gm / greenmoon_gm）立刻装好，并且让
+# ``import gm.panel`` 拿到**同一份**模块对象 —— 不必等 on_enable。
+# 否则 import 机制会按 gm.__path__ 把 panel.py 重跑一遍，副本里的
+# ``from .. import panel`` 越界，第三方插件注册面板直接失败。
+try:
+    from . import _context as _ctx
+
+    _ctx._install_aliases()
+except Exception:
+    pass

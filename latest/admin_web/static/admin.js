@@ -1,4 +1,5 @@
 <script>
+        function gmEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
         let currentPlayers = [];
         async function loadDiag() {
             const box = el('diag-box'), st = el('diag-status');
@@ -7,11 +8,11 @@
                 if (!r || r.error) { if (st) st.textContent = '读取失败: ' + (r ? r.error : '无响应'); return; }
                 const d = r.diag || {};
                 const lines = [];
-                // ★★★ 存储故障优先显示在最上方：用户反馈"日志写入错误"时，
+                // <i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i> 存储故障优先显示在最上方：用户反馈"日志写入错误"时，
                 // 这是唯一能说明"为什么"的地方（其余统计项帮不上忙）。
-                if (d.log_error) lines.push('★★★ 日志未能正常启用：' + d.log_error);
-                if (d.data_dir_error) lines.push('★★★ 数据目录解析失败：' + d.data_dir_error);
-                if (d.packaging_error) lines.push('★★★ ' + d.packaging_error);
+                if (d.log_error) lines.push('<i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i> 日志未能正常启用：' + d.log_error);
+                if (d.data_dir_error) lines.push('<i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i> 数据目录解析失败：' + d.data_dir_error);
+                if (d.packaging_error) lines.push('<i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i> ' + d.packaging_error);
                 if (lines.length) lines.push('');
                 lines.push('数据目录(data_dir)   : ' + (d.data_dir || '(未设置)'));
                 lines.push('日志文件(log_path)   : ' + (d.log_path || '(未启用)'));
@@ -64,7 +65,7 @@
             const st = el('diag-status');
             try {
                 // 与 setDiagToggle 同样走 POST：都是写操作。
-                // ★ 级别必须原样传字符串（含空串），不能像布尔开关那样转 0/1
+                // <i class=gm-ico data-ic=star></i> 级别必须原样传字符串（含空串），不能像布尔开关那样转 0/1
                 //   —— 后端对 min_level 做的是字符串白名单校验。
                 const r = await apiPost('/api/diag/toggle', { key: 'min_level', v: val || '' });
                 if (!r || !r.ok) { if (st) st.textContent = '保存失败: ' + (r ? r.error : '无响应'); return; }
@@ -102,7 +103,7 @@
                 t.id = 'toast';
                 document.body.appendChild(t);
             }
-            t.textContent = (ok ? '✓ ' : '✗ ') + msg;
+            t.textContent = (ok ? '' : '') + msg;
             t.className = ok ? 'is-ok' : 'is-bad';
             void t.offsetWidth;                       /* 强制重排，保证每次都播放过渡 */
             t.classList.add('show');
@@ -120,8 +121,11 @@
         }
         function gmSyncThemeBtn() {
             var list = document.querySelectorAll('.theme-toggle');
-            var txt = gmCurrentTheme() === 'light' ? '☀️ 浅色' : '🌙 深色';
-            for (var i = 0; i < list.length; i++) list[i].textContent = txt;
+            var txt = gmCurrentTheme() === 'light' ? '<i class=gm-ico data-ic=sun></i> 浅色' : '<i class=gm-ico data-ic=moon></i> 深色';
+            // ★ 必须用 innerHTML：这里的内容是带图标的 HTML 片段。
+            //   用 textContent 会把 "<i class=gm-ico ...>" 原样显示成
+            //   一串文字（线上截图里就是这个症状）。
+            for (var i = 0; i < list.length; i++) list[i].innerHTML = txt;
         }
         function gmToggleTheme() {
             var next = gmCurrentTheme() === 'light' ? 'dark' : 'light';
@@ -183,6 +187,15 @@
             btn.setAttribute('aria-expanded', 'true');
         }
 
+        // <summary> 里的问号：点击时必须阻止 details 展开/收起，
+        // 但不阻止冒泡 —— 下面那层委托还要负责弹出解释浮层。
+        document.addEventListener('click', function (ev) {
+            var t = ev.target;
+            if (t && t.closest && t.closest('.help-q') && t.closest('summary')) {
+                ev.preventDefault();
+            }
+        }, true);
+
         // 事件委托：任何带 .help-q 的元素都能用，包括 JS 动态生成的
         document.addEventListener('click', function (ev) {
             var t = ev.target;
@@ -231,12 +244,13 @@
         });
 
         // ---------- 抽屉侧边栏 ----------
-        // 默认收起，点标题栏 ☰ 展开；点遮罩、✕ 或任一菜单项后收起。
+        // 默认收起，点标题栏 <i class=gm-ico data-ic=menu></i> 展开；点遮罩、<i class=gm-ico data-ic=x></i> 或任一菜单项后收起。
         function gmOpenSidebar() {
             var sb = el('sidebar'), sc = el('side-scrim');
             if (sb) sb.classList.add('open');
             if (sc) sc.classList.add('open');
             document.body.classList.add('side-open');
+            gmSideIcon(true);
         }
 
         function gmCloseSidebar() {
@@ -244,6 +258,7 @@
             if (sb) sb.classList.remove('open');
             if (sc) sc.classList.remove('open');
             document.body.classList.remove('side-open');
+            gmSideIcon(false);
         }
 
         function gmToggleSidebar() {
@@ -272,7 +287,7 @@
             gmStopPolls(sectionId);
             var fns = gmPolls[sectionId];
             if (!fns) return;
-            // ★ 轮询函数多数是 async，try/catch 只能捕获**同步**抛出。
+            // <i class=gm-ico data-ic=star></i> 轮询函数多数是 async，try/catch 只能捕获**同步**抛出。
             // 被 reject 的 Promise 会变成 unhandledrejection —— 既没有
             // 用户提示、也很难在控制台定位（尤其 /api 返回 500 时）。
             // 这里统一接住并记一条 error 日志。
@@ -301,13 +316,27 @@
             delete gmTimers[sectionId];
         }
 
+        // 板块与导航项都是静态 DOM（页面加载后就不再增减），
+        // 原来每次切换都要 querySelectorAll 两遍、遍历几十个节点。
+        // 缓存起来 —— 切板块是高频操作，这点重复劳动没必要每次都付。
+        var _ALL_SECTIONS = null;
+        var _ALL_NAV_A = null;
+        function _staticEls() {
+            if (_ALL_SECTIONS === null) {
+                _ALL_SECTIONS = document.querySelectorAll('.section');
+                _ALL_NAV_A = document.querySelectorAll('.sidebar a');
+            }
+        }
+
         function showSection(id, link) {
-            document.querySelectorAll('.section').forEach(function (s) { s.style.display = 'none'; });
+            _staticEls();
+            _ALL_SECTIONS.forEach(function (s) { s.style.display = 'none'; });
             const sec = document.getElementById(id);
             if (sec) sec.style.display = 'block';
-            document.querySelectorAll('.sidebar a').forEach(function (a) { a.classList.remove('active'); });
+            _ALL_NAV_A.forEach(function (a) { a.classList.remove('active'); });
             if (link) {
                 link.classList.add('active');
+                gmPopIco(link.querySelector('.gm-ico-live,.gm-ico'));
                 try { window.scrollTo(0, 0); } catch (e) {}
             }
             // 触屏上选完板块就把抽屉收起来，别挡着内容
@@ -328,25 +357,29 @@
                 else if (id === 'sec-whitelist') loadWhitelist();
                 else if (id === 'sec-properties') loadProperties();
                 else if (id === 'sec-worlds') loadWorlds();
-                // ★ 记分板 / 权限管理已并入「操作控制台」，不再有独立板块 id。
+                // <i class=gm-ico data-ic=star></i> 记分板 / 权限管理已并入「操作控制台」，不再有独立板块 id。
                 //   进入控制台时把这两个子块的玩家下拉与列表一起拉一次。
                 else if (id === 'sec-console') { pollConsole(); loadScoreboards(); }
-                else if (id === 'sec-bots') { loadBots(); qrFillCards(); aiLoadPurposeSummary(); }
+                else if (id === 'sec-bots') { loadBots(); qrFillCards(); aiLoadPurposeSummary(); loadQQTiers(); }
                 else if (id === 'sec-regex') loadRegex();
-                // ★ 模组页**不做自动扫描**：那两个栏位要遍历磁盘上的
+                // <i class=gm-ico data-ic=star></i> 模组页**不做自动扫描**：那两个栏位要遍历磁盘上的
                 //   resource_packs / behavior_packs 与两个 world_*_packs.json，
-                //   每次切进来都扫一遍纯属浪费。改成只渲染上次扫过的结果，
-                //   用户点「🔄 刷新」才真正扫一次。
-                else if (id === 'sec-mods') renderMods();
+                //   每次切进来都扫一遍纯属浪费。改成：**首次打开**扫一次
+                //   （否则用户看到「尚未扫描」会以为坏了），之后只渲染
+                //   上次结果，点「刷新」才真正重扫。
+                else if (id === 'sec-mods') {
+                    if (modCache === null) scanMods(); else renderMods();
+                }
                 else if (id === 'sec-gmods') loadGmods();
+                else if (id === 'sec-ext') loadExtPanels();
                 else if (id === 'sec-files') loadFiles();
                 else if (id === 'sec-region') regionRefresh();
-                else if (id === 'sec-ext') extLoadPanels();
                 else if (id === 'sec-gametools') loadGameTools();
                 else if (id === 'sec-trust') loadTrust();
                 else if (id === 'sec-ai') {
                     aiLoadPrompts();   // 预填内置默认提示词（用户要看到默认长什么样）
                     aiLoad(); aiLoadAudit(); aiLoadUndo();
+                    loadAgentConfig();
                 }
                 // 云黑板块：进板块就把统计与明细拉一次（都是只读查询，
                 // 新版接口下是两次很轻的 GET）。旧版服务会返回友好提示，
@@ -360,7 +393,7 @@
             const chatPane = el('chat-pane'), conPane = el('console-pane');
             if (!chatTab || !conTab || !chatPane || !conPane) return;
 
-            // ★ 显示/隐藏必须**同时**管住 style.display 和 .hidden 类。
+            // <i class=gm-ico data-ic=star></i> 显示/隐藏必须**同时**管住 style.display 和 .hidden 类。
             //
             //   历史上 console-pane 上同时挂了 .hidden 类（CSS 里是
             //   `.hidden { display: none }`）和 style="display:none"。
@@ -481,7 +514,7 @@
             }
             function done(ok) {
                 if (!st) return;
-                st.textContent = ok ? '✓ 已复制' : '✗ 复制失败，请手动选中';
+                st.textContent = ok ? '已复制' : '复制失败，请手动选中';
                 st.className = 'status ' + (ok ? 'text-ok' : 'text-bad');
                 setTimeout(function () { if (st) st.textContent = ''; }, 2000);
             }
@@ -514,6 +547,56 @@
             if (p.charAt(p.length - 1) !== '/') p = p.slice(0, p.lastIndexOf('/') + 1);
             return p;
         })();
+        // ---------- 图标动效 ----------
+        // gmMorph 由 admin.morph.js（morphicons，MIT）提供。库没加载时
+        // 下面这些全部空转，界面退回静态图标 —— 不报错，也不白屏。
+        var _gmBtn = null;                  // 最近点过的、带图标的按钮
+
+        document.addEventListener('click', function (ev) {
+            var b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+            _gmBtn = (b && b.querySelector('.gm-ico,.gm-ico-live')) ? b : null;
+            if (!_gmBtn || !window.gmMorph) return;
+            // 刷新类按钮：点一下先转圈。转圈是纯 CSS 动画，
+            // 不需要形状插值，也就不用把 <i> 升级成 <svg>。
+            var ico = _gmBtn.querySelector('.gm-ico[data-ic=refresh],.gm-ico-live[data-ic=refresh]');
+            if (ico) {
+                ico.classList.add('gm-spin');
+                clearTimeout(ico._gmSpin);
+                ico._gmSpin = setTimeout(function () { ico.classList.remove('gm-spin'); }, 780);
+            }
+        }, true);
+
+        function gmBtnDone(btn) {
+            // 操作成功：按钮里的图标变成对勾，1.1s 后变回原来的样子。
+            // 形变是逐帧改 d，只动这一个图标，不触发任何重排。
+            if (!btn || !window.gmMorph) return;
+            var ico = btn.querySelector('.gm-ico-live,.gm-ico');
+            if (!ico) return;
+            var home = ico.getAttribute('data-ic');
+            if (!home || home === 'check' || !gmMorph.has(home)) return;
+            var e = gmMorph.to(ico, 'check');
+            if (!e) return;
+            clearTimeout(e._gmHome);
+            e._gmHome = setTimeout(function () { gmMorph.to(e, home); }, 1100);
+        }
+
+        // 导航切板块：对应项的图标弹一下（一次性，触发前强制回排一次）
+        function gmPopIco(el) {
+            if (!el) return;
+            el.classList.remove('gm-pop');
+            void el.offsetWidth;
+            el.classList.add('gm-pop');
+        }
+
+        // ☰ 按钮：展开时变 ×，收起时变回 ☰（morphicons 的经典一对）
+        function gmSideIcon(open) {
+            if (!window.gmMorph) return;
+            var btn = el('side-toggle');
+            if (!btn) return;
+            var ico = btn.querySelector('.gm-ico-live,.gm-ico');
+            if (ico) gmMorph.to(ico, open ? 'x' : 'menu');
+        }
+
         function apiPath(u) { return API_BASE + u.replace(/^\//, ''); }
 
         // 统一解析响应：非 2xx 时也不再静默失败，而是把状态码和错误带回去
@@ -540,7 +623,10 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             });
-            return await apiParse(res);
+            const r = await apiParse(res);
+            // 提交成功就把按钮上的图标变成对勾 —— 反馈落在你刚点的那个按钮上
+            if (r && r.ok) gmBtnDone(_gmBtn);
+            return r;
         }
 
         // ---------- 登录身份与权限 ----------
@@ -602,7 +688,7 @@
                 document.querySelectorAll('.section').forEach(function (s) { s.style.display = 'none'; });
                 var tip = document.createElement('div');
                 tip.className = 'section';
-                tip.innerHTML = '<h2>无可用板块</h2><p class="hint">当前账户未分配任何可访问板块的权限，请联系管理员在「账户与安全 → 临时账户」中重新分配。</p>';
+                tip.innerHTML = '<h2>无可用板块</h2><p class="hint">当前账户未分配任何可访问板块的权限，请联系管理员在「账户与安全 <i class=gm-ico data-ic=arrow-r></i> 临时账户」中重新分配。</p>';
                 main.appendChild(tip);
             }
             return false;
@@ -733,7 +819,7 @@
                 c0.appendChild(cb);
 
                 const c1 = document.createElement('td');
-                c1.innerHTML = (it.is_dir ? '📁 ' : '📄 ') + esc(it.name);
+                c1.innerHTML = (it.is_dir ? '<i class=gm-ico data-ic=folder></i> ' : '<i class=gm-ico data-ic=doc></i> ') + esc(it.name);
                 c1.classList.add('pointer');
                 c1.title = it.is_dir ? '双击进入目录' : '双击编辑';
                 c1.ondblclick = function () { filesOpen(it.name, it.is_dir); };
@@ -916,12 +1002,12 @@
                 tbody.innerHTML = '';
                 currentPlayers.forEach(p => {
                     const tr = document.createElement('tr');
-                    // ⚠ 玩家名是可控输入（玩家可自由取名，含 < > & 等字符）。
+                    // <i class=gm-ico data-ic=warn></i> 玩家名是可控输入（玩家可自由取名，含 < > & 等字符）。
                     // 这里曾经是 innerHTML 直接拼 String(p.name)：
                     // 一个叫 <img src=x onerror=...> 的玩家上线即可在管理员
                     // 面板里执行脚本。必须走 esc()。同文件其它地方（如玩家
                     // 详情）本来就用了 esc，唯独这里漏了。
-                    const c1 = document.createElement('td'); c1.innerHTML = '<span class="online">●</span> ' + esc(p.name);
+                    const c1 = document.createElement('td'); c1.innerHTML = '<span class="online"><i class=gm-ico data-ic=dot></i></span> ' + esc(p.name);
                     const c2 = document.createElement('td'); c2.textContent = Math.round(p.x) + ', ' + Math.round(p.y) + ', ' + Math.round(p.z);
                     const c3 = document.createElement('td'); c3.textContent = p.dimension;
                     const c4 = document.createElement('td'); c4.textContent = p.health + '/' + (p.max_health != null ? p.max_health : '?');
@@ -1164,21 +1250,21 @@
         async function setGamerule(name, value, ctrl) {
             const st = el('gamerule-status');
             if (typeof value === 'number' && isNaN(value)) {
-                if (st) { st.textContent = '✗ 请输入有效数字'; st.className = 'status text-bad'; }
+                if (st) { st.textContent = '请输入有效数字'; st.className = 'status text-bad'; }
                 return;
             }
             if (st) { st.textContent = '… 正在设置 ' + name; st.className = 'status'; }
             try {
                 const r = await apiPost('/api/gamerule', { name: name, value: value });
                 if (r.success) {
-                    if (st) { st.textContent = '✓ ' + r.message; st.className = 'status text-ok'; }
+                    if (st) { st.textContent = '' + r.message; st.className = 'status text-ok'; }
                 } else {
-                    if (st) { st.textContent = '✗ ' + (r.error || r.message); st.className = 'status text-bad'; }
+                    if (st) { st.textContent = '' + (r.error || r.message); st.className = 'status text-bad'; }
                     if (ctrl && ctrl.type === 'checkbox') { ctrl.checked = !value; }
                     else { loadGamerules(); }
                 }
             } catch (e) {
-                if (st) { st.textContent = '✗ 请求失败: ' + e; st.className = 'status text-bad'; }
+                if (st) { st.textContent = '请求失败: ' + e; st.className = 'status text-bad'; }
                 loadGamerules();
             }
         }
@@ -1196,17 +1282,17 @@
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
-        // 一段文本 → 问号浮层 data-help 属性值。
+        // 一段文本 <i class=gm-ico data-ic=arrow-r></i> 问号浮层 data-help 属性值。
         //
-        // ★★★ 为什么必须转两层，且换行要用占位符保护
+        // <i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i> 为什么必须转两层，且换行要用占位符保护
         // -------------------------------------------
         // gmOpenHelp 的取值链是：
         //     var text = btn.getAttribute('data-help');   // ① 浏览器把属性值**解码一次**
         //     pop.innerHTML = text;                       // ② 再当 HTML 解析注入
         // 内容被解析两次，所以只转一层是不够的：
         //     esc 把 "<script>" 变成 "&lt;script&gt;"
-        //     ① 解码后还原成 "<script>"  ← 真标签又回来了
-        //     ② innerHTML 就执行了        ← XSS
+        //     ① 解码后还原成 "<script>"  <i class=gm-ico data-ic=arrow-l></i> 真标签又回来了
+        //     ② innerHTML 就执行了        <i class=gm-ico data-ic=arrow-l></i> XSS
         // 因此第一层 esc 之外，**还必须有一层针对属性的转义**，
         // 把 & 再转成 &amp; ，让第 ① 步只能解出 "&lt;script&gt;" 这个字面量。
         //
@@ -1217,32 +1303,32 @@
         //       走完两层转义后再把占位符还原成 <br>。
         //       占位符用 \u0000 包裹，正常文本里不可能出现，也就无法被伪造。
         //
-        // 最终顺序：归一换行 → 换占位符 → esc → escAttr → 占位符还原 <br>
+        // 最终顺序：归一换行 <i class=gm-ico data-ic=arrow-r></i> 换占位符 <i class=gm-ico data-ic=arrow-r></i> esc <i class=gm-ico data-ic=arrow-r></i> escAttr <i class=gm-ico data-ic=arrow-r></i> 占位符还原 <br>
         var GM_BR_TOKEN = '\u0000GM_BR\u0000';
 
         function helpAttr(text) {
             var s = String(text == null ? '' : text);
             s = s.replace(/\r\n?/g, '\n');            // 归一闪行，避免 Windows 换行多出空行
-            s = s.replace(/\n/g, GM_BR_TOKEN);        // 换行 → 占位符（避开后续转义）
-            s = esc(s);                               // 第一层：内容 → HTML 文本
+            s = s.replace(/\n/g, GM_BR_TOKEN);        // 换行 <i class=gm-ico data-ic=arrow-r></i> 占位符（避开后续转义）
+            s = esc(s);                               // 第一层：内容 <i class=gm-ico data-ic=arrow-r></i> HTML 文本
             s = escAttr(s);                           // 第二层：属性（连 & < > " 一起转）
-            return s.replace(new RegExp(GM_BR_TOKEN, 'g'), '<br>');   // 占位符 → 真换行
+            return s.replace(new RegExp(GM_BR_TOKEN, 'g'), '<br>');   // 占位符 <i class=gm-ico data-ic=arrow-r></i> 真换行
         }
 
         function qqSafe(s) { return String(s == null ? '' : s).replace(/[^0-9a-zA-Z_-]/g, '_'); }
 
         // 把一个值安全地嵌进内联 onclick 的**字符串字面量**里（含外侧引号）。
         //
-        // ★★★ 为什么不能只做 HTML 转义
+        // <i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i><i class=gm-ico data-ic=star></i> 为什么不能只做 HTML 转义
         // ---------------------------------
         // 常见错误写法是 onclick="f('" + escAttr(name) + "')"。
         // 这里有两层解析：先 HTML 属性解码，再当 JS 解析。escAttr 只挡了
         // 第一层。玩家名/机器人名里只要出现反斜杠就会出事：
         //
         //     name = a\'  +  )" onmouseover="alert(1)
-        //     → 输出 onclick="f('a\')" onmouseover="alert(1)')"
-        //          ↑ 反斜杠把引号转义掉了，JS 串提前闭合，
-        //            后面的内容变成新的 HTML 属性 → 存储型 XSS
+        //     <i class=gm-ico data-ic=arrow-r></i> 输出 onclick="f('a\')" onmouseover="alert(1)')"
+        //          <i class=gm-ico data-ic=arrow-u></i> 反斜杠把引号转义掉了，JS 串提前闭合，
+        //            后面的内容变成新的 HTML 属性 <i class=gm-ico data-ic=arrow-r></i> 存储型 XSS
         //
         // 也不能用「把 ' 替换成 \'」这种土办法：反斜杠本身没转义，
         // 攻击者加一个 \ 就能反过来控制转义方向。
@@ -1374,6 +1460,23 @@
             return true;
         }
 
+        // 面板里允许保留的最大行数。
+        // ★ 这是**必需**的：面板开着一晚上，每 3 秒追加一次，
+        //   节点会无限膨胀（一个晚上就是几千个 div）。
+        //   到那时滚动、重排、内存都会明显变卡，而用户只会觉得"面板很卡"。
+        //   只留最近这些条，历史记录仍在服务端（cursor 拉得到），
+        //   滚动位置不会因为裁剪而丢失内容。
+        var _PANE_MAX_ROWS = 400;
+
+        function _trimPane(panel, selector) {
+            if (!panel) return;
+            const rows = panel.querySelectorAll(selector);
+            const over = rows.length - _PANE_MAX_ROWS;
+            // 每次追加只会多出少数几条，这里的循环实际每次最多删一两条，
+            // 不会退化成"删一半"的大扫除。
+            for (let i = 0; i < over; i++) rows[i].remove();
+        }
+
         function appendMessages(msgs, panelId, scrollId) {
             const pid = panelId || 'message-panel';
             const panel = el(pid);
@@ -1394,6 +1497,7 @@
                 div.innerHTML = '<span class="msg-time">[' + esc(m.time) + ']</span>' + body;
                 panel.appendChild(div);
             });
+            _trimPane(panel, '.msg');
             const as = el(scrollId || 'msg-autoscroll');
             if (as && as.checked) { panel.scrollTop = panel.scrollHeight; }
         }
@@ -1431,9 +1535,9 @@
             pollMessages(pid, _scrollIdFor(pid, 'msg'));
         }
 
-        // 面板 id → 对应的「自动滚动」复选框 id。
+        // 面板 id <i class=gm-ico data-ic=arrow-r></i> 对应的「自动滚动」复选框 id。
         // 容器 id 是 `xxx-panel`，复选框 id 是 `xxx-autoscroll`，
-        // 唯一例外是 message→msg。
+        // 唯一例外是 message<i class=gm-ico data-ic=arrow-r></i>msg。
         function _scrollIdFor(panelId, kind) {
             if (panelId === 'message-panel') return 'msg-autoscroll';
             return String(panelId).replace(/-panel$/, '') + '-autoscroll';
@@ -1443,7 +1547,7 @@
         // 原来这里有一整个独立的「日志中心」板块（lg-* 一套 DOM + 
         // switchLogCenterTab / refreshLogsCenter），内容和服务器信息里的
         // 「聊天与日志」面板完全重复。现已合并：只保留 sec-players 里的
-        // 那一套面板，下面这个函数为「🔄 刷新」按钮服务。
+        // 那一套面板，下面这个函数为「<i class=gm-ico data-ic=refresh></i> 刷新」按钮服务。
         function refreshLogsCenter() {
             const chatPane = el('chat-pane');
             // 控制台面板可见时刷新控制台，否则刷新聊天
@@ -1455,7 +1559,7 @@
         }
 
         function loadPermInfo() {
-            // perm-player 在「🔐 权限管理」板块里，而该板块默认 .hidden。
+            // perm-player 在「<i class=gm-ico data-ic=lock></i> 权限管理」板块里，而该板块默认 .hidden。
             // 若用户在 DOMContentLoaded 之前点到了侧边栏（页面卡顿时可能），
             // 或某次渲染异常导致该 select 缺失，直接 .value 会抛
             // "Cannot read properties of null" 并中断整个板块渲染。
@@ -1627,6 +1731,62 @@
             'chat-restriction': ['None', 'Dropped', 'Disabled'],
             'server-authoritative-movement': ['client-auth', 'server-auth', 'server-auth-with-rewind']
         };
+
+        //: server.properties 的中文说明。[中文名, 解释]
+        //: ★ 只用于面板展示，不参与读写；未列出的键仍会正常显示（只显示键名）。
+        //:   解释按 Bedrock 服务端语义写，避免"看懂了字却不知道开了会怎样"。
+        const PROPS_DOC = {
+            'server-name': ['服务器名称', '显示在服务器列表里的名字。'],
+            'gamemode': ['默认游戏模式', 'survival 生存 / creative 创造 / adventure 冒险 / spectator 旁观。'],
+            'force-gamemode': ['强制游戏模式', 'true = 每次进服都重置为上面的默认模式；false = 保留玩家上次的模式。'],
+            'difficulty': ['难度', 'peaceful 和平 / easy 简单 / normal 普通 / hard 困难。'],
+            'allow-cheats': ['允许作弊', 'true = 允许使用 /gamemode、/give 等作弊指令。'],
+            'max-players': ['最大玩家数', '服务器同时在线人数上限。'],
+            'online-mode': ['正版验证', 'true = 只允许正版账号进入；false = 允许离线 / 第三方登录。'],
+            'allow-list': ['白名单开关', 'true = 只允许白名单内的玩家进入（名单在 allowlist.json）。'],
+            'server-port': ['IPv4 端口', '服务器监听的 UDP 端口，默认 19132。'],
+            'server-portv6': ['IPv6 端口', 'IPv6 监听端口，默认 19133。'],
+            'enable-lan-visibility': ['局域网可见', '是否在局域网 / 好友列表中广播本服。'],
+            'enable-latency-telemetry': ['延迟遥测', '是否向微软上报网络延迟数据（一般保持 true）。'],
+            'level-name': ['世界存档名', '对应 worlds/ 下的存档文件夹名，修改后需重启。'],
+            'level-seed': ['世界种子', '仅在世界首次生成时生效。'],
+            'level-type': ['世界类型', 'DEFAULT 默认 / FLAT 超平坦 / LEGACY 旧版。'],
+            'default-player-permission-level': ['默认玩家权限', 'visitor 访客 / member 成员 / operator 管理员。'],
+            'view-distance': ['视距（区块）', '玩家能看到的区块半径，越大越吃带宽与内存。'],
+            'tick-distance': ['模拟距离（区块）', '服务器实际更新方块 / 生物的区块半径。'],
+            'player-idle-timeout': ['挂机踢出（分钟）', '玩家无操作超过该时间会被踢出，0 = 不踢。'],
+            'max-threads': ['最大线程数', '服务端工作线程上限，0 = 自动。'],
+            'compression-threshold': ['压缩阈值', '大于该字节数的数据包才压缩，0 = 全部压缩。'],
+            'compression-algorithm': ['压缩算法', '服务端支持 zlib / snappy，需与客户端能力匹配。'],
+            'client-side-chunk-generation-enabled': ['客户端生成区块', '允许客户端自行生成远处区块，能省服务器性能。'],
+            'block-network-ids-are-hashes': ['方块 ID 用哈希', '网络协议里的方块 ID 形式，改错会导致客户端进不来。'],
+            'disable-persona': ['禁用 Persona', '是否禁用角色外观 / 披风等个性化内容。'],
+            'disable-custom-skins': ['禁用自定义皮肤', 'true = 只允许官方皮肤。'],
+            'server-authoritative-movement': ['移动权威', 'client-auth 客户端判定 / server-auth 服务端判定 / server-auth-with-rewind 带回滚修正。'],
+            'server-authoritative-block-breaking': ['破坏方块权威', 'true = 由服务端判定方块破坏，防作弊更强。'],
+            'server-authoritative-block-breaking-pick-range-scalar': ['破坏距离系数', '服务端判定可破坏距离的缩放系数。'],
+            'correct-player-movement': ['修正玩家移动', '服务端修正客户端上报的异常位移（防瞬移 / 穿墙）。'],
+            'player-position-acceptance-threshold': ['位置容差', '服务端接受客户端位置的最大偏差，越小越严格。'],
+            'player-movement-action-direction-threshold': ['移动方向容差', '判定玩家移动方向一致性的阈值。'],
+            'server-authoritative-sound': ['声音权威', 'true = 由服务端决定音效播放。'],
+            'chat-restriction': ['聊天限制', 'None 不限制 / Dropped 丢弃 / Disabled 完全禁用。'],
+            'disable-player-interaction': ['禁止玩家交互', 'true = 玩家之间不能互相伤害 / 交互。'],
+            'content-log-file-enabled': ['内容日志', '是否把内容日志写入文件（排查资源包错误时用）。'],
+            'content-log-file-buffer-size': ['内容日志缓冲', '内容日志写入缓冲大小。'],
+            'text-filtering-config': ['文本过滤配置', '指定聊天文本过滤规则文件。'],
+            'script-watchdog-enable': ['脚本看门狗', '脚本卡死时是否触发看门狗保护。'],
+            'script-watchdog-memory-limit': ['看门狗内存上限 (MB)', '脚本占用超过该值会被终止。'],
+            'script-watchdog-memory-warning': ['看门狗内存告警 (MB)', '达到该值时先记录告警。'],
+            'script-watchdog-max-stack-size': ['看门狗最大栈', '脚本栈深度上限。'],
+            'script-watchdog-hang-exception': ['卡死抛异常', '脚本卡死时是否抛异常。'],
+            'script-watchdog-hang-warning': ['卡死告警', '脚本卡死时是否先记录告警。'],
+            'script-debugger-auto-attach': ['自动附加调试器', '启动时是否自动等待脚本调试器。'],
+            'script-debugger-auto-attach-connect-address': ['调试器地址', '自动附加调试器的监听地址。'],
+            'allow-inbound-script-debugging': ['允许入站脚本调试', '是否允许外部调试器连接脚本引擎。'],
+            'emit-server-telemetry': ['服务器遥测', '是否上报服务器运行遥测数据。'],
+            'server-build-radius-ratio': ['建造半径比例', '限制玩家在出生点附近的建造范围比例。'],
+            'transport': ['传输方式', 'raknet = 传统 RakNet（默认）；nethernet = 新版 NetherNet；也可以直接填写服务端支持的其他值。']
+        };
         let propsKeys = {};
 
         function isBoolValue(v) {
@@ -1646,28 +1806,103 @@
             } catch (e) { console.error('loadProperties', e); }
         }
 
+        function propsTitle(card, key) {
+            const doc = PROPS_DOC[String(key).toLowerCase()];
+            const title = document.createElement('div');
+            title.className = 'text-accent break mb-xs';
+            title.textContent = doc ? doc[0] : key;
+            if (doc) {
+                const code = document.createElement('span');
+                code.className = 'hint-sm';
+                code.style.marginLeft = '6px';
+                code.style.fontWeight = '400';
+                code.textContent = key;
+                title.appendChild(code);
+            }
+            card.appendChild(title);
+            if (doc) {
+                const d = document.createElement('div');
+                d.className = 'hint-sm mb-sm';
+                d.textContent = doc[1];
+                card.appendChild(d);
+            }
+        }
+
+        //: transport 是"可选可填"的特殊项：文件里没有这一项也要能添加。
+        //: 输入框挂 datalist —— 既能从 raknet/nethernet 里选，也允许自己写。
+        function renderTransportCard(box, kw) {
+            const key = 'transport';
+            // 文件里的键大小写可能不统一；找到真实的那一行，避免重复添加
+            const actual = Object.keys(propsKeys).filter(function (k) {
+                return String(k).toLowerCase() === key;
+            })[0] || key;
+            const val0 = String(propsKeys[actual] == null ? '' : propsKeys[actual]);
+            const hay = (key + ' 传输方式 raknet nethernet ' + val0).toLowerCase();
+            if (kw && hay.indexOf(kw) < 0) return false;
+            const card = document.createElement('div');
+            card.className = 'world-card';
+            card.style.margin = '0';
+            propsTitle(card, actual);
+            const row = document.createElement('div');
+            row.className = 'row';
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.className = 'flex-input';
+            inp.value = val0;
+            inp.placeholder = 'raknet / nethernet / 自定义';
+            inp.setAttribute('list', 'props-transport-options');
+            const dl = document.createElement('datalist');
+            dl.id = 'props-transport-options';
+            ['raknet', 'nethernet'].forEach(function (o) {
+                const op = document.createElement('option');
+                op.value = o;
+                dl.appendChild(op);
+            });
+            const btn = document.createElement('button');
+            btn.className = 'ok';
+            btn.textContent = val0 ? '保存' : '添加';
+            btn.onclick = function () { setProperty(actual, inp.value, btn); };
+            row.appendChild(inp);
+            row.appendChild(dl);
+            row.appendChild(btn);
+            card.appendChild(row);
+            if (!val0) {
+                const tip = document.createElement('div');
+                tip.className = 'hint-sm mt-xs';
+                tip.textContent = '当前文件里没有这一项；选择或填写后点「添加」会写入 server.properties。';
+                card.appendChild(tip);
+            }
+            box.appendChild(card);
+            return true;
+        }
+
         function renderProperties() {
             const box = el('props-quick');
             if (!box) return;
             const kw = (el('props-filter') ? el('props-filter').value : '').trim().toLowerCase();
             const keys = Object.keys(propsKeys).sort();
             box.innerHTML = '';
+            let visible = 0;
+            if (renderTransportCard(box, kw)) visible++;
             if (!keys.length) {
-                box.innerHTML = '<div class="empty grid-full">未能解析到配置项（server.properties 可能为空）</div>';
+                const empty = document.createElement('div');
+                empty.className = 'empty grid-full';
+                empty.textContent = '未能解析到配置项（server.properties 可能为空）';
+                box.appendChild(empty);
                 return;
             }
-            let visible = 0;
             keys.forEach(function (key) {
+                if (String(key).toLowerCase() === 'transport') return; // 已单独渲染
                 const val0 = String(propsKeys[key] == null ? '' : propsKeys[key]);
-                if (kw && key.toLowerCase().indexOf(kw) < 0 && val0.toLowerCase().indexOf(kw) < 0) return;
+                const doc = PROPS_DOC[String(key).toLowerCase()];
+                const hay = (key + ' ' + val0 + ' ' +
+                             (doc ? doc.join(' ') : '')).toLowerCase();
+                if (kw && hay.indexOf(kw) < 0) return;
                 visible++;
                 const card = document.createElement('div');
                 card.className = 'world-card';
                 card.style.margin = '0';
-                const title = document.createElement('div');
-                title.className = 'text-accent break mb-sm';
-                title.textContent = key;
-                card.appendChild(title);
+                propsTitle(card, key);
 
                 if (isBoolValue(val0)) {
                     const isOn = ['true', 'yes', 'on'].indexOf(val0.toLowerCase()) >= 0;
@@ -1755,11 +1990,11 @@
                 const content = el('props-content').value;
                 const r = await apiPost('/api/properties/save', { content: content });
                 showStatus(r.message || r.error, !!r.success);
-                if (st) { st.textContent = (r.success ? '✓ ' : '✗ ') + (r.message || r.error); st.className = r.success ? 'status text-ok' : 'status text-bad'; }
+                if (st) { st.textContent = (r.success ? '' : '') + (r.message || r.error); st.className = r.success ? 'status text-ok' : 'status text-bad'; }
                 if (r.success) loadWorlds();
             } catch (e) {
                 showStatus('请求失败: ' + e, false);
-                if (st) { st.textContent = '✗ 请求失败: ' + e; st.className = 'status text-bad'; }
+                if (st) { st.textContent = '请求失败: ' + e; st.className = 'status text-bad'; }
             }
         }
 
@@ -1828,6 +2063,7 @@
                 div.innerHTML = '<span class="clog-time">[' + esc(l.time) + ' ' + esc(l.level) + ']</span>' + esc(l.message);
                 panel.appendChild(div);
             });
+            _trimPane(panel, '.clog');
             const as = el(scrollId || 'console-autoscroll');
             if (as && as.checked) { panel.scrollTop = panel.scrollHeight; }
         }
@@ -1871,7 +2107,7 @@
             if (st) { st.textContent = '发送中…'; st.className = 'status'; }
             apiPost('/api/console/command', { command: cmd }).then(function (r) {
                 if (r && r.ok) {
-                    if (st) { st.textContent = '✅ 已执行: ' + cmd; st.className = 'status text-ok'; }
+                    if (st) { st.textContent = '已执行: ' + cmd; st.className = 'status text-ok'; }
                     if (input) input.value = '';
                 } else {
                     if (st) { st.textContent = '发送失败: ' + (r ? r.error : '无响应'); st.className = 'status text-bad'; }
@@ -1899,7 +2135,8 @@
         var REGION_ACTION_CN = {
             break: '破坏', place: '放置', explode: '炸毁',
             leaves_decay: '树叶凋零', block_grow: '生长',
-            block_form: '形成', liquid_flow: '液体流动'
+            block_form: '形成', block_piston: '活塞推拉',
+            liquid_flow: '液体流动'
         };
 
         function regionStatus(text, isErr) {
@@ -1955,7 +2192,7 @@
             box.className = 'hint-sm' + (lv > 0 ? ' ok' : '');
         }
 
-        // ★ 设置从 /api/region/status 的 settings 字段读，**不**去调
+        // <i class=gm-ico data-ic=star></i> 设置从 /api/region/status 的 settings 字段读，**不**去调
         //   /api/tools/config —— 后者要求 backup/cloud 权限，而本板块
         //   只需要 region 权限。用它会表现为"只授了 region 的账号打开
         //   设置区一片空白"。
@@ -2086,7 +2323,11 @@
             var off = el('region-off');
             if (off) off.classList.toggle('hidden', !!d.enabled);
             if (!d.enabled) regionStatus('未开启', true);
-            else regionStatus(d.busy ? '回档进行中…' : '就绪');
+            else if (d.busy) regionStatus('回档进行中…');
+            else if (d.pending_restore > 0)
+                regionStatus('就绪（' + regionFmt(d.pending_restore) +
+                             ' 个方块待区块加载后自动恢复）');
+            else regionStatus('就绪');
             // 状态里已经带了本板块的设置快照，顺手刷新设置区
             regionLoadSettings(d);
             // 玩家行为记录同属本板块，一起刷新（status 里带的
@@ -2101,6 +2342,7 @@
                     kvRow('已回档', regionFmt(d.rolled_back)) +
                     kvRow('世界事件', regionFmt(d.events)) +
                     kvRow('回档次数', regionFmt(d.sessions)) +
+                    kvRow('待恢复', regionFmt(d.pending_restore)) +
                     kvRow('最早记录', d.oldest || '—') +
                     kvRow('库大小', ((d.file_bytes || 0) / 1024).toFixed(1) + ' KB') +
                     kvRow('待落盘', regionFmt(d.queued_records)) +
@@ -2147,7 +2389,7 @@
                     esc(s.player || '') + '</td><td class="mono">' + esc(box) + '</td><td>' +
                     esc(mins + ' 分钟') + '</td><td>' + esc(s.block_count || 0) + '</td><td>' + state +
                     '</td><td>' + (s.undone ? '' :
-                        '<button onclick="regionUndo(' + escAttr(s.id) + ')">↩️ 撤销</button>') +
+                        '<button onclick="regionUndo(' + escAttr(s.id) + ')"><i class=gm-ico data-ic=undo></i> 撤销</button>') +
                     '</td></tr>';
             }).join('');
         }
@@ -2176,9 +2418,30 @@
             throw new Error('请填中心点+半径，或对角两点');
         }
 
+        // 维度取值：下拉选内置三维度，手填框用于自定义维度。
+        //
+        // ★ 为什么「手填优先」而不是「下拉优先」：
+        //   两边都能改的情况下，总得定一个优先级。选"手填优先"是因为
+        //   手写的内容是用户**更明确的意图** —— 他特意敲了一个自定义维度
+        //   名，说明下拉里的三个都不是他要的。反过来的话（下拉优先），
+        //   用户填了半天发现发的还是 overworld，等于填了没用，而且这种
+        //   "填了不生效"极难自查。
+        // ★ 下拉值走 gmSelect.get()（值存在 data-value 上，列表重渲染
+        //   也不丢）；这里包了 try 是为了在 gmSelect 尚未挂载（如页面
+        //   初始化竞态）时退化成空串，不至于让整个回档请求崩掉。
+        function regionDim() {
+            const custom = ((el('region-dim-custom') || {}).value || '').trim();
+            if (custom) return custom;
+            let sel = '';
+            try {
+                sel = String((window.gmSelect && gmSelect.get('region-dim-sel')) || '');
+            } catch (e) { sel = ''; }
+            return sel.trim();
+        }
+
         function regionCommon() {
             return {
-                dimension: ((el('region-dim') || {}).value || '').trim(),
+                dimension: regionDim(),
                 minutes: Number((el('region-minutes') || {}).value || 60)
             };
         }
@@ -2225,7 +2488,7 @@
             try { region = regionBuildRegion(); }
             catch (e) { regionShowResult({ ok: false, message: e.message, data: {} }, '参数有误'); return; }
             const c = regionCommon();
-            // ★ 回档会改动世界且开销不小，必须让人再说一次"确定"。
+            // <i class=gm-ico data-ic=star></i> 回档会改动世界且开销不小，必须让人再说一次"确定"。
             //   这里是最后一道人工闸门；AI 侧由审批流程承担同样职责。
             if (!confirm('确定要把该区域恢复到 ' + c.minutes +
                          ' 分钟之前吗？\n\n回档会在撤销窗口内可反悔，但仍建议先做备份。')) {
@@ -2251,162 +2514,6 @@
             if (r && r.ok) setTimeout(regionRefresh, 1500);
         }
 
-        // ==================== 第三方插件面板 ====================
-        //
-        // 别的插件把自己的设置项挂到这里，用户就能在一个后台里配所有插件。
-        // 这个板块是"隐形"的：没有插件接入时连导航项一起隐藏。
-        // ========================================================
-
-        var extCurrent = null;      // 当前选中的 pid
-        var extFields = [];
-        var extPanelMeta = null;
-
-        function extStatus(text, isErr) {
-            var n = el('ext-status');
-            if (!n) return;
-            n.textContent = text || '';
-            n.className = 'status' + (isErr ? ' err' : '');
-        }
-
-        async function extLoadPanels() {
-            const r = await apiGet('/api/ext/panels');
-            const list = el('ext-list');
-            if (!list) return;
-            if (!r || !r.ok) { extStatus('加载失败', true); return; }
-            const panels = r.panels || [];
-            extRefreshNav(panels.length);
-            var empty = el('ext-empty');
-            if (empty) empty.classList.toggle('hidden', panels.length > 0);
-            if (!panels.length) { list.innerHTML = ''; return; }
-            extStatus(panels.length + ' 个插件');
-            list.innerHTML = panels.map(function (p) {
-                return '<button type="button" class="ext-item' +
-                    (p.pid === extCurrent ? ' active' : '') + '" onclick="extOpen(' +
-                    escAttr(JSON.stringify(p.pid)) + ')">' +
-                    '<span class="ext-icon">' + esc(p.icon || '🧩') + '</span>' +
-                    '<span class="ext-meta"><b>' + esc(p.title) + '</b>' +
-                    '<span class="hint-sm">' + esc(p.description || (p.field_count + ' 个设置项')) +
-                    '</span></span></button>';
-            }).join('');
-            // 首次进入自动选中第一个，省一次点击
-            if (!extCurrent && panels.length) extOpen(panels[0].pid);
-        }
-
-        // ★ 隐形入口：只有真有插件接入时才放出导航项与板块本身。
-        function extRefreshNav(count) {
-            var nav = el('nav-ext');
-            var sec = el('sec-ext');
-            if (nav) nav.classList.toggle('hidden', !(count > 0));
-            if (sec && !(count > 0) && sec.style.display === 'block') {
-                // 正在看这个板块时插件全部撤走了 —— 退回首页，别留白屏
-                showSection('sec-players', document.querySelector('.sidebar a'));
-            }
-        }
-
-        async function extOpen(pid) {
-            extCurrent = pid;
-            const r = await apiGet('/api/ext/panel?pid=' + encodeURIComponent(pid));
-            const body = el('ext-body');
-            if (!body) return;
-            if (!r || !r.ok) {
-                body.innerHTML = '<p class="err">加载失败：' + esc((r && r.error) || '未知错误') + '</p>';
-                return;
-            }
-            extFields = r.fields || [];
-            extPanelMeta = r.panel || {};
-            const values = r.values || {};
-            let html = '<div class="ext-head"><h3>' + esc(extPanelMeta.icon || '🧩') + ' ' +
-                esc(extPanelMeta.title || pid) + '</h3>';
-            if (extPanelMeta.version) html += '<span class="tag">' + esc(extPanelMeta.version) + '</span>';
-            if (extPanelMeta.author) html += '<span class="hint-sm">作者 ' + esc(extPanelMeta.author) + '</span>';
-            html += '</div>';
-            if (extPanelMeta.description) {
-                html += '<p class="hint-sm">' + esc(extPanelMeta.description) + '</p>';
-            }
-            if (!extFields.length) {
-                html += '<p class="empty mt">该插件没有声明设置项</p>';
-                body.innerHTML = html;
-                return;
-            }
-            html += '<div class="ext-form mt">' + extFields.map(function (f) {
-                return extFieldHtml(f, values[f.key]);
-            }).join('') + '</div>';
-            html += '<div class="row mt"><button class="ok" onclick="extSave()">💾 保存设置</button>' +
-                '<span class="hint-sm" id="ext-save-msg"></span></div>';
-            body.innerHTML = html;
-            // 同步左侧高亮
-            document.querySelectorAll('#ext-list .ext-item').forEach(function (b) {
-                b.classList.remove('active');
-            });
-            extLoadPanelsSilent();
-        }
-
-        async function extLoadPanelsSilent() {
-            // 只重画列表高亮，避免整体闪烁
-            const btns = document.querySelectorAll('#ext-list .ext-item');
-            btns.forEach(function (b) {
-                try {
-                    const pid = JSON.parse(b.getAttribute('onclick').match(/extOpen\((.*)\)/)[1]);
-                    b.classList.toggle('active', pid === extCurrent);
-                } catch (e) { /* 解析失败就不高亮，不影响使用 */ }
-            });
-        }
-
-        function extFieldHtml(f, val) {
-            const id = 'extf-' + f.key;
-            let input = '';
-            const v = val == null ? '' : val;
-            if (f.type === 'bool') {
-                input = '<label class="switch"><input type="checkbox" id="' + escAttr(id) + '"' +
-                    (v ? ' checked' : '') + '><span></span></label>';
-            } else if (f.type === 'select') {
-                input = '<select id="' + escAttr(id) + '">' + (f.options || []).map(function (o) {
-                    return '<option value="' + escAttr(o.value) + '"' +
-                        (String(o.value) === String(v) ? ' selected' : '') + '>' +
-                        esc(o.label) + '</option>';
-                }).join('') + '</select>';
-            } else if (f.type === 'textarea') {
-                input = '<textarea id="' + escAttr(id) + '" rows="4">' + esc(v) + '</textarea>';
-            } else if (f.type === 'group' || f.type === 'note') {
-                return '<div class="ext-group"><b>' + esc(f.label) + '</b>' +
-                    (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '') + '</div>';
-            } else {
-                const tp = f.type === 'password' ? 'password'
-                    : (f.type === 'number' ? 'number' : 'text');
-                input = '<input type="' + tp + '" id="' + escAttr(id) + '" value="' +
-                    escAttr(v) + '"' + (f.placeholder ? ' placeholder="' + escAttr(f.placeholder) + '"' : '') + '>';
-            }
-            return '<div class="ext-field"><label for="' + escAttr(id) + '">' + esc(f.label) +
-                '</label>' + input +
-                (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '') + '</div>';
-        }
-
-        function extCollect() {
-            const out = {};
-            extFields.forEach(function (f) {
-                if (f.type === 'group' || f.type === 'note') return;
-                const n = el('extf-' + f.key);
-                if (!n) return;
-                out[f.key] = (f.type === 'bool') ? n.checked
-                    : (f.type === 'number' ? Number(n.value) : n.value);
-            });
-            return out;
-        }
-
-        async function extSave() {
-            if (!extCurrent) return;
-            const msg = el('ext-save-msg');
-            if (msg) msg.textContent = '保存中…';
-            const r = await apiPost('/api/ext/panel/save',
-                { pid: extCurrent, values: extCollect() });
-            if (msg) {
-                msg.textContent = (r && r.ok) ? ('已保存' + (r.message ? '：' + r.message : ''))
-                    : ('失败：' + ((r && r.message) || (r && r.error) || '未知错误'));
-                msg.className = 'hint-sm ' + ((r && r.ok) ? 'ok' : 'err');
-            }
-            if (r && r.ok) extOpen(extCurrent);   // 重新读一次，反映真实落盘值
-        }
-
         // ==================== 账户与安全 ====================
         // 板块元数据：中文名 + 一句话解释 + 分组。键名与后端 _ALL_SCOPES 对齐。
         var GM_SCOPE_META = {
@@ -2418,7 +2525,7 @@
             bans:       { n: '封禁管理', d: '封禁 / 解封玩家', g: '玩家管理' },
             whitelist:  { n: '白名单审核', d: '审批进服申请', g: '玩家管理' },
             detail:     { n: '玩家详情', d: '单个玩家完整数据', g: '玩家管理' },
-            // ★ perm / scoreboard 已并入「操作控制台」，diag 已并入
+            // <i class=gm-ico data-ic=star></i> perm / scoreboard 已并入「操作控制台」，diag 已并入
             //   「账户与安全」。这三个 scope 不再单独出现在授权列表里 ——
             //   保留它们会让临时账户能勾选一个**页面上已不存在**的板块。
             //   页面上的元素 ID 未变，JS 逻辑不受影响。
@@ -2428,7 +2535,7 @@
             files:      { n: '文件管理', d: '服务器文件读写', g: '服务器' },
             qqbot:      { n: '机器人管理', d: 'QQ 机器人配置', g: '扩展' },
             cross:      { n: '跨服互联', d: '多服数据同步', g: '扩展' },
-            gametools:  { n: '签到与绑定', d: 'MC ↔ QQ 绑定、签到', g: '扩展' },
+            gametools:  { n: '签到与绑定', d: 'MC <i class=gm-ico data-ic=arrow-lr></i> QQ 绑定、签到', g: '扩展' },
             trust:      { n: '玩家可信度', d: '加权信任分、门禁与设备管理', g: '扩展' },
             cloud:      { n: '云黑名单', d: '云黑联合封禁', g: '扩展' },
             mods:       { n: '模组管理', d: '资源 / 行为包与子插件', g: '扩展' },
@@ -2436,16 +2543,22 @@
             // （base_url），也能看到全服日志分析结果，权限级别和
             // 「签到绑定」这类日常功能不该混在一个开关里。
             ai:         { n: 'AI 自动管理', d: '日志分析、白名单审核、自动巡查', g: '扩展' },
-            // ↓ v9.2 新增两个板块
-            //   region：能改世界方块 + 能看完整方块流水（含隐私），
-            //           敏感度高，单独一个开关。
-            //   ext   ：查看并配置其它插件挂进来的设置面板。
+            // <i class=gm-ico data-ic=arrow-d></i> region 敏感度高，单独一个开关：
+            //   它能改世界方块 + 能看完整方块流水（含隐私）。
+            //   ★ ext（第三方插件面板）此前在 v11 被移出导航：当时那个板块
+            //     只是「通往别处的一个跳转」，留着等于在授权列表里放一个
+            //     页面上不存在的幽灵板块。但后端 /api/ext/* 注册接口一直
+            //     都在，别的 Endstone 插件其实照常把自己的设置项挂进来了，
+            //     只是前端没有入口，服主看不到也改不了。
+            //     现（11.3.5+）把 sec-ext 板块恢复：列表 + 设置弹窗 + 保存，
+            //     与子插件 settings 同款渲染。所以这个 ext scope 又变成
+            //     「真实存在、可授权」的板块了，临时账号可按需勾选。
             region:     { n: '区块日志与恢复', d: '方块变更流水、区域回档与撤销', g: '服务器' },
-            ext:        { n: '第三方插件面板', d: '集中配置接入的其它插件', g: '扩展' },
+            ext:        { n: '第三方插件面板', d: '查看与配置其它插件挂进来的设置项', g: '扩展' },
         };
         var GM_SCOPE_GROUPS = ['常用', '玩家管理', '服务器', '扩展'];
         // 常用组合：一键勾选，省得一个个点。
-        // ★ 预设里只能出现**真实存在的 scope**。diag / perm / scoreboard
+        // <i class=gm-ico data-ic=star></i> 预设里只能出现**真实存在的 scope**。diag / perm / scoreboard
         //   已并入别的板块，写进来会渲染成"勾不上/点了没反应"的空壳。
         var GM_SCOPE_PRESETS = {
             '只读监控':   ['players', 'logs'],
@@ -2505,7 +2618,7 @@
 
             // 勾选状态变化时同步卡片高亮与计数。
             //
-            // ⚠ 本函数每次 loadAccount() 成功都会被调用，而 #tmp-scopes
+            // <i class=gm-ico data-ic=warn></i> 本函数每次 loadAccount() 成功都会被调用，而 #tmp-scopes
             // 这个容器节点**从头到尾不会被替换**（只换 innerHTML）。
             // 如果无条件 addEventListener，每进一次「账户与安全」就多挂
             // 一个监听器 —— 点一次勾选会触发 N 次 _syncScopeCards，
@@ -2614,7 +2727,7 @@
             }
             box.innerHTML = r.docs.map(function (d) {
                 return '<button onclick="docsOpen(' + jsArg(d.id) + ')" title=' +
-                    jsArg(d.desc || '') + '>📄 ' + esc(d.title) + '</button>';
+                    jsArg(d.desc || '') + '><i class=gm-ico data-ic=doc></i> ' + esc(d.title) + '</button>';
             }).join('');
             if (st) st.textContent = '';
         }
@@ -2632,7 +2745,7 @@
             mask.innerHTML = '<div class="modal doc-modal">' +
                 '<div class="row mb">' +
                 '<b class="modal-title">加载中…</b>' +
-                '<button onclick="docsClose()" class="btn-ghost">✕ 关闭</button></div>' +
+                '<button onclick="docsClose()" class="btn-ghost"><i class=gm-ico data-ic=x></i> 关闭</button></div>' +
                 '<div id="docs-body" class="doc-body"><p class="hint">正在读取…</p></div></div>';
             mask.addEventListener('click', function (e) { if (e.target === mask) docsClose(); });
             document.body.appendChild(mask);
@@ -2664,7 +2777,7 @@
             try {
                 const r = await apiPost('/api/account/test_mode', { test_mode: !!checked });
                 if (r && r.ok) {
-                    if (st) { st.textContent = '✅ 测试模式已' + (r.test_mode ? '开启' : '关闭'); st.className = 'status text-ok'; }
+                    if (st) { st.textContent = '测试模式已' + (r.test_mode ? '开启' : '关闭'); st.className = 'status text-ok'; }
                 } else {
                     if (st) { st.textContent = r.error || '保存失败'; st.className = 'status text-bad'; }
                 }
@@ -2681,7 +2794,7 @@
             try {
                 const r = await apiPost('/api/account/password', { admin_user: user, admin_pass: pass });
                 if (r && r.ok) {
-                    if (st) { st.textContent = '✅ ' + (r.message || '账号/密码已更新'); st.className = 'status text-ok'; }
+                    if (st) { st.textContent = '' + (r.message || '账号/密码已更新'); st.className = 'status text-ok'; }
                     if (el('acc-pass')) el('acc-pass').value = '';
                 } else {
                     if (st) { st.textContent = r.error || '保存失败'; st.className = 'status text-bad'; }
@@ -2700,7 +2813,7 @@
                     ips: el('secwl-ips') ? el('secwl-ips').value : ''
                 });
                 if (r && r.ok) {
-                    if (st) { st.textContent = '✅ ' + (r.message || '已保存'); st.className = 'status text-ok'; }
+                    if (st) { st.textContent = '' + (r.message || '已保存'); st.className = 'status text-ok'; }
                 } else {
                     if (st) { st.textContent = r.error || '保存失败'; st.className = 'status text-bad'; }
                 }
@@ -2761,7 +2874,7 @@
             try {
                 const r = await apiPost('/api/account/temp/revoke', { id: id });
                 if (r && r.ok) {
-                    if (st) { st.textContent = '✅ 已撤销'; st.className = 'status text-ok'; }
+                    if (st) { st.textContent = '已撤销'; st.className = 'status text-ok'; }
                     loadAccount();
                 } else {
                     if (st) { st.textContent = r.error || '撤销失败'; st.className = 'status text-bad'; }
@@ -2787,7 +2900,7 @@
         // 也让用户完全不必理解这个字段（原先要手填，且 label 还写反了）。
         //
         // 返回 '' 表示推断失败（file:// 打开、沙箱环境等）。
-        // ★ 调用方在返回 '' 时**绝对不能**把空串提交上去，见 saveCross 的说明。
+        // <i class=gm-ico data-ic=star></i> 调用方在返回 '' 时**绝对不能**把空串提交上去，见 saveCross 的说明。
         function crossSelfUrl() {
             try {
                 var o = window.location && window.location.origin;
@@ -2806,7 +2919,7 @@
         // 用 .hidden（admin.css 里 display:none）而不是内联 style：
         // 与全站写法一致，也避开 style.display='' 恢复默认值时的浏览器差异。
         //
-        // ★ 只切 display，绝不动 input.value。
+        // <i class=gm-ico data-ic=star></i> 只切 display，绝不动 input.value。
         //   切到 master 再切回 slave，之前填的主服地址、密码必须还在 ——
         //   否则用户只是换个角色试一下，配置就丢了。
         function syncCrossVisibility() {
@@ -2866,7 +2979,7 @@
                 el('cross-role').value = c.role || 'none';
                 el('cross-server-name').value = c.server_name || '本服';
                 // 后端下发的是掩码（"*"*len），不是明文。填进去让用户看到「已设置」，
-                // 不动这个框原样提交 → 后端识别全星号 → 保留原密码。
+                // 不动这个框原样提交 <i class=gm-ico data-ic=arrow-r></i> 后端识别全星号 <i class=gm-ico data-ic=arrow-r></i> 保留原密码。
                 el('cross-password').value = c.password || '';
                 el('cross-password').placeholder = c.password_set ? '已设置（留空不修改）' : '未设置';
                 el('cross-master-url').value = c.master_url || '';
@@ -2891,7 +3004,7 @@
                 if (!r || r.error) throw new Error(r.error || '读取失败');
                 renderCrossStatus(r);
                 const badge = el('cross-status-badge');
-                if (badge) badge.textContent = r.enabled ? ('● ' + (r.role === 'master' ? '主服' : '从服')) : '○ 未启用';
+                if (badge) badge.innerHTML = r.enabled ? ('<i class=gm-ico data-ic=dot></i> ' + gmEsc(r.role === 'master' ? '主服' : '从服')) : '<i class=gm-ico data-ic=ring></i> 未启用';
             } catch (e) {
                 const box = el('cross-status-box');
                 if (box) box.innerHTML = '<p class="text-bad">读取状态失败：' + esc(String(e)) + '</p>';
@@ -2928,15 +3041,15 @@
             const peers = d.peers || {};
             const peerKeys = Object.keys(peers);
 
-            // 主服：peers 是**本机登记的从服**（主服自己维护的注册表）→「已注册从服」
-            // 副服：peers 是主服回包里带下来的**其他**副服（不含自己）→
+            // 主服：peers 是**本机登记的从服**（主服自己维护的注册表）<i class=gm-ico data-ic=arrow-r></i>「已注册从服」
+            // 副服：peers 是主服回包里带下来的**其他**副服（不含自己）<i class=gm-ico data-ic=arrow-r></i>
             //       沿用「已注册从服」会让副服主以为自己在管理这些机器，必须区分措辞
             const peersTitle = isMaster ? '已注册从服：' : '主服上报的其他副服：';
             let peersHtml;
             if (peerKeys.length) {
                 peersHtml = '<ul class="peers-list">';
                 peerKeys.forEach(function (k) {
-                    peersHtml += '<li>' + esc(k) + ' → ' + esc(peers[k]) + '</li>';
+                    peersHtml += '<li>' + esc(k) + ' <i class=gm-ico data-ic=arrow-r></i> ' + esc(peers[k]) + '</li>';
                 });
                 peersHtml += '</ul>';
             } else {
@@ -2946,7 +3059,7 @@
                 var tone = 'is-ok';
                 if (color === '#e94560') tone = 'is-bad';
                 else if (color === '#888') tone = 'is-idle';
-                // ★ val 必须转义：d.server_name 是用户自己填的、
+                // <i class=gm-ico data-ic=star></i> val 必须转义：d.server_name 是用户自己填的、
                 //   d.last_error 来自异常字符串（可能含 < >），原样拼接是同一条注入路径。
                 return '<div class="stat ' + tone + '"><div class="k">' + esc(label)
                     + '</div><div class="v">' + esc(val) + '</div></div>';
@@ -2993,7 +3106,7 @@
                 };
                 // 本服地址（self_url）：用自动推断的浏览器地址 —— 主服靠它回连本副服。
                 //
-                // ★ 推断失败时（返回 ''）**绝不能提交空串**：
+                // <i class=gm-ico data-ic=star></i> 推断失败时（返回 ''）**绝不能提交空串**：
                 //   后端见到空串会把该字段清空，主服随即把这个副服从 peers 里删掉，
                 //   于是跨服聊天 / 系统通知 / 白名单 / 封禁推送全部**静默失效**
                 //   （不报错、只是不工作，最难排查）。
@@ -3002,7 +3115,12 @@
                 if (selfUrl) payload.self_url = selfUrl;
                 const r = await apiPost('/api/cross/config/save', payload);
                 if (r && r.ok) {
-                    if (st) { st.textContent = '已保存并重新加载跨服模块'; st.className = 'status text-ok'; }
+                    if (st) {
+                        st.textContent = r.notice
+                            ? ('已保存并重新加载 · ' + r.notice)
+                            : '已保存并重新加载跨服模块';
+                        st.className = r.notice ? 'status text-warn' : 'status text-ok';
+                    }
                     loadCross();
                 } else {
                     if (st) { st.textContent = r.error || '保存失败'; st.className = 'status text-bad'; }
@@ -3020,7 +3138,14 @@
                 if (r && r.ok) {
                     if (st) { st.textContent = r.message || '连接成功'; st.className = 'status text-ok'; }
                 } else {
-                    if (st) { st.textContent = r.error || '连接失败'; st.className = 'status text-bad'; }
+                    if (st) {
+                        var msg = r.error || '连接失败';
+                        // 后端的 hint 是「下一步该改什么」，比原始的 HTTP 错误有用得多，
+                        // 用换行接在错误后面（status 元素是 pre-line 之外就退回空格）。
+                        if (r.hint) msg += ' ｜ ' + r.hint;
+                        st.textContent = msg;
+                        st.className = 'status text-bad';
+                    }
                 }
             } catch (e) {
                 if (st) { st.textContent = '测试失败：' + e; st.className = 'status text-bad'; }
@@ -3033,8 +3158,8 @@
         // 都带上它。不这样做的话后端只能按「主卡」处理，A 卡申请的验证码
         // 会出现在 B 卡的编辑页里。
         //
-        // __botEditSeq 是请求代次：打开 A 卡 → 请求尚未返回 → 关掉再打开
-        // B 卡 → A 的响应到达时会把 B 的群列表覆盖成 A 的。每次切换卡片都
+        // __botEditSeq 是请求代次：打开 A 卡 <i class=gm-ico data-ic=arrow-r></i> 请求尚未返回 <i class=gm-ico data-ic=arrow-r></i> 关掉再打开
+        // B 卡 <i class=gm-ico data-ic=arrow-r></i> A 的响应到达时会把 B 的群列表覆盖成 A 的。每次切换卡片都
         // 自增序号，回调里比对序号，不是自己那一代就直接丢弃。
         var __botEditId = '';
         var __botEditSeq = 0;
@@ -3086,15 +3211,13 @@
                 html += '<div class="row list-divider">' +
                     '<span class="badge badge-warn">待绑定</span>' +
                     '<b class="code-lg">' + esc(p.code) + '</b>' +
-                    '<span class="hint-sm">把机器人拉进目标群，然后在<b>那个群</b>里发送该验证码</span>' +
-                    '<span class="hint-sm break">同时只保留一个有效码；申请新码会作废旧码，成功加入一个群后此码自动注销。</span>' +
-                    '<span class="hint-sm break">若在已绑定的群里发送，机器人会提示「已绑定」而不会消耗此码。</span>' +
+                    '<span class="help-q" data-help="把机器人拉进目标群，然后在<b>那个群</b>里发送该验证码。<br><br>同时只保留一个有效码；申请新码会作废旧码，成功加入一个群后此码自动注销。<br>若在已绑定的群里发送，机器人会提示「已绑定」而不会消耗此码。" role="button" tabindex="0">?</span>' +
                     '</div>';
             });
             if (!has) {
                 html = '<p class="empty">尚未绑定任何群。点击上方「加入新群」获取 4 位验证码，再把机器人拉入目标群并发送验证码即可完成绑定。</p>';
             }
-            html += '<p class="hint-sm mt-sm">提示：修改名字后点对应「保存」按钮；也可在 QQ 群内发送「设置群名 名字」快速重命名。</p>';
+            html += '<p class="hint-sm mt-sm">群名<span class="help-q" data-help="修改名字后点对应「保存」按钮；也可在 QQ 群内发送「设置群名 名字」快速重命名。" role="button" tabindex="0">?</span></p>';
             box.innerHTML = html;
         }
 
@@ -3156,7 +3279,7 @@
             const badge = el('backup-state-badge');
             const lines = [];
             if (st.running) {
-                lines.push('<span class="text-warn">⏳ 备份正在进行中…</span>');
+                lines.push('<span class="text-warn"><i class=gm-ico data-ic=hourglass></i> 备份正在进行中…</span>');
                 if (badge) { badge.textContent = '备份中'; badge.className = 'status text-warn'; }
             } else {
                 if (badge) { badge.textContent = bk.enabled ? '自动备份已开启' : '自动备份已关闭'; badge.style.color = bk.enabled ? '#4ef09a' : '#888'; }
@@ -3185,7 +3308,7 @@
             if (!list.length) { box.innerHTML = '<p class="empty">暂无备份文件</p>'; return; }
             const rows = list.map(function (b) {
                 return '<div class="list-item">'
-                    + '<span class="break">📄 ' + esc(b.name) + '<br><small class="text-accent">' + esc(fmtBytes(b.size)) + '　' + esc(b.mtime) + '</small></span>'
+                    + '<span class="break"><i class=gm-ico data-ic=doc></i> ' + esc(b.name) + '<br><small class="text-accent">' + esc(fmtBytes(b.size)) + '　' + esc(b.mtime) + '</small></span>'
                     + '<span class="row">'
                     + '<button class="ok" onclick="restoreBackup(' + jsArg(b.name) + ')">恢复</button>'
                     + '<button onclick="deleteBackup(' + jsArg(b.name) + ')">删除</button></span></div>';
@@ -3214,7 +3337,7 @@
                     el('cloud-server-name').value = c.server_name || '';
                     el('cloud-kick-message').value = c.kick_message || '';
                     if (el('cloud-api-style')) {
-                        // 老配置没有 api_style 字段 → 落到 auto，与后端默认一致
+                        // 老配置没有 api_style 字段 <i class=gm-ico data-ic=arrow-r></i> 落到 auto，与后端默认一致
                         const st = String(c.api_style || 'auto').toLowerCase();
                         el('cloud-api-style').value = (st === 'rest' || st === 'legacy') ? st : 'auto';
                     }
@@ -3293,7 +3416,7 @@
                     const roleTone = role === 'admin' ? 'text-ok' : (role === 'readonly' ? 'text-warn' : 'text-mute');
                     card.innerHTML = ''
                         + '<div class="row"><b class="spacer">接入状态</b>'
-                        + '<span class="badge ' + (r.ok ? 'badge-ok' : 'badge-bad') + '">● ' + (r.ok ? '连接正常' : '连接失败') + '</span></div>'
+                        + '<span class="badge ' + (r.ok ? 'badge-ok' : 'badge-bad') + '"><i class=gm-ico data-ic=dot></i> ' + (r.ok ? '连接正常' : '连接失败') + '</span></div>'
                         + '<div class="hint-sm mt-xs">接口协议：<b>' + esc(r.api_style || '未知') + '</b></div>'
                         + '<div class="hint-sm">身份：<span class="' + roleTone + '">' + esc(roleText) + '</span></div>'
                         + '<div class="hint-sm break">' + esc(r.message || '') + '</div>';
@@ -3332,7 +3455,7 @@
                         + cell(s.java, 'Java 版分组')
                         + '</div>';
                 }
-                if (st) { st.textContent = '✓'; st.className = 'status text-ok'; }
+                if (st) { st.textContent = ''; st.className = 'status text-ok'; }
             } catch (e) {
                 if (box) box.innerHTML = '<p class="hint">加载失败: ' + esc(String(e)) + '</p>';
                 if (st) { st.textContent = '失败'; st.className = 'status text-bad'; }
@@ -3377,7 +3500,7 @@
                             + '</tr>';
                     }).join('');
                 }
-                if (st) { st.textContent = '✓ ' + bans.length + ' 条'; st.className = 'status text-ok'; }
+                if (st) { st.textContent = '' + bans.length + ' 条'; st.className = 'status text-ok'; }
             } catch (e) {
                 if (tb) tb.innerHTML = '';
                 if (hint) hint.textContent = '加载失败: ' + e;
@@ -3398,19 +3521,19 @@
                 const r = await apiPost('/api/cloud/lookup', { xuid: xuid, ip_address: ip });
                 if (!box) return;
                 if (!r || !r.ok) {
-                    box.innerHTML = '<span class="text-bad">✗ ' + esc((r && r.message) || '查询失败') + '</span>';
+                    box.innerHTML = '<span class="text-bad"><i class=gm-ico data-ic=cross></i> ' + esc((r && r.message) || '查询失败') + '</span>';
                     return;
                 }
                 if (r.ban) {
-                    box.innerHTML = '<span class="text-bad">● 命中云黑</span>　'
+                    box.innerHTML = '<span class="text-bad"><i class=gm-ico data-ic=dot></i> 命中云黑</span>　'
                         + '原因：<b>' + esc(String(r.ban.reason || '-')) + '</b>'
                         + '　来源：' + esc(String(r.ban.server_name || '-'))
                         + '　分组：' + esc(String(r.ban.edition || '-'));
                 } else {
-                    box.innerHTML = '<span class="text-ok">○ 未命中云黑</span>';
+                    box.innerHTML = '<span class="text-ok"><i class=gm-ico data-ic=ring></i> 未命中云黑</span>';
                 }
             } catch (e) {
-                if (box) box.innerHTML = '<span class="text-bad">✗ ' + esc(String(e)) + '</span>';
+                if (box) box.innerHTML = '<span class="text-bad"><i class=gm-ico data-ic=cross></i> ' + esc(String(e)) + '</span>';
             }
         }
 
@@ -3451,13 +3574,13 @@
                     else {
                         bb.innerHTML = blist.map(function (b) {
                             return '<div class="list-item">'
-                                + esc(b.mc) + ' ↔ QQ ' + esc(b.qq) + ' <span class="empty">' + esc(b.bound_at || '') + '</span></div>';
+                                + esc(b.mc) + ' <i class=gm-ico data-ic=arrow-lr></i> QQ ' + esc(b.qq) + ' <span class="empty">' + esc(b.bound_at || '') + '</span></div>';
                         }).join('');
                     }
                 }
-                if (st) { st.textContent = '✓ ' + dlist.length + ' 个待发奖励 / ' + blist.length + ' 个绑定'; st.className = 'status text-ok'; }
+                if (st) { st.textContent = '' + dlist.length + ' 个待发奖励 / ' + blist.length + ' 个绑定'; st.className = 'status text-ok'; }
             } catch (e) {
-                if (st) { st.textContent = '✗ ' + e; st.className = 'status text-bad'; }
+                if (st) { st.textContent = '' + e; st.className = 'status text-bad'; }
             }
         }
 
@@ -3527,7 +3650,7 @@
         function trustStatus(id, msg, ok) {
             var s = el(id);
             if (!s) return;
-            s.textContent = msg || '';
+            s.textContent = (msg || '').replace(/^[✓✗★]\s*/, '');
             s.className = 'status ' + (ok === true ? 'text-ok' : (ok === false ? 'text-bad' : 'text-warn'));
         }
 
@@ -3661,12 +3784,12 @@
             // 上限必须大于下限，否则钳位会反过来。前端先挡一道，给个明确提示。
             if (t.hard_ceiling < t.hard_floor) {
                 trustStatus('trust-save-status',
-                    '✗ 分数上限不能小于下限', false);
+                    '<i class=gm-ico data-ic=cross></i> 分数上限不能小于下限', false);
                 return;
             }
             if (t.device_burst_threshold < 2) {
                 trustStatus('trust-save-status',
-                    '✗ 突发阈值至少为 2（1 个场次就扣分没有意义）', false);
+                    '<i class=gm-ico data-ic=cross></i> 突发阈值至少为 2（1 个场次就扣分没有意义）', false);
                 return;
             }
 
@@ -3707,7 +3830,7 @@
                 if (p.degraded) flags += '<span class="tag warn" title="该玩家没有 xuid，只能按名字/唯一ID存档。改名会重置权重。">降级档案</span>';
                 if (p.trusted_devices > 0) flags += '<span class="tag">信任设备 ' + esc(String(p.trusted_devices)) + '</span>';
                 // 「信任的人」徽标：与设备信任视觉上明确区分（后者是 tag，这里是 tag ok）
-                if (p.trusted_person) flags += '<span class="tag ok" title="该玩家永久保持满分，不受任何扣分影响">信任的人 ★</span>';
+                if (p.trusted_person) flags += '<span class="tag ok" title="该玩家永久保持满分，不受任何扣分影响">信任的人 <i class=gm-ico data-ic=star></i></span>';
                 if (p.qq) flags += '<span class="tag ok">已绑 QQ</span>';
                 var lastChg = p.last_change || {};
                 return '<div class="list-item">'
@@ -3739,7 +3862,7 @@
         }
 
         async function trustToggleTrustedPerson(name, trusted) {
-            // ★ 这是破坏性较大的操作（永久满分），先确认一次。
+            // <i class=gm-ico data-ic=star></i> 这是破坏性较大的操作（永久满分），先确认一次。
             //   取消信任同理 —— 用户点错了要能立刻改回来，但至少给个提示。
             var tip = trusted
                 ? '确定把「' + name + '」设为信任的人吗？\n\n效果：该玩家将永久保持满分，不受断签、设备异常等任何扣分影响。'
@@ -3827,7 +3950,7 @@
                         return '<div class="list-item"><span class="' + cls + '">'
                             + (d > 0 ? '+' : '') + esc(String(d)) + '</span> '
                             + esc(trustReasonLabel(h.reason, trustState.reasons))
-                            + ' <span class="empty">→ ' + esc(String(h.score)) + ' 分｜'
+                            + ' <span class="empty"><i class=gm-ico data-ic=arrow-r></i> ' + esc(String(h.score)) + ' 分｜'
                             + esc(h.at || '') + '｜' + esc(h.by || 'auto') + '</span></div>';
                     }).join('') + '</div>';
                 }
@@ -3905,7 +4028,7 @@
         function aiStatus(id, msg, ok) {
             var s = el(id);
             if (!s) return;
-            s.textContent = msg || '';
+            s.textContent = (msg || '').replace(/^[✓✗★]\s*/, '');
             s.className = 'status ' + (ok === true ? 'text-ok'
                                      : (ok === false ? 'text-bad' : 'text-warn'));
         }
@@ -3920,7 +4043,7 @@
         //   gmSelect.get('ai-autonomy')       // 取当前值（字符串）
         //   gmSelect.set('ai-autonomy', 2)    // 设值（不触发 onChange）
         //
-        // ★ 关键设计：真实值存在宿主元素的 data-value 上，
+        // <i class=gm-ico data-ic=star></i> 关键设计：真实值存在宿主元素的 data-value 上，
         //   而不是靠"当前选中了第几项"去反推 —— 列表是重渲染的，
         //   索引会变，data-value 不会。
         var gmSelect = (function () {
@@ -3947,7 +4070,7 @@
                     (st.open ? 'true' : 'false') + '">' +
                     '<span class="gmselect-label">' +
                     esc(cur ? cur.label : '（未选择）') + '</span>' +
-                    '<span class="gmselect-arrow">▼</span>' +
+                    '<span class="gmselect-arrow"><i class=gm-ico data-ic=tri-d></i></span>' +
                     '</button>' +
                     '<ul class="gmselect-list' + (st.open ? '' : ' hidden') +
                     '" role="listbox">';
@@ -4115,7 +4238,7 @@
             };
         })();
 
-        //: 风险等级 → 中文 + 色调。顺序很重要：越危险越靠前。
+        //: 风险等级 <i class=gm-ico data-ic=arrow-r></i> 中文 + 色调。顺序很重要：越危险越靠前。
         function aiRiskLabel(r) {
             var v = String(r || '');
             if (v.indexOf('irreversible') >= 0 || v.indexOf('IRREVERSIBLE') >= 0) {
@@ -4127,7 +4250,7 @@
             return '<span class="badge text-ok">只读</span>';
         }
 
-        //: 提示词框被手动编辑 → 标记 data-touched（用户可能已改动），
+        //: 提示词框被手动编辑 <i class=gm-ico data-ic=arrow-r></i> 标记 data-touched（用户可能已改动），
         //: 并实时刷新「内置默认 / 已自定义」标签，让用户立刻看到状态变化。
         //: 用 input 事件（含粘贴、拖拽）而不是 change —— change 要等失焦。
         document.addEventListener('input', function (ev) {
@@ -4163,7 +4286,7 @@
                 var setC = function (id, v) { var e = el(id); if (e) e.checked = !!v; };
 
                 setC('ai-enabled', c.enabled);
-                // ★ 接管级别（v7.9 主控）。后端已经做好旧 shadow_mode 的迁移，
+                // <i class=gm-ico data-ic=star></i> 接管级别（v7.9 主控）。后端已经做好旧 shadow_mode 的迁移，
                 //   这里直接用 autonomy_level；缺失时按第二级兜底（与后端
                 //   DEFAULT_AUTONOMY 一致），绝不能猜成 2 —— 那会显示成
                 //   「完全放开」，用户一看就慌。
@@ -4174,7 +4297,7 @@
                 aiRenderAutonomy(lv, s);
 
                 // 高级设置：提示词 + 聊天参数
-                // ★ 提示词框改为「预填内置默认」：用户一进来就能看到 AI
+                // <i class=gm-ico data-ic=star></i> 提示词框改为「预填内置默认」：用户一进来就能看到 AI
                 //   收到的是什么，而不是对着空框猜。语义仍然是「空 = 默认」，
                 //   但展示上不再留空 —— 靠 aiPromptSet() 在保存时判断
                 //   「框里是否就是默认原文」，是则提交空串。
@@ -4200,7 +4323,7 @@
                 setV('ai-chat-context-max-chars',
                      c.chat_context_max_chars == null ? 300 : c.chat_context_max_chars);
 
-                // 「玩家行为记录」的配置已搬到「🧱 区块日志与恢复」板块，
+                // 「玩家行为记录」的配置已搬到「<i class=gm-ico data-ic=cube></i> 区块日志与恢复」板块，
                 // 这里不再回显 —— 它的配置也不在 ai 段了（见 behavior_record）。
 
                 setV('ai-base-url', c.base_url);
@@ -4214,7 +4337,7 @@
                 setC('ai-cap-wl', c.enable_whitelist_review);
                 setC('ai-cap-auto', c.enable_auto_manage);
 
-                // ★ api_key 用的是"留空不修改"约定：后端只回掩码 __SET__，
+                // <i class=gm-ico data-ic=star></i> api_key 用的是"留空不修改"约定：后端只回掩码 __SET__，
                 //   这里**不填进输入框**（填进去用户会以为那是真 key，
                 //   而且原样提交时后端会把它当新 key 写进去）。
                 var keyEl = el('ai-api-key');
@@ -4245,7 +4368,7 @@
             else if (!s.configured) parts.push('配置不完整：' + (s.config_error || ''));
             else parts.push('已就绪' + (s.model ? '（' + s.model + '）' : ''));
 
-            // ★ 接管级别要带上"当前有多少工具被拦"。
+            // <i class=gm-ico data-ic=star></i> 接管级别要带上"当前有多少工具被拦"。
             //   级别与工具权限是 AND 关系，用户容易误以为"勾了就该动"。
             //   状态栏是唯一常驻可见的位置，必须在这里说清楚。
             var lv = (s.autonomy_level == null)
@@ -4293,7 +4416,7 @@
         }
 
         //: 没有播报卡时给一句可操作的话，而不是留个空列表让人困惑
-        //: ★ 渲染目标已从 AI 页的 #ai-purpose-summary 改为机器人页的
+        //: <i class=gm-ico data-ic=star></i> 渲染目标已从 AI 页的 #ai-purpose-summary 改为机器人页的
         //:   #bots-purpose-summary。两个 id 都尝试，谁在就渲染谁，
         //:   这样老版本页面缓存和新版页面都能正常工作。
         function aiRenderPurpose(p) {
@@ -4327,7 +4450,7 @@
         }
 
         //: 影子模式/执行模式的实时提示。
-        //: ★ 原实现用 box.innerHTML.split('<br><b')[0] 保留静态前缀 —— 那段
+        //: <i class=gm-ico data-ic=star></i> 原实现用 box.innerHTML.split('<br><b')[0] 保留静态前缀 —— 那段
         //: 接管级别的说明文案。键与后端 AUTONOMY_LEVELS 一一对应。
         var AI_AUTONOMY_HINTS = {
             0: '<b class="text-ok">第一级 · 纯建议：</b>模型的一切工具调用都不会执行，' +
@@ -4369,7 +4492,7 @@
             // 第三级 + 有权限问题时的额外提醒
             if (lv === 2 && hint) {
                 hint.innerHTML += '<br><span class="text-warn">' +
-                    '★ 请确认你理解了这一点：AI 会真的动手，且只在窗口内可挽回。</span>';
+                    '<i class=gm-ico data-ic=star></i> 请确认你理解了这一点：AI 会真的动手，且只在窗口内可挽回。</span>';
             }
         }
 
@@ -4387,7 +4510,7 @@
                           '（但工具白名单 / 脱敏 / 限频三道代码防线不受影响）。');
             }
             if (msgs.length) {
-                box.innerHTML = '⚠ ' + msgs.join('<br>⚠ ');
+                box.innerHTML = '<i class=gm-ico data-ic=warn></i> ' + msgs.join('<br><i class=gm-ico data-ic=warn></i> ');
                 box.classList.remove('hidden');
             } else {
                 box.innerHTML = '';
@@ -4408,9 +4531,9 @@
         // 设计意图（用户要求）：「把默认的提示词先放在输入框里面，方便人们
         // 了解一开始提示词是怎么写的。」
         //
-        // ★ 三个必须同时成立的约束，缺一就会出问题：
+        // <i class=gm-ico data-ic=star></i> 三个必须同时成立的约束，缺一就会出问题：
         //   ① 展示 = 默认原文（用户看得到内置提示词长什么样）
-        //   ② 语义 = 不变（框里没改过 → 保存空串 → 后端仍当"用默认"）
+        //   ② 语义 = 不变（框里没改过 <i class=gm-ico data-ic=arrow-r></i> 保存空串 <i class=gm-ico data-ic=arrow-r></i> 后端仍当"用默认"）
         //   ③ 恢复 = 填回默认（不是清空 —— 清空后用户又看不到默认了）
         //
         //   所以不能简单地 setV(value || default)：那样用户点保存时会把
@@ -4440,7 +4563,7 @@
                 tag.innerHTML = '内置默认（原样 = 不变）';
             } else {
                 tag.className = 'hint-sm ai-prompt-tag text-warn';
-                tag.innerHTML = '⚠ 已自定义（将完全替换默认）';
+                tag.innerHTML = '<i class=gm-ico data-ic=warn></i> 已自定义（将完全替换默认）';
             }
         }
 
@@ -4455,7 +4578,7 @@
                 e.classList.remove('is-default');
                 e.removeAttribute('data-showing-default');
             } else if (def) {
-                // 未自定义 → 预填默认原文，但仍标记"这是默认"
+                // 未自定义 <i class=gm-ico data-ic=arrow-r></i> 预填默认原文，但仍标记"这是默认"
                 e.value = def;
                 e.classList.add('is-default');
                 e.setAttribute('data-showing-default', '1');
@@ -4526,8 +4649,8 @@
         }
 
         //: 提交时决定这个框该发什么：
-        //:   · 内容 == 默认原文（或空）→ 发空串 → 后端当"用内置默认"
-        //:   · 其他 → 发用户内容 → 后端当"完全替换"
+        //:   · 内容 == 默认原文（或空）<i class=gm-ico data-ic=arrow-r></i> 发空串 <i class=gm-ico data-ic=arrow-r></i> 后端当"用内置默认"
+        //:   · 其他 <i class=gm-ico data-ic=arrow-r></i> 发用户内容 <i class=gm-ico data-ic=arrow-r></i> 后端当"完全替换"
         function aiPromptSubmitValue(id) {
             var e = el(id);
             if (!e) return '';
@@ -4539,7 +4662,7 @@
             aiStatus('ai-advanced-status', '保存中…');
             var getV = function (id) { var e = el(id); return e ? String(e.value) : ''; };
             var getB = function (id) { var e = el(id); return e ? !!e.checked : false; };
-            // ★ 提示词：框里若仍是默认原文，提交**空串**（= 用内置默认），
+            // <i class=gm-ico data-ic=star></i> 提示词：框里若仍是默认原文，提交**空串**（= 用内置默认），
             //   而不是把默认原文当成自定义内容存下来。否则默认提示词日后
             //   一升级，服主就永远停在旧版，且面板上显示"已自定义"——误导。
             var patch = {
@@ -4564,7 +4687,7 @@
                     aiLoad();
                 } else {
                     aiStatus('ai-advanced-status',
-                             '✗ ' + ((r && r.error) || '保存失败'), false);
+                             '<i class=gm-ico data-ic=cross></i> ' + ((r && r.error) || '保存失败'), false);
                 }
             } catch (e) {
                 aiStatus('ai-advanced-status', '✗ ' + e, false);
@@ -4573,7 +4696,7 @@
 
         // ---- 撤销窗口 ----
         // 第三级下 AI 执行的不可逆操作会在这里留下记录，窗口内可回滚。
-        // ★ 不可回滚的记录也要显示（并说明原因）——「做不到」必须如实说，
+        // <i class=gm-ico data-ic=star></i> 不可回滚的记录也要显示（并说明原因）——「做不到」必须如实说，
         //   藏起来会让服主以为"没有这条操作"，比显示一条坏消息更糟。
         async function aiLoadUndo() {
             var box = el('ai-undo-box');
@@ -4608,7 +4731,7 @@
                     badge = '<span class="badge text-warn">可撤销 · 剩 ' +
                             Number(rec.remaining || 0).toFixed(0) + ' 秒</span>';
                     extra = '<button class="warn" onclick="aiUndo(\'' +
-                            botsEsc(rec.id) + '\')">↩ 回滚这一条</button>';
+                            botsEsc(rec.id) + '\')"><i class=gm-ico data-ic=undo></i> 回滚这一条</button>';
                 } else if (st === 'no_path_back') {
                     badge = '<span class="badge text-bad">无法回滚</span>';
                     extra = '<span class="hint-sm text-bad">' +
@@ -4652,7 +4775,7 @@
                 0: '切到「第一级 · 纯建议」？模型将不再执行任何操作。',
                 1: '切到「第二级 · 白名单自动」？只读与可逆操作会由 AI 直接执行。',
                 2: '切到「第三级 · 完全放开」？\n\n' +
-                   '★ AI 将可以直接删除玩家数据、修改服务器属性，不需要你确认。\n' +
+                   '<i class=gm-ico data-ic=star></i> AI 将可以直接删除玩家数据、修改服务器属性，不需要你确认。\n' +
                    '执行后有撤销窗口可以回滚，但窗口一过就真的不可逆了。\n\n确认切换？'
             }[Number(level)] || '切换接管级别？';
             if (!confirm(msg)) { aiLoad(); return; }
@@ -4674,7 +4797,7 @@
         function aiRenderGuard(s) {
             var box = el('ai-guard-note');
             if (!box || !s) return;
-            // ★ v7.9：影子模式被三级接管取代，说明文案随之更新。
+            // <i class=gm-ico data-ic=star></i> v7.9：影子模式被三级接管取代，说明文案随之更新。
             //   优先用 autonomy_level；缺失时回退到旧 shadow_mode 判断，
             //   保证老缓存页面也能显示合理文案。
             var lv = (s.autonomy_level == null)
@@ -4692,8 +4815,8 @@
             var head = '<div class="hint-sm mb-sm">' +
                 '<span class="badge">' + botsEsc(r.task || '') + '</span> ' +
                 (r.ts ? botsEsc(new Date(r.ts * 1000).toLocaleString()) : '') +
-                (r.ok ? ' <span class="text-ok">✓ 成功</span>'
-                      : ' <span class="text-bad">✗ 失败</span>') + '</div>';
+                (r.ok ? ' <span class="text-ok"><i class=gm-ico data-ic=check></i> 成功</span>'
+                      : ' <span class="text-bad"><i class=gm-ico data-ic=cross></i> 失败</span>') + '</div>';
             var body = '';
             if (r.error) body += '<div class="text-bad">' + botsEsc(r.error) + '</div>';
             if (r.text) body += '<pre class="ai-result-pre">' + botsEsc(r.text) + '</pre>';
@@ -4711,7 +4834,7 @@
             var getB = function (id) { var e = el(id); return e ? !!e.checked : false; };
             var patch = {
                 enabled: getB('ai-enabled'),
-                // ★ shadow_mode 不再由前端提交 —— 它已被 autonomy_level 取代，
+                // <i class=gm-ico data-ic=star></i> shadow_mode 不再由前端提交 —— 它已被 autonomy_level 取代，
                 //   由 /api/ai/autonomy 单独管理。保留旧字段会让升级路径
                 //   出现"两个真源打架"（迁移逻辑 vs 前端布尔）。
                 base_url: getV('ai-base-url'),
@@ -4720,7 +4843,7 @@
                 max_log_lines: Number(getV('ai-max-lines') || 120),
                 min_interval: Number(getV('ai-min-interval') || 0),
                 daily_limit: Number(getV('ai-daily-limit') || 0),
-                // ★ 撤销窗口属于"普通配置"，随「保存配置」一起提交没问题
+                // <i class=gm-ico data-ic=star></i> 撤销窗口属于"普通配置"，随「保存配置」一起提交没问题
                 //   （它与提示词/聊天参数不同，没有"空串=清空"的歧义）。
                 //   接管级别**不在这里** —— 它走独立的 /api/ai/autonomy，
                 //   避免"改个超时顺带把级别也改了"。
@@ -4729,16 +4852,16 @@
                 enable_whitelist_review: getB('ai-cap-wl'),
                 enable_auto_manage: getB('ai-cap-auto')
             };
-            // ★ 这里**故意不包含 allowed_tools**。
+            // <i class=gm-ico data-ic=star></i> 这里**故意不包含 allowed_tools**。
             //   工具权限有自己的保存按钮（aiToolsSave），走同一个
             //   /api/ai/save 接口但只带 allowed_tools 一个字段。
             //   后端是"payload 里有的字段才改"，所以：
-            //     · 点「保存配置」→ 不动工具权限；
-            //     · 点「保存工具权限」→ 不动其他配置。
+            //     · 点「保存配置」<i class=gm-ico data-ic=arrow-r></i> 不动工具权限；
+            //     · 点「保存工具权限」<i class=gm-ico data-ic=arrow-r></i> 不动其他配置。
             //   如果这里把 allowed_tools 也带上，用户改个超时就会
             //   顺带把工具权限重置掉 —— 那是个很难查的"改了别的丢了这个"。
             //
-            // ★ 只有真的填了新 key 才提交 api_key。留空 = 不改动，
+            // <i class=gm-ico data-ic=star></i> 只有真的填了新 key 才提交 api_key。留空 = 不改动，
             //   绝不能把空串或掩码当"新 key"发过去。
             var k = getV('ai-api-key');
             if (k) patch.api_key = k;
@@ -4792,7 +4915,7 @@
         }
 
         //: 分析在后台线程跑，UI 轮询状态直到结束。
-        //: ★ 必须有结束条件（最多 5 分钟），否则一次失败的
+        //: <i class=gm-ico data-ic=star></i> 必须有结束条件（最多 5 分钟），否则一次失败的
         //:   "running 没复位"会让定时器永远转下去。
         function aiWatch() {
             if (AI_STATUS_TIMER) { clearInterval(AI_STATUS_TIMER); AI_STATUS_TIMER = null; }
@@ -4803,6 +4926,9 @@
                     aiStatus('ai-run-status', '分析时间过长，已停止等待（可点刷新看结果）', false);
                     return;
                 }
+                // 页面切到后台时不要白轮询：分析在服务端照常跑，
+                // 切回来时下一次轮询会把状态补上。省电也省请求。
+                if (document.hidden) return;
                 try {
                     var r = await apiGet('/api/ai/status');
                     if (!r || !r.ok) return;
@@ -4853,8 +4979,8 @@
                 box.innerHTML = items.map(function (p) {
                     var pending = String(p.status || '') === 'pending';
                     var btn = pending
-                        ? '<button onclick="aiConfirm(' + jsArg(p.id) + ')">✅ 确认执行</button>' +
-                          '<button class="danger" onclick="aiReject(' + jsArg(p.id) + ')">✖ 驳回</button>'
+                        ? '<button onclick="aiConfirm(' + jsArg(p.id) + ')"><i class=gm-ico data-ic=check></i> 确认执行</button>' +
+                          '<button class="danger" onclick="aiReject(' + jsArg(p.id) + ')"><i class=gm-ico data-ic=x></i> 驳回</button>'
                         : '<span class="badge">' + botsEsc(p.status || '') + '</span>';
                     return '<div class="card">' +
                         '<div class="row"><b class="break spacer">' + botsEsc(p.tool || '') + '</b>' +
@@ -4921,6 +5047,151 @@
             }
         }
 
+        // ==================== 面板「与 AI 对话（服主）」 ====================
+        // 与群里「群友 @AI 聊天」是两条**独立**的链路，同一个后端 AI：
+        //   · 群聊：受群聊开关 / 按人限频约束，只有只读工具，结果脱敏；
+        //   · 这里：服主身份，可用全部工具，结果不脱敏，也不受限频。
+        // 入口不同、权限不同、互不牵连 —— 关掉「群友 @AI 聊天」
+        // 不会影响这里，反之亦然。
+        //
+        // 保存历史是为了让 AI 能理解「它刚才说的那个」这类指代。
+        // 只存最近若干轮：多留一轮，每次请求的输入就长一截，
+        // 花费是按 token 线性涨的。
+        var AIWEB_HIST = [];
+        var AIWEB_BUSY = false;
+
+        function aiWebPush(role, text, meta) {
+            var log = el('aiweb-log');
+            if (!log) return;
+            var empty = log.querySelector('.aiweb-empty');
+            if (empty) empty.remove();
+            var row = document.createElement('div');
+            row.className = 'aiweb-row aiweb-' + role;
+            var head = document.createElement('div');
+            head.className = 'aiweb-head';
+            head.textContent = (role === 'me') ? '我（服主）' : 'AI';
+            var body = document.createElement('div');
+            body.className = 'aiweb-body';
+            // ★ 一律纯文本写入，绝不用 innerHTML：
+            //   AI 的回复里可能复述玩家名、日志原文、甚至被注入的 HTML，
+            //   用 innerHTML 等于给模型开一个 XSS 入口。
+            body.textContent = String(text || '');
+            row.appendChild(head);
+            row.appendChild(body);
+            if (meta) {
+                var m = document.createElement('div');
+                m.className = 'aiweb-meta';
+                m.textContent = meta;
+                row.appendChild(m);
+            }
+            log.appendChild(row);
+            // 长对话会让 DOM 无限膨胀（一轮 3 个节点，聊 200 轮就是 600 个）。
+            // 超出上限时删掉最旧的，保证滚动与重排成本有界。
+            var rows = log.querySelectorAll('.aiweb-row');
+            if (rows.length > 60) {
+                for (var i = 0; i < rows.length - 60; i++) rows[i].remove();
+            }
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function aiWebEmpty() {
+            var log = el('aiweb-log');
+            if (!log) return;
+            log.innerHTML = '';
+            var d = document.createElement('div');
+            d.className = 'aiweb-empty';
+            d.textContent = '还没有对话。直接下指令，例如「恢复今天下午被炸的地方」。';
+            log.appendChild(d);
+        }
+
+        function aiWebMeta(r) {
+            var parts = [];
+            if (r && r.source === 'direct') parts.push('直连指令');
+            var acts = (r && r.actions) || [];
+            if (acts.length) {
+                var names = acts.map(function (a) { return a.tool; })
+                                .filter(Boolean);
+                var uniq = names.filter(function (v, i) {
+                    return names.indexOf(v) === i;
+                });
+                if (uniq.length) parts.push('调用 ' + uniq.join('、'));
+            }
+            if (r && r.api_calls) parts.push(r.api_calls + ' 次请求');
+            if (r && r.pending_proposals) {
+                parts.push(r.pending_proposals + ' 条待确认');
+            }
+            if (r && r.undo_pending) parts.push(r.undo_pending + ' 项可撤销');
+            return parts.join(' · ');
+        }
+
+        function aiWebStatus(text, cls) {
+            var st = el('aiweb-status');
+            if (!st) return;
+            st.textContent = text || '';
+            st.className = 'hint-sm' + (cls ? ' ' + cls : '');
+        }
+
+        async function aiWebSend() {
+            if (AIWEB_BUSY) return;
+            var input = el('aiweb-input');
+            var btn = el('aiweb-send');
+            if (!input) return;
+            var text = String(input.value || '').trim();
+            if (!text) return;
+
+            AIWEB_BUSY = true;
+            if (btn) btn.disabled = true;
+            aiWebPush('me', text);
+            AIWEB_HIST.push({ role: 'user', content: text });
+            input.value = '';
+            aiWebStatus('思考中…（最长几十秒）', 'text-warn');
+            try {
+                var r = await apiPost('/api/ai/webchat',
+                                      { message: text, history: AIWEB_HIST });
+                if (!r || !r.ok) {
+                    aiWebPush('ai', '（失败）' + ((r && r.error) || '未知错误'));
+                    aiWebStatus('请求失败', 'text-bad');
+                    AIWEB_HIST.pop();
+                    return;
+                }
+                var reply = r.text || '（AI 没有返回文字内容）';
+                aiWebPush('ai', reply, aiWebMeta(r));
+                AIWEB_HIST.push({ role: 'assistant', content: reply });
+                // 只留最近 6 轮（12 条）：历史越长，每次请求的输入越长。
+                if (AIWEB_HIST.length > 12) {
+                    AIWEB_HIST = AIWEB_HIST.slice(-12);
+                }
+                aiWebStatus('完成', 'text-ok');
+                // 让 AI 动过手之后，「待确认提议」与「可撤销的操作」很可能
+                // 已经变了。顺手刷一下，省得服主还要手动点两次才知道
+                // 要不要去点确认 —— 那正是这两张表存在的意义。
+                var auditBox = el('ai-audit-box');
+                if (auditBox && auditBox.offsetParent !== null) aiLoadAudit();
+                var undoBox = el('ai-undo-box');
+                if (undoBox && undoBox.offsetParent !== null) aiLoadUndo();
+            } catch (e) {
+                aiWebPush('ai', '（请求异常）' + String(e));
+                aiWebStatus('请求异常', 'text-bad');
+                AIWEB_HIST.pop();
+            } finally {
+                AIWEB_BUSY = false;
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function aiWebKey(ev) {
+            if (ev.key !== 'Enter') return;
+            if (ev.shiftKey) return;        // Shift + 回车 = 换行，不发送
+            ev.preventDefault();
+            aiWebSend();
+        }
+
+        function aiWebClear() {
+            AIWEB_HIST = [];
+            aiWebEmpty();
+            aiWebStatus('', '');
+        }
+
         function aiRenderTools() {
             var box = el('ai-tools-box');
             if (!box || !AI_TOOL_CACHE) return;
@@ -4945,7 +5216,7 @@
             var blocks = (st && st.shadow_blocks) || [];
             if (blocks.length) {
                 head += '<div class="callout-warn mt-sm">' +
-                    '<b>⚠ 影子模式正在拦截 ' + blocks.length + ' 个已启用的工具</b>' +
+                    '<b><i class=gm-ico data-ic=warn></i> 影子模式正在拦截 ' + blocks.length + ' 个已启用的工具</b>' +
                     '<div class="hint-sm mt-xs">这些工具已勾选，但影子模式不会让它们执行：' +
                     blocks.map(function (b) {
                         return '<span class="badge">' + botsEsc(b.name) + '</span>';
@@ -4980,13 +5251,13 @@
             });
 
             html += '<div class="row mt">' +
-                '<button class="ok" onclick="aiToolsSave()">💾 保存工具权限</button>' +
+                '<button class="ok" onclick="aiToolsSave()"><i class=gm-ico data-ic=disk></i> 保存工具权限</button>' +
                 '<span id="ai-tools-status" class="hint-sm"></span></div>';
 
             box.innerHTML = head + html;
         }
 
-        //: 用户动了任意开关 → 立即进入白名单模式。
+        //: 用户动了任意开关 <i class=gm-ico data-ic=arrow-r></i> 立即进入白名单模式。
         //: 这一步很关键：如果「取消第一个勾」时不切模式，
         //: 前端会一直按"未限制=全勾"渲染，用户的取消操作看起来无效。
         function aiToolToggle() {
@@ -5048,15 +5319,15 @@
         function gmodStatus(id, msg, ok) {
             const s = el(id);
             if (!s) return;
-            s.textContent = msg || '';
+            s.textContent = (msg || '').replace(/^[✓✗★]\s*/, '');
             s.className = 'status ' + (ok === true ? 'text-ok' : (ok === false ? 'text-bad' : 'text-warn'));
         }
 
         function gmodTypeLabel(t) {
-            if (t === 'index') return '<span class="badge">🌐 官网首页</span>';
-            if (t === 'admin') return '<span class="badge">🗄 管理后台</span>';
-            if (t === 'py') return '<span class="badge">🐍 可执行代码</span>';
-            return '<span class="badge">🧩 代码型</span>';
+            if (t === 'index') return '<span class="badge"><i class=gm-ico data-ic=globe></i> 官网首页</span>';
+            if (t === 'admin') return '<span class="badge"><i class=gm-ico data-ic=server></i> 管理后台</span>';
+            if (t === 'py') return '<span class="badge"><i class=gm-ico data-ic=code></i> 可执行代码</span>';
+            return '<span class="badge"><i class=gm-ico data-ic=puzzle></i> 代码型</span>';
         }
 
         async function loadGmods() {
@@ -5077,7 +5348,7 @@
                         st.innerHTML = '当前 <b>没有</b> 子插件接管页面，官网与后台使用面板默认页面。';
                     } else {
                         st.innerHTML = '当前接管：' + on.map(function (m) {
-                            return (m.type === 'admin' ? '/admin' : '官网首页') + ' ← <b>' + esc(m.name || m.uuid) + '</b>';
+                            return (m.type === 'admin' ? '/admin' : '官网首页') + ' <i class=gm-ico data-ic=arrow-l></i> <b>' + esc(m.name || m.uuid) + '</b>';
                         }).join('　|　');
                     }
                 }
@@ -5093,20 +5364,20 @@
                             const miss = (m.missing_libs && m.missing_libs.length)
                                 ? '<span class="text-bad">　缺少依赖：' + esc(m.missing_libs.join('、')) + '</span>' : '';
                             const state = m.enabled
-                                ? '<span class="text-ok">● 已启用</span>'
-                                : '<span class="text-accent">○ 未启用</span>';
+                                ? '<span class="text-ok"><i class=gm-ico data-ic=dot></i> 已启用</span>'
+                                : '<span class="text-accent"><i class=gm-ico data-ic=ring></i> 未启用</span>';
                             const toggle = m.enabled
-                                ? '<button onclick="disableGmod(' + q + ')">⏹ 停用</button>'
-                                : '<button class="ok" onclick="enableGmod(' + q + ')">▶ 启用</button>';
+                                ? '<button onclick="disableGmod(' + q + ')"><i class=gm-ico data-ic=stop></i> 停用</button>'
+                                : '<button class="ok" onclick="enableGmod(' + q + ')"><i class=gm-ico data-ic=tri-r></i> 启用</button>';
                             let preview = '';
-                            if (m.type === 'index') preview = '<a class="btn-link" href="/" target="_blank" rel="noopener">🌐 打开首页</a>';
-                            if (m.type === 'admin') preview = '<a class="btn-link" href="/admin" target="_blank" rel="noopener">🗄 打开后台</a>';
+                            if (m.type === 'index') preview = '<a class="btn-link" href="/" target="_blank" rel="noopener"><i class=gm-ico data-ic=globe></i> 打开首页</a>';
+                            if (m.type === 'admin') preview = '<a class="btn-link" href="/admin" target="_blank" rel="noopener"><i class=gm-ico data-ic=server></i> 打开后台</a>';
                             // py 型：补一条「入口 / 权限」信息，方便确认它到底跑没跑、能读什么
                             let extra = '';
                             if (m.type === 'py') {
                                 const run = m.running
-                                    ? '<span class="text-ok">● 运行中</span>'
-                                    : '<span class="text-mute">○ 未运行</span>';
+                                    ? '<span class="text-ok"><i class=gm-ico data-ic=dot></i> 运行中</span>'
+                                    : '<span class="text-mute"><i class=gm-ico data-ic=ring></i> 未运行</span>';
                                 const perms = (m.permissions && m.permissions.length)
                                     ? esc(m.permissions.join('、'))
                                     : '未声明（仅游戏侧能力）';
@@ -5125,10 +5396,10 @@
                                 + '</span>'
                                 + toggle
                                 + (m.has_settings
-                                    ? '<button onclick="gmodOpenSettings(' + q + ')" title="该子插件的独立设置项">⚙ 设置</button>'
+                                    ? '<button onclick="gmodOpenSettings(' + q + ')" title="该子插件的独立设置项"><i class=gm-ico data-ic=gear></i> 设置</button>'
                                     : '')
-                                + '<button onclick="viewGmod(' + q + ')" title="查看包内文件">📄</button>'
-                                + '<button onclick="uninstallGmod(' + q + ')" title="删除子插件文件">🗑</button>'
+                                + '<button onclick="viewGmod(' + q + ')" title="查看包内文件"><i class=gm-ico data-ic=doc></i></button>'
+                                + '<button onclick="uninstallGmod(' + q + ')" title="删除子插件文件"><i class=gm-ico data-ic=trash></i></button>'
                                 + preview
                                 + '</div>';
                         }).join('');
@@ -5138,7 +5409,7 @@
                 const lb = el('gmod-lib-box');
                 if (lb) {
                     lb.innerHTML = libs.length
-                        ? libs.map(function (n) { return '<div class="list-item break">📦 ' + esc(n) + '</div>'; }).join('')
+                        ? libs.map(function (n) { return '<div class="list-item break"><i class=gm-ico data-ic=box></i> ' + esc(n) + '</div>'; }).join('')
                         : '<p class="empty">暂无依赖包</p>';
                 }
                 if (el('gmod-paths')) {
@@ -5274,7 +5545,7 @@
             }
             const fields = r.fields || [];
             if (!fields.length) {
-                botEditOpenHtml('⚙ ' + esc(r.name || uid),
+                botEditOpenHtml('<i class=gm-ico data-ic=gear></i> ' + esc(r.name || uid),
                     '<p class="hint">该子插件未提供设置项（包内缺少 settings.json）。</p>'
                     + '<div class="row mt"><button onclick="botEditClose()" class="btn-ghost">关闭</button></div>');
                 return;
@@ -5296,11 +5567,11 @@
                 body += '<details class="gmod-adv"><summary>高级选项</summary>' + adv.join('') + '</details>';
             }
             body += '<div class="row mt">'
-                + '<button class="ok" onclick="gmodSettingsSave(' + JSON.stringify(uid) + ')">💾 保存</button>'
+                + '<button class="ok" onclick="gmodSettingsSave(' + JSON.stringify(uid) + ')"><i class=gm-ico data-ic=disk></i> 保存</button>'
                 + '<button class="text-bad" onclick="botEditClose()">取消</button>'
                 + '<span id="gmodset-status" class="hint"></span></div>';
 
-            botEditOpenHtml('⚙ ' + esc(r.name || uid) + ' 设置', body);
+            botEditOpenHtml('<i class=gm-ico data-ic=gear></i> ' + esc(r.name || uid) + ' 设置', body);
 
             // 渲染完再填值 —— 密码字段的 placeholder 要等主插件给了面罩才知道
             const vals = r.values || {};
@@ -5326,7 +5597,7 @@
             const st = document.getElementById('gmodset-status');
             function setSt(msg, ok) {
                 if (!st) return;
-                st.textContent = msg || '';
+                st.textContent = (msg || '').replace(/^[✓✗★]\s*/, '');
                 st.className = 'hint ' + (ok === true ? 'text-ok' : (ok === false ? 'text-bad' : ''));
             }
             // 从 DOM 反查当前有哪些字段，避免依赖外层的 fields 变量
@@ -5341,7 +5612,7 @@
                 } else if (node.type === 'password') {
                     seenPwd[key] = true;
                     const raw = String(node.value || '');
-                    // 空 = 管理员没动它（可能是"已设置"状态）→ 不提交，保留原值
+                    // 空 = 管理员没动它（可能是"已设置"状态）<i class=gm-ico data-ic=arrow-r></i> 不提交，保留原值
                     if (raw === '') continue;
                     values[key] = raw;
                 } else {
@@ -5362,6 +5633,215 @@
             }
         }
 
+        // ---------- 第三方插件面板（sec-ext） ----------
+        //
+        // 别的 Endstone 插件经 gm.panel.register()（同进程）或
+        // POST /api/ext/register（远程）把设置项挂进面板。后端 /api/ext/*
+        // 一直都在，v11 只是把前端板块移除了；这里恢复渲染，让外部插件的
+        // 配置界面重新可见。字段规格与子插件 settings.json 完全一致，
+        // 渲染结构复用 gmodFieldHtml 的同款逻辑。
+        //
+        // 控件 id 约定：extset-<key>。key 已被主插件校验为纯标识符，安全。
+        var extCurrentPid = null;
+        var extCurrentFields = [];
+
+        function extIconHtml(p) {
+            // 插件可自带 icon：既支持 gm-ico 名（data-ic），也支持单个 emoji
+            // （satmap 用的就是 🛰️）。emoji 只放行「短且不含 HTML 元字符」的
+            // 串，且一律转义后再拼，杜绝把任意字符串注入 DOM。
+            const raw = (p && typeof p.icon === 'string') ? p.icon : '';
+            if (/^[a-z][a-z0-9-]*$/.test(raw)) {
+                return '<i class=gm-ico data-ic=' + escAttr(raw) + '></i> ';
+            }
+            if (raw && raw.length <= 8 && !/[<>&"']/.test(raw)) {
+                return '<span class=gm-ico-emoji>' + esc(raw) + '</span> ';
+            }
+            return '<i class=gm-ico data-ic=puzzle></i> ';
+        }
+
+        function extFieldHtml(f) {
+            const id = 'extset-' + String(f.key);
+            const label = esc(f.label || f.key);
+            let inner = '';
+            if (f.type === 'bool') {
+                return '<div class="mb-sm"><label class="ios" data-on="启用" data-off="关闭">'
+                    + '<input type="checkbox" id="' + escAttr(id) + '"' + (f.default === true ? ' checked' : '') + '><i></i>'
+                    + ' <span class="ios-text">' + label + '</span></label>'
+                    + (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '')
+                    + '</div>';
+            }
+            if (f.type === 'note') {
+                return '<div class="hint mb-sm">' + label + (f.hint ? '　' + esc(f.hint) : '') + '</div>';
+            }
+            if (f.type === 'select') {
+                let o = '';
+                (f.options || []).forEach(function (x) {
+                    o += '<option value="' + escAttr(String(x.value)) + '">' + esc(String(x.label)) + '</option>';
+                });
+                inner = '<select id="' + escAttr(id) + '" class="block-input">' + o + '</select>';
+            } else if (f.type === 'textarea') {
+                inner = '<textarea id="' + escAttr(id) + '" rows="5" class="block-input min-h-80"'
+                    + (f.placeholder ? ' placeholder="' + escAttr(f.placeholder) + '"' : '')
+                    + '></textarea>';
+            } else {
+                // text / password / number
+                const itype = (f.type === 'password') ? 'password' : (f.type === 'number' ? 'number' : 'text');
+                let extra = '';
+                if (f.type === 'number') {
+                    if (f.min != null) extra += ' min="' + escAttr(String(f.min)) + '"';
+                    if (f.max != null) extra += ' max="' + escAttr(String(f.max)) + '"';
+                    extra += ' step="any"';
+                }
+                inner = '<input type="' + itype + '" id="' + escAttr(id) + '" class="block-input"' + extra
+                    + (f.placeholder ? ' placeholder="' + escAttr(f.placeholder) + '"' : '')
+                    + '>';
+            }
+            return '<div class="mb-sm">'
+                + '<div class="field-label">' + label + '</div>'
+                + inner
+                + (f.hint ? '<div class="hint-sm">' + esc(f.hint) + '</div>' : '')
+                + '</div>';
+        }
+
+        async function loadExtPanels() {
+            const box = el('ext-panel-list');
+            if (box) box.innerHTML = '<p class="hint">加载中…</p>';
+            try {
+                const r = await apiGet('/api/ext/panels');
+                if (!r || !r.ok) throw new Error((r && r.error) || '加载失败');
+                const panels = r.panels || [];
+                if (el('ext-panel-count')) el('ext-panel-count').textContent = String(r.count != null ? r.count : panels.length);
+                if (!box) return;
+                if (!panels.length) {
+                    box.innerHTML = '<p class="empty">当前没有第三方插件接入面板。'
+                        + '别的 Endstone 插件可通过 <code>from gm import panel</code> '
+                        + '或 <code>POST /api/ext/register</code> 把自己的设置项挂到这里。</p>';
+                    return;
+                }
+                box.innerHTML = panels.map(function (p) {
+                    const q = JSON.stringify(String(p.pid || '')).replace(/"/g, '&quot;');
+                    const meta = []
+                        .concat(p.version ? ['v' + esc(p.version)] : [])
+                        .concat(p.author ? ['作者 ' + esc(p.author)] : [])
+                        .concat(p.remote ? ['远程'] : [])
+                        .join('　');
+                    const src = p.source ? esc(p.source) : (p.remote ? 'remote' : '本地');
+                    return '<div class="list-item">'
+                        + '<div class="break"><b>' + extIconHtml(p) + esc(p.title || p.pid) + '</b>'
+                        + (meta ? ' <span class="text-accent">' + meta + '</span>' : '')
+                        + (p.description ? '<div class="hint-sm break">' + esc(p.description) + '</div>' : '')
+                        + '<div class="hint-sm break">来源: ' + src + '</div>'
+                        + '</div>'
+                        + '<button class="ok" onclick="extOpenPanel(' + q + ')"><i class=gm-ico data-ic=gear></i> 设置</button>'
+                        + '</div>';
+                }).join('');
+            } catch (e) {
+                if (box) box.innerHTML = '<p class="hint text-bad">加载失败: ' + esc(String(e)) + '</p>';
+            }
+        }
+
+        async function extOpenPanel(pid) {
+            const p = String(pid);
+            extCurrentPid = p;
+            let r;
+            try {
+                r = await apiGet('/api/ext/panel?pid=' + encodeURIComponent(p));
+            } catch (e) {
+                botEditOpenHtml('第三方插件面板', '<p class="hint text-bad">读取失败: ' + esc(String(e)) + '</p>'
+                    + '<div class="row mt"><button onclick="botEditClose()" class="btn-ghost">关闭</button></div>');
+                return;
+            }
+            if (!r || !r.ok) {
+                botEditOpenHtml('第三方插件面板', '<p class="hint text-bad">' + esc((r && r.error) || '读取失败') + '</p>'
+                    + '<div class="row mt"><button onclick="botEditClose()" class="btn-ghost">关闭</button></div>');
+                return;
+            }
+            const fields = r.fields || [];
+            const panel = r.panel || {};
+            extCurrentFields = fields;
+            if (!fields.length) {
+                botEditOpenHtml(extIconHtml(panel) + esc(panel.title || p),
+                    '<p class="hint">该插件未提供设置项。</p>'
+                    + '<div class="row mt"><button onclick="botEditClose()" class="btn-ghost">关闭</button></div>');
+                return;
+            }
+            const main = [], adv = [];
+            fields.forEach(function (f) {
+                if (!f || !f.type) return;
+                if (f.type === 'group') {
+                    const t = '<div class="modal-section-title">' + esc(f.label || '') + '</div>';
+                    (f.advanced ? adv : main).push(t);
+                    return;
+                }
+                (f.advanced ? adv : main).push(extFieldHtml(f));
+            });
+            let body = '<p class="hint mb-sm">' + esc(panel.description || (panel.title || p)) + '</p>';
+            body += main.join('');
+            if (adv.length) {
+                body += '<details class="gmod-adv"><summary>高级选项</summary>' + adv.join('') + '</details>';
+            }
+            body += '<div class="row mt">'
+                + '<button class="ok" onclick="extPanelSave(' + JSON.stringify(p) + ')"><i class=gm-ico data-ic=disk></i> 保存</button>'
+                + '<button class="text-bad" onclick="botEditClose()">取消</button>'
+                + '<span id="extset-status" class="hint"></span></div>';
+            botEditOpenHtml(extIconHtml(panel) + esc(panel.title || p), body);
+
+            // 渲染完再填值（密码面罩需特殊处理）
+            const vals = r.values || {};
+            fields.forEach(function (f) {
+                if (!f || !f.key) return;
+                const node = document.getElementById('extset-' + f.key);
+                if (!node) return;
+                const v = (f.key in vals) ? vals[f.key] : '';
+                if (f.type === 'bool') {
+                    node.checked = !!v;
+                } else if (f.type === 'password') {
+                    if (String(v) === '******') node.placeholder = '已设置（留空不修改）';
+                    else node.value = (v == null ? '' : String(v));
+                } else {
+                    node.value = (v == null ? '' : String(v));
+                }
+            });
+        }
+
+        async function extPanelSave(pid) {
+            const p = (pid != null) ? String(pid) : (extCurrentPid || '');
+            if (!p) return;
+            const status = el('extset-status');
+            if (status) { status.textContent = '保存中…'; status.className = 'hint'; }
+            const values = {};
+            (extCurrentFields || []).forEach(function (f) {
+                if (!f || !f.key || !f.type) return;
+                if (f.type === 'group' || f.type === 'note') return;
+                const node = document.getElementById('extset-' + f.key);
+                if (!node) return;
+                if (f.type === 'bool') {
+                    values[f.key] = !!node.checked;
+                } else if (f.type === 'password') {
+                    // 空 = 管理员没改（"已设置"状态）→ 发面罩串让后端丢弃，保留原值
+                    values[f.key] = (node.value === '') ? '******' : node.value;
+                } else {
+                    values[f.key] = node.value;
+                }
+            });
+            try {
+                const r = await apiPost('/api/ext/panel/save', { pid: p, values: values });
+                if (status) {
+                    if (r && r.ok) {
+                        let msg = (r.message || '已保存');
+                        if (r.rejected && r.rejected.length) msg += '（' + r.rejected.length + ' 项未通过校验被忽略）';
+                        status.textContent = '✓ ' + msg;
+                        status.className = 'hint text-ok';
+                    } else {
+                        status.textContent = '✗ ' + ((r && r.error) || (r && r.message) || '保存失败');
+                        status.className = 'hint text-bad';
+                    }
+                }
+            } catch (e) {
+                if (status) { status.textContent = '保存失败: ' + esc(String(e)); status.className = 'hint text-bad'; }
+            }
+        }
+
         // ---------- 包内文件查看 / 在线编辑 ----------
         async function viewGmod(uuid, file) {
             gmodCurrent = String(uuid);
@@ -5379,7 +5859,7 @@
                         // 包内文件名/子插件 id 都来自压缩包，属不可信输入：
                         // 必须用 jsArg 生成合法 JS 字面量，不能简单拼单引号。
                         const act = (f === r.file) ? ' text-ok' : '';
-                        return '<div class="list-item break' + act + '">📄 <a class="btn-link" onclick="viewGmod('
+                        return '<div class="list-item break' + act + '"><i class=gm-ico data-ic=doc></i> <a class="btn-link" onclick="viewGmod('
                             + jsArg(gmodCurrent) + ', ' + jsArg(f) + ')">' + esc(f) + '</a></div>';
                     }).join('') || '<p class="empty">包内没有文件</p>';
                 }
@@ -5420,7 +5900,7 @@
 
         // ==================== 模组管理器 ====================
         //
-        // ★ 为什么改成手动刷新
+        // <i class=gm-ico data-ic=star></i> 为什么改成手动刷新
         // --------------------
         // 「待安装」栏要读上传库 + 实时遍历 mods/inbox/，
         // 「存档启用状态」栏要遍历 resource_packs/、behavior_packs/，
@@ -5450,7 +5930,7 @@
                 renderMods();
                 if (st) { st.className = 'status text-ok'; }
             } catch (e) {
-                if (st) { st.textContent = '✗ ' + e; st.className = 'status text-bad'; }
+                if (st) { st.textContent = '' + e; st.className = 'status text-bad'; }
             }
         }
 
@@ -5461,7 +5941,7 @@
 
         //: 正在安装中的文件名。列表每次轮询都会**整块重建 innerHTML**，
         //: 重建出来的按钮是全新的 DOM，disabled 自然丢了 —— 于是大包解压的
-        //: 十几秒里，用户完全可以在同一行上再点一次「🛠 安装」。两次安装会
+        //: 十几秒里，用户完全可以在同一行上再点一次「<i class=gm-ico data-ic=wrench></i> 安装」。两次安装会
         //: 并发写同一个目标目录，而且和「装完即删源文件」互相打架。
         //: 所以「谁在装」要记在函数外的变量上，由 renderMods 重建时补回禁用态。
         var installingMods = {};
@@ -5473,11 +5953,11 @@
             if (modCache === null) {
                 if (el('mod-uploaded-count')) el('mod-uploaded-count').textContent = '0';
                 const lb = el('mod-library-box');
-                if (lb) lb.innerHTML = '<p class="empty">尚未扫描。点上方「🔄 刷新」开始扫描。</p>';
+                if (lb) lb.innerHTML = '<p class="empty">尚未扫描。点上方「<i class=gm-ico data-ic=refresh></i> 刷新」开始扫描。</p>';
                 const box = el('mod-pack-groups');
-                if (box) box.innerHTML = '<p class="empty">尚未扫描。点上方「🔄 刷新」开始扫描。</p>';
+                if (box) box.innerHTML = '<p class="empty">尚未扫描。点上方「<i class=gm-ico data-ic=refresh></i> 刷新」开始扫描。</p>';
                 const metaEl = el('mod-world-meta');
-                if (metaEl) metaEl.innerHTML = '<span class="hint">点「🔄 刷新」读取该存档的模组启用状态</span>';
+                if (metaEl) metaEl.innerHTML = '<span class="hint">点「<i class=gm-ico data-ic=refresh></i> 刷新」读取该存档的模组启用状态</span>';
                 if (st) { st.textContent = '未扫描'; st.className = 'status'; }
                 return;
             }
@@ -5493,7 +5973,7 @@
                 const inboxEl = el('mod-inbox-hint');
                 if (inboxEl) {
                     if (r.inbox_dir) {
-                        inboxEl.innerHTML = '💡 大文件上传不了？用文件管理器把 .mcaddon / .mcpack '
+                        inboxEl.innerHTML = '<i class=gm-ico data-ic=bulb></i> 超过 64 MB 的包传不上来？用文件管理器把 .mcaddon / .mcpack '
                             + '拷进下面这个目录，刷新即可见：<br><code class="break">'
                             + esc(r.inbox_dir) + '</code><br>'
                             + '<span class="text-mute">安装成功的包会自动从该目录移走；安装失败会原样保留，方便你修正后重试。</span>';
@@ -5522,20 +6002,20 @@
                             // inbox 条目要标出来：它不受「上传」概念约束，用户
                             // 手动放进去的东西和他自己传的要能一眼分开。
                             const tag = (u.source === 'inbox')
-                                ? '<span class="tag-ok" title="来自手动投放目录（mods/inbox）">📁 手动投放</span> '
+                                ? '<span class="tag-ok" title="来自手动投放目录（mods/inbox）"><i class=gm-ico data-ic=folder></i> 手动投放</span> '
                                 : '';
-                            // 正在装的这一行：重建后也要保持禁用 + 「⏳ 安装中」，
+                            // 正在装的这一行：重建后也要保持禁用 + 「<i class=gm-ico data-ic=hourglass></i> 安装中」，
                             // 否则轮询每 800ms 就把按钮"解锁"一次。
                             const busy = !!installingMods[raw];
                             const btnHtml = !u.exists
                                 ? '<span class="text-bad">文件缺失</span>'
                                 : (busy
-                                    ? '<button class="ok" disabled>⏳ 安装中</button>'
-                                    : '<button class="ok" onclick="installMod(this)">🛠 安装</button>');
+                                    ? '<button class="ok" disabled><i class=gm-ico data-ic=hourglass></i> 安装中</button>'
+                                    : '<button class="ok" onclick="installMod(this)"><i class=gm-ico data-ic=wrench></i> 安装</button>');
                             return '<div class="mod-row card card-sm" data-file="' + attr + '">'
                                 + '<div class="list-item break">'
-                                + '<span>' + tag + '📦 ' + esc(label) + '<br><small class="text-accent">' + fmtBytes(u.size) + '　' + esc(u.uploaded || '') + '</small>' + sub + '</span>'
-                                + '<button onclick="deleteMod(' + jsArg + ')" title="从待安装列表删除">🗑</button></div>'
+                                + '<span>' + tag + '<i class=gm-ico data-ic=box></i> ' + esc(label) + '<br><small class="text-accent">' + fmtBytes(u.size) + '　' + esc(u.uploaded || '') + '</small>' + sub + '</span>'
+                                + '<button onclick="deleteMod(' + jsArg + ')" title="从待安装列表删除"><i class=gm-ico data-ic=trash></i></button></div>'
                                 + '<div class="row mt-xs">'
                                 + '<select class="mod-target block-input">' + opts2 + '</select>'
                                 + btnHtml
@@ -5565,7 +6045,7 @@
                 const eduN = Number(meta.education_hidden || 0);
                 const eduLine = eduN > 0
                     ? ('<br><span class="text-mute" title="' + escAttr((meta.education_names || []).join('、'))
-                       + '">🧪 已自动隐藏 ' + eduN + ' 个教育版（化学）模组，文件仍在磁盘上未被删除</span>')
+                       + '"><i class=gm-ico data-ic=flask></i> 已自动隐藏 ' + eduN + ' 个教育版（化学）模组，文件仍在磁盘上未被删除</span>')
                     : '';
                 if (metaEl) {
                     if (!meta.world) {
@@ -5584,7 +6064,7 @@
                 const res = (r.resource_packs || []).length;
                 const beh = (r.behavior_packs || []).length;
                 if (st) {
-                    st.textContent = '✓ ' + ups.length + ' 个待安装 / 资源包 ' + res + ' · 行为包 ' + beh
+                    st.textContent = '' + ups.length + ' 个待安装 / 资源包 ' + res + ' · 行为包 ' + beh
                         + (eduN > 0 ? (' · 已隐藏教育版 ' + eduN) : '')
                         + (r._at ? ('　上次扫描 ' + fmtClock(r._at)) : '');
                     st.className = 'status text-ok';
@@ -5611,10 +6091,10 @@
             const box = el('mod-pack-groups');
             if (!box) return;
             const groups = [
-                { key: 'resource', title: '📦 资源包', items: resource },
-                { key: 'behavior', title: '⚙️ 行为包', items: behavior },
+                { key: 'resource', title: '<i class=gm-ico data-ic=box></i> 资源包', items: resource },
+                { key: 'behavior', title: '<i class=gm-ico data-ic=gear></i> 行为包', items: behavior },
             ];
-            if (unknown.length) groups.push({ key: 'unknown', title: '❓ 类型未知', items: unknown });
+            if (unknown.length) groups.push({ key: 'unknown', title: '<i class=gm-ico data-ic=help></i> 类型未知', items: unknown });
 
             if (!resource.length && !behavior.length && !unknown.length) {
                 box.innerHTML = '<p class="empty">该存档目录下没有已安装的资源包或行为包</p>';
@@ -5643,7 +6123,11 @@
             const name = esc(String(p.name || p.uuid || ''));
             const ver = esc(String(p.version || '?'));
             const parent = esc(String(p.parent || ''));
-            const scope = p.scope === 'world' ? '存档内' : '全局目录';
+            // 区分「全局仓库」与「哪个存档」：同一 uuid 可能在多个存档都有，
+            // 只写「存档内」会让用户不知道这条属于哪个世界。
+            const scope = p.scope === 'world'
+                ? ('存档内' + (p.world ? ('：' + String(p.world)) : ''))
+                : '全局目录';
             const types = (p.mod_types || []).length
                 ? '<span class="hint-sm">模块：' + esc(p.mod_types.join('/')) + '</span>' : '';
 
@@ -5663,7 +6147,7 @@
             const state = p.enabled === true ? '<span class="tag-ok">已启用</span>'
                         : (p.enabled === false ? '<span class="tag-off">未启用</span>' : '');
 
-            return '<div class="list-item pack-item' + (p.enabled === true ? ' is-on' : '') + '" data-uuid="' + q + '">'
+            return '<div class="list-item pack-item' + (p.enabled === true ? ' is-on' : '') + '" data-uuid="' + escAttr(p.uuid || '') + '">'
                  + '<div class="break grow">'
                  + '<span>' + name + ' ' + state + ' <span class="text-accent">v' + ver + '</span></span>'
                  + '<div class="hint-sm break">' + parent + ' · ' + scope + '</div>'
@@ -5683,15 +6167,15 @@
                     uuid: uuid, type: kind, world: currentModWorld, enabled: enabled,
                 });
                 if (r && r.ok) {
-                    if (st) { st.textContent = '✓ ' + (r.message || '已更新'); st.className = 'status text-ok'; }
+                    if (st) { st.textContent = '' + (r.message || '已更新'); st.className = 'status text-ok'; }
                     // 重新拉取，让两组的分组计数同步刷新
                     await loadMods();
                 } else {
-                    if (st) { st.textContent = '✗ ' + ((r && (r.error || r.message)) || '操作失败'); st.className = 'status text-bad'; }
+                    if (st) { st.textContent = '' + ((r && (r.error || r.message)) || '操作失败'); st.className = 'status text-bad'; }
                     if (input) input.checked = !enabled;   // 回滚开关
                 }
             } catch (e) {
-                if (st) { st.textContent = '✗ ' + e; st.className = 'status text-bad'; }
+                if (st) { st.textContent = '' + e; st.className = 'status text-bad'; }
                 if (input) input.checked = !enabled;
             } finally {
                 if (input) input.disabled = false;
@@ -5699,11 +6183,18 @@
         }
 
         function targetSelectHtml(worlds) {
-            const g = '<option value="global">全局（服务器根目录）</option>';
+            // ★ 默认选中「当前正在查看的存档」。绝大多数人装模组就是为了
+            //   在这个存档里用；默认落在「全局」会让包只进仓库、不启用，
+            //   用户以为装坏了。全局仍然保留为显式选项。
+            const cur = currentModWorld || '';
             const ws = (worlds || []).map(function (w) {
-                return '<option value="' + escAttr(w.name) + '">存档：' + esc(w.name) + '</option>';
+                const sel = (w.name === cur) ? ' selected' : '';
+                return '<option value="' + escAttr(w.name) + '"' + sel
+                     + '>存档：' + esc(w.name) + '</option>';
             }).join('');
-            return g + ws;
+            const g = '<option value="global"' + (ws ? '' : ' selected')
+                    + '>全局（服务器根目录）</option>';
+            return ws + g;
         }
 
         async function uploadMod() {
@@ -5714,13 +6205,19 @@
                 if (st) { st.textContent = '只支持 .mcaddon / .mcpack'; st.className = 'status text-bad'; }
                 return;
             }
+            // 与服务端 _MOD_UPLOAD_LIMIT 一致：先在本地拦一次，避免
+            // 传了 100MB 才被拒（浏览器白等、服务器白读）。
+            if (fileInput.files[0].size > 64 * 1024 * 1024) {
+                if (st) { st.textContent = '文件超过 64 MB；请用文件管理器放进 mods/inbox 目录后刷新'; st.className = 'status text-bad'; }
+                return;
+            }
             const fd = new FormData();
             fd.append('file', fileInput.files[0]);
             if (st) { st.textContent = '上传中…'; st.className = 'status text-warn'; }
             try {
                 const res = await fetch(apiPath('/api/mod/upload'), { method: 'POST', body: fd });
                 const r = await res.json();
-                if (st) { st.textContent = r.ok ? ('✓ ' + (r.message || '已上传')) : ('✗ ' + (r.error || r.message || '上传失败')); st.className = r.ok ? 'status text-ok' : 'status text-bad'; }
+                if (st) { st.textContent = r.ok ? ('' + (r.message || '已上传')) : ('' + (r.error || r.message || '上传失败')); st.className = r.ok ? 'status text-ok' : 'status text-bad'; }
                 if (r.ok) { fileInput.value = ''; loadMods(); }
             } catch (e) {
                 if (st) { st.textContent = '上传失败: ' + e; st.className = 'status text-bad'; }
@@ -5735,25 +6232,27 @@
         //: 改成轮询：反复扫，直到该文件从「待安装」列表消失（=安装成功并清理了
         //: 源文件），或者出现明确失败。
         //:
-        //: ★ 为什么不能只靠「文件消失」判断成功：装失败时源文件是**故意保留**的，
+        //: <i class=gm-ico data-ic=star></i> 为什么不能只靠「文件消失」判断成功：装失败时源文件是**故意保留**的，
         //:   那时文件一直在列表里，光等消失会一路等到超时。所以轮询同时看两件事：
-        //:   文件没了 → 成功；超时了但文件还在 → 提示用户看服务端日志。
+        //:   文件没了 <i class=gm-ico data-ic=arrow-r></i> 成功；超时了但文件还在 <i class=gm-ico data-ic=arrow-r></i> 提示用户看服务端日志。
         async function waitModInstall(file, btn) {
             const st = el('mod-upload-status');
-            for (let i = 0; i < 20; i++) {
+            // 大包（尤其是带高清材质/大量脚本的 mcaddon）解压+注册可能要
+            // 几十秒；20 轮 × 0.8s = 16s 太短，会让用户误以为失败并重试。
+            for (let i = 0; i < 60; i++) {
                 await new Promise(function (r) { setTimeout(r, 800); });
                 //: 每轮都刷新状态栏：大包（几十 MB）解压要十几秒，期间文案如果
-                //: 一直停在「🛠 正在后台安装」，用户分不清是在跑还是卡死了
+                //: 一直停在「<i class=gm-ico data-ic=wrench></i> 正在后台安装」，用户分不清是在跑还是卡死了
                 //: —— 于是又点一次安装。这里显示「已等待 Ns」让他看得见进度。
                 if (st) {
-                    st.textContent = '⏳ 安装中…（已等待 ' + Math.round((i + 1) * 0.8) + 's）';
+                    st.textContent = '安装中…（已等待 ' + Math.round((i + 1) * 0.8) + 's）';
                     st.className = 'status text-warn';
                 }
                 await loadMods();
                 const still = ((modCache && modCache.uploaded) || []).some(function (u) {
                     return String(u.file) === String(file);
                 });
-                if (!still) return true;          // 源文件已被清理 → 装完了
+                if (!still) return true;          // 源文件已被清理 <i class=gm-ico data-ic=arrow-r></i> 装完了
             }
             return false;
         }
@@ -5771,25 +6270,27 @@
 
             // 安装期间禁用按钮：同一个包并发点两次会让两次安装互相覆盖目标
             // 目录，也和「装完即删源文件」冲突（后一次可能撞上文件已被删）。
-            // ★ 光设 btn.disabled 不够：轮询里的 loadMods() 会把整个列表
+            // <i class=gm-ico data-ic=star></i> 光设 btn.disabled 不够：轮询里的 loadMods() 会把整个列表
             //   innerHTML 重建，按钮被换成新的。所以还要登记到 installingMods，
             //   由 renderMods 在每次重建时把禁用态补回来。
             const btnText = btn ? btn.textContent : '';
             installingMods[file] = true;
-            if (btn) { btn.disabled = true; btn.textContent = '⏳ 安装中'; }
+            if (btn) { btn.disabled = true; btn.textContent = '安装中'; }
             if (st) { st.textContent = '安装中…'; st.className = 'status text-warn'; }
             try {
                 const r = await apiPost('/api/mod/install', payload);
                 if (!r.ok) {
-                    if (st) { st.textContent = '✗ ' + (r.error || r.message || '安装失败'); st.className = 'status text-bad'; }
+                    if (st) { st.textContent = '' + (r.error || r.message || '安装失败'); st.className = 'status text-bad'; }
                     return;
                 }
-                if (st) { st.textContent = '🛠 ' + (r.message || '开始安装'); st.className = 'status text-warn'; }
+                if (st) { st.textContent = '' + (r.message || '开始安装'); st.className = 'status text-warn'; }
                 const done = await waitModInstall(file, btn);
                 if (st) {
-                    st.textContent = done
-                        ? '✓ 已安装，安装包已从待安装列表移除'
-                        : '⚠ 安装仍在进行或已失败，请查看服务端日志（安装包已保留以便重试）';
+                    // 这里含图标标签，必须用 innerHTML；textContent 会把
+                    // "<i class=gm-ico ...>" 原样显示成一串文字。
+                    st.innerHTML = done
+                        ? '<i class=gm-ico data-ic=check></i> 已安装，安装包已从待安装列表移除'
+                        : '<i class=gm-ico data-ic=warn></i> 安装仍在进行或已失败，请查看服务端日志（安装包已保留以便重试）';
                     st.className = done ? 'status text-ok' : 'status text-warn';
                 }
             } catch (e) {
@@ -5812,7 +6313,7 @@
             try {
                 const r = await apiPost('/api/mod/delete', { file: String(file) });
                 const st = el('mod-upload-status');
-                if (st) { st.textContent = r.ok ? '✓ 已删除' : ('✗ ' + (r.error || '删除失败')); st.className = r.ok ? 'status text-ok' : 'status text-bad'; }
+                if (st) { st.textContent = r.ok ? '已删除' : ('' + (r.error || '删除失败')); st.className = r.ok ? 'status text-ok' : 'status text-bad'; }
                 loadMods();
             } catch (e) {
                 const st = el('mod-upload-status');
@@ -5834,6 +6335,92 @@
             if (!card.enabled) return '';
             if (!card.configured) return 'badge-warn';
             return card.connected ? 'badge-ok' : 'badge-warn';
+        }
+
+        // ------------------------------------------------------------------
+        // QQ 三档分档管理
+        // ------------------------------------------------------------------
+        const _TIER_LABELS = { owner: '服主', newbie: '萌新', normal: '普通人', brat: '沙币/熊孩' };
+
+        async function loadQQTiers() {
+            try {
+                const r = await apiGet('/api/qq/tiers');
+                const ownerEl = document.getElementById('qq-owner');
+                if (ownerEl) ownerEl.textContent = (r && r.owner) ? r.owner : '（未设置，绑定码发起人即服主）';
+                const rows = (r && r.tiers) || {};
+                const tb = document.getElementById('tier-rows');
+                if (!tb) return;
+                const keys = Object.keys(rows);
+                if (!keys.length) {
+                    tb.innerHTML = '<tr><td colspan="3" class="hint">暂无手动分档</td></tr>';
+                    return;
+                }
+                tb.innerHTML = keys.map(function (k) {
+                    const t = rows[k];
+                    return '<tr><td>' + esc(k) + '</td><td>' + (_TIER_LABELS[t] || t) +
+                        '</td><td><button onclick="delQQTier(\'' + esc(k) + '\')">移除</button></td></tr>';
+                }).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function saveQQTier() {
+            const oidEl = document.getElementById('tier-openid');
+            const selEl = document.getElementById('tier-select');
+            const oid = (oidEl && oidEl.value || '').trim();
+            const tv = (selEl && selEl.value) || 'normal';
+            if (!oid) { alert('请填写 openid'); return; }
+            try {
+                const r = await apiPost('/api/qq/tiers', { openid: oid, tier: tv });
+                if (r && r.ok) { loadQQTiers(); }
+                else { alert('设置失败：' + ((r && r.error) || '未知')); }
+            } catch (e) { alert('请求失败：' + e); }
+        }
+
+        async function delQQTier(oid) {
+            try {
+                const r = await apiPost('/api/qq/tiers', { openid: oid, tier: 'normal' });
+                if (r && r.ok) { loadQQTiers(); }
+            } catch (e) { console.error(e); }
+        }
+
+        // ------------------------------------------------------------------
+        // AI Agent 巡检配置
+        // ------------------------------------------------------------------
+        async function loadAgentConfig() {
+            try {
+                const r = await apiGet('/api/agent/config');
+                const c = (r && r.config) || {};
+                const setC = function (id, v) { const e = document.getElementById(id); if (e) e.checked = !!v; };
+                const setV = function (id, v) { const e = document.getElementById(id); if (e) e.value = (v == null ? '' : v); };
+                setC('agent-enabled', !!c.enabled);
+                setC('agent-report', c.report_to_group !== false);
+                setC('agent-autofix', !!c.auto_fix);
+                setV('agent-interval', c.check_interval_min || 10);
+                setV('agent-grief', c.grief_event_threshold || 20);
+                setV('agent-tps', c.tps_warn != null ? c.tps_warn : 18);
+            } catch (e) { console.error(e); }
+        }
+
+        async function saveAgentConfig() {
+            const getC = function (id) { const e = document.getElementById(id); return !!(e && e.checked); };
+            const getV = function (id) { const e = document.getElementById(id); return e ? e.value : ''; };
+            const num = function (v, d) { const n = parseFloat(v); return isNaN(n) ? d : n; };
+            const body = {
+                enabled: getC('agent-enabled'),
+                report_to_group: getC('agent-report'),
+                auto_fix: getC('agent-autofix'),
+                check_interval_min: num(getV('agent-interval'), 10),
+                grief_event_threshold: num(getV('agent-grief'), 20),
+                tps_warn: num(getV('agent-tps'), 18)
+            };
+            try {
+                const r = await apiPost('/api/agent/config', body);
+                const st = document.getElementById('agent-save-status');
+                if (st) st.textContent = (r && r.ok) ? '已保存' : ('' + ((r && r.error) || '失败'));
+            } catch (e) {
+                const st = document.getElementById('agent-save-status');
+                if (st) st.textContent = '' + e;
+            }
         }
 
         async function loadBots() {
@@ -5864,18 +6451,18 @@
                 return '' +
                     '<div class="card">' +
                     '  <div class="row">' +
-                    '    <b class="break spacer">' + botsEsc(c.name) + (isPrimary ? ' <span class="text-warn">★ 主</span>' : '') + '</b>' +
+                    '    <b class="break spacer">' + botsEsc(c.name) + (isPrimary ? ' <span class="text-warn"><i class=gm-ico data-ic=star></i> 主</span>' : '') + '</b>' +
                     '    <span class="badge">' + (typeLabel[c.type] || c.type) + '</span>' +
-                    '    <span class="badge ' + botPurposeTone(c.purpose) + '" title="' + botsEsc(botPurposeHint(c.purpose)) + '">🎯 ' + botsEsc(c.purpose_label || botPurposeLabel(c.purpose)) + '</span>' +
-                    '    <span class="badge ' + botsBadgeTone(c) + '">● ' + badge + '</span>' +
+                    '    <span class="badge ' + botPurposeTone(c.purpose) + '" title="' + botsEsc(botPurposeHint(c.purpose)) + '"><i class=gm-ico data-ic=target></i> ' + botsEsc(c.purpose_label || botPurposeLabel(c.purpose)) + '</span>' +
+                    '    <span class="badge ' + botsBadgeTone(c) + '"><i class=gm-ico data-ic=dot></i> ' + badge + '</span>' +
                     '  </div>' +
                     '  <div class="hint-sm break">' + extra + '</div>' +
-                    '  <div class="hint-sm">互通: ' + (sync.qq_to_mc === false ? '群→服✘' : '群→服✓') + ' ' + (sync.mc_to_qq === false ? '服→群✘' : '服→群✓') + '</div>' +
+                    '  <div class="hint-sm">互通: ' + (sync.qq_to_mc === false ? '群<i class=gm-ico data-ic=arrow-r></i>服<i class=gm-ico data-ic=x></i>' : '群<i class=gm-ico data-ic=arrow-r></i>服<i class=gm-ico data-ic=check></i>') + ' ' + (sync.mc_to_qq === false ? '服<i class=gm-ico data-ic=arrow-r></i>群<i class=gm-ico data-ic=x></i>' : '服<i class=gm-ico data-ic=arrow-r></i>群<i class=gm-ico data-ic=check></i>') + '</div>' +
                     '  <div class="row mt">' +
                     '    <label class="ios" data-on="启用" data-off="禁用"><input type="checkbox"' + (c.enabled ? ' checked' : '') + ' onchange="botsToggle(' + jsArg(c.id) + ', this.checked)"><i></i> <span class="ios-text">' + (c.enabled ? '启用' : '禁用') + '</span></label>' +
                     '    <div class="spacer"></div>' +
-                    '    <button onclick="botsEdit(' + jsArg(c.id) + ')">✏️ 编辑</button>' +
-                    '    <button onclick="botsDelete(' + jsArg(c.id) + ', ' + jsArg(c.name || '') + ')" class="text-bad">🗑 删除</button>' +
+                    '    <button onclick="botsEdit(' + jsArg(c.id) + ')"><i class=gm-ico data-ic=edit></i> 编辑</button>' +
+                    '    <button onclick="botsDelete(' + jsArg(c.id) + ', ' + jsArg(c.name || '') + ')" class="text-bad"><i class=gm-ico data-ic=trash></i> 删除</button>' +
                     '  </div>' +
                     '</div>';
             }).join('');
@@ -5892,7 +6479,7 @@
             box.style.display = 'block';
             if (atype === 'qqofficial') {
                 box.innerHTML = '' +
-                    '<b class="text-strong">新建 QQ 官方机器人</b>' +
+                    '<b class="text-strong">新建 QQ 官方机器人<span class="help-q" data-help="创建后请在卡片「编辑」中填写群绑定（main_group）与管理员 QQ，启用后即可互通。" role="button" tabindex="0">?</span></b>' +
                     '<div class="modal-grid-2 mt-sm">' +
                     '  <div><label class="field-label">名称</label><input id="bots-c-name" placeholder="如 官方群服机器人" class="block-input"></div>' +
                     '  <div><label class="field-label">AppID</label><input id="bots-c-appid" placeholder="机器人 AppID" class="block-input"></div>' +
@@ -5904,13 +6491,13 @@
                     BOT_PURPOSES.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + ' —— ' + x[2] + '</option>'; }).join('') +
                     '</select></div>' +
                     '<div class="row mt">' +
-                    '  <button class="ok" onclick="botsCreateSubmit()">✓ 创建</button>' +
+                    '  <button class="ok" onclick="botsCreateSubmit()"><i class=gm-ico data-ic=check></i> 创建</button>' +
                     '  <button onclick="botsCreateClose()">取消</button>' +
                     '  <span class="hint-sm" id="bots-c-status"></span>' +
                     '</div>';
             } else {
                 box.innerHTML = '' +
-                    '<b class="text-strong">新建 WebSocket (OneBot v11) 机器人</b>' +
+                    '<b class="text-strong">新建 WebSocket (OneBot v11) 机器人<span class="help-q" data-help="创建后请在卡片「编辑」中填写群绑定（main_group）与管理员 QQ，启用后即可互通。" role="button" tabindex="0">?</span></b>' +
                     '<div class="modal-grid-2 mt-sm">' +
                     '  <div><label class="field-label">名称</label><input id="bots-c-name" placeholder="如 个人号机器人" class="block-input"></div>' +
                     '  <div><label class="field-label">连接方式</label><select id="bots-c-wstype" class="block-input"><option value="0">正向（面板连接 Go-CQHTTP）</option><option value="1">反向（面板监听）</option></select></div>' +
@@ -5923,9 +6510,9 @@
                     '<select id="bots-c-purpose" class="block-input">' +
                     BOT_PURPOSES.map(function (x) { return '<option value="' + x[0] + '">' + x[1] + ' —— ' + x[2] + '</option>'; }).join('') +
                     '</select></div>' +
-                    '<div class="hint-sm mt-sm">创建后请在卡片「编辑」中填写群绑定(main_group)与管理员QQ，启用后即可互通。</div>' +
+                    '' +
                     '<div class="row mt">' +
-                    '  <button class="ok" onclick="botsCreateSubmit()">✓ 创建</button>' +
+                    '  <button class="ok" onclick="botsCreateSubmit()"><i class=gm-ico data-ic=check></i> 创建</button>' +
                     '  <button onclick="botsCreateClose()">取消</button>' +
                     '  <span class="hint-sm" id="bots-c-status"></span>' +
                     '</div>';
@@ -5955,14 +6542,14 @@
             try {
                 const r = await apiPost('/api/bots/create', patch);
                 if (r && r.ok) {
-                    if (st) st.textContent = '✓ 已创建';
+                    if (st) st.textContent = '已创建';
                     botsCreateClose();
                     botsStatus('已创建机器人');
                     loadBots();
                 } else {
-                    if (st) st.textContent = '✗ ' + ((r && r.error) || '创建失败');
+                    if (st) st.textContent = '' + ((r && r.error) || '创建失败');
                 }
-            } catch (e) { if (st) st.textContent = '✗ ' + e; }
+            } catch (e) { if (st) st.textContent = '' + e; }
         }
 
         async function botsToggle(id, enabled) {
@@ -5983,7 +6570,7 @@
         }
 
         // ============ 机器人编辑弹窗（单「编辑」按钮完整配置） ============
-        //: 机器人用途三选一。★ 这里的取值必须与后端 connections.py 的
+        //: 机器人用途三选一。<i class=gm-ico data-ic=star></i> 这里的取值必须与后端 connections.py 的
         //: PURPOSE_* 常量严格一致 —— 后端校验器对未知值会**直接报错**，
         //: 用户一保存就会看到"用途只能为 bridge/broadcast/reserved"。
         //: 所以下面这份表是硬编码的，不从接口动态拉（接口那份是给渲染用的，
@@ -5994,7 +6581,7 @@
             ['reserved', '空着（等第三方插件）', '本插件不主动使用，留给第三方插件']
         ];
 
-        //: 用途 → 中文短标签（列表卡片上显示的小徽章）
+        //: 用途 <i class=gm-ico data-ic=arrow-r></i> 中文短标签（列表卡片上显示的小徽章）
         function botPurposeLabel(p) {
             for (var i = 0; i < BOT_PURPOSES.length; i++) {
                 if (BOT_PURPOSES[i][0] === String(p || '')) return BOT_PURPOSES[i][1];
@@ -6002,7 +6589,7 @@
             return '群服互通';
         }
 
-        //: 用途 → 悬停说明（卡片徽章的 title）
+        //: 用途 <i class=gm-ico data-ic=arrow-r></i> 悬停说明（卡片徽章的 title）
         function botPurposeHint(p) {
             for (var i = 0; i < BOT_PURPOSES.length; i++) {
                 if (BOT_PURPOSES[i][0] === String(p || '')) return BOT_PURPOSES[i][2];
@@ -6010,7 +6597,7 @@
             return '';
         }
 
-        //: 用途 → 徽章色调。bridge 是普通功能，用默认色；
+        //: 用途 <i class=gm-ico data-ic=arrow-r></i> 徽章色调。bridge 是普通功能，用默认色；
         //: broadcast 用醒目色（它会往外发 AI 结论，属于"主动说话"）；
         //: reserved 用灰调（明示"这个机器人现在没什么用"）。
         function botPurposeTone(p) {
@@ -6021,8 +6608,8 @@
         }
 
         var BOT_SYNC_FIELDS = [
-            {k:'qq_to_mc', t:'bool', l:'群→服 互通'},
-            {k:'mc_to_qq', t:'bool', l:'服→群 互通'},
+            {k:'qq_to_mc', t:'bool', l:'群<i class=gm-ico data-ic=arrow-r></i>服 互通'},
+            {k:'mc_to_qq', t:'bool', l:'服<i class=gm-ico data-ic=arrow-r></i>群 互通'},
             {k:'join_to_qq', t:'bool', l:'进服播报到群'},
             {k:'leave_to_qq', t:'bool', l:'退服播报到群'},
             {k:'notify_start', t:'bool', l:'服务器上线播报'},
@@ -6034,8 +6621,8 @@
             // 「%s=群名/名字」，两种可能混在一起说，导致用户配出来的
             // 格式显示成一串 openid（第一个位置填的是群名，取不到群名
             // 时又回退成了 openid）。
-            {k:'qq_to_mc_format', t:'text', l:'群→服 格式（%s=昵称, %s=群名, %s=内容）'},
-            {k:'mc_to_qq_format', t:'text', l:'服→群 格式（%s=名字, %s=消息）'},
+            {k:'qq_to_mc_format', t:'text', l:'群<i class=gm-ico data-ic=arrow-r></i>服 格式（%s=昵称, %s=群名, %s=内容）'},
+            {k:'mc_to_qq_format', t:'text', l:'服<i class=gm-ico data-ic=arrow-r></i>群 格式（%s=名字, %s=消息）'},
             {k:'join_format', t:'text', l:'进服播报格式（%s=名字）'},
             {k:'leave_format', t:'text', l:'退服播报格式（%s=名字）'},
             {k:'banned_words', t:'wordlist', l:'违禁词（每行一个，命中即不转发到游戏）'},
@@ -6135,7 +6722,7 @@
             mask.innerHTML = '<div class="modal">' +
                 '<div class="row mb">' +
                 '<b class="modal-title">' + title + '</b>' +
-                '<button onclick="botEditClose()" class="btn-ghost">✕ 关闭</button></div>' +
+                '<button onclick="botEditClose()" class="btn-ghost"><i class=gm-ico data-ic=x></i> 关闭</button></div>' +
                 bodyHtml + '</div>';
             mask.addEventListener('click', function (e) { if (e.target === mask) botEditClose(); });
             document.body.appendChild(mask);
@@ -6171,7 +6758,7 @@
             var groupsBlock = card.type === 'qqofficial'
                 ? '<div class="divider-top">' +
                     '<div class="row mb-sm">' +
-                    '<b class="status">👥 群管理（官方绑定码）</b>' +
+                    '<b class="status"><i class=gm-ico data-ic=users></i> 群管理（官方绑定码）</b>' +
                     '<button onclick="qqNewGroupModal()">＋ 生成绑定码</button>' +
                     '<span id="qq-newgroup-status" class="hint-sm"></span></div>' +
                     '<div id="qq-group-list"><p class="hint">正在读取群列表…</p></div></div>'
@@ -6179,22 +6766,20 @@
 
             var bodyHtml =
                 bfBool('启用网关', pf + '-enabled', !!card.enabled) +
-                '<div class="modal-section-title">🎯 用途</div>' +
+                '<div class="modal-section-title"><i class=gm-ico data-ic=target></i> 用途<span class="help-q" data-help="<b>群服互通</b>：游戏与群之间转发消息。<br><b>AI 播报</b>：只接收 AI 分析结论，<b>不转发玩家消息</b>。<br><b>空着</b>：本插件不主动使用，留给第三方插件调用。" role="button" tabindex="0">?</span></div>' +
                 bfSelect('这个机器人用来做什么', pf + '-purpose',
                          card.purpose || 'bridge', BOT_PURPOSES.map(function (x) {
                              return [x[0], x[1] + ' —— ' + x[2]];
                          })) +
-                '<div class="hint-sm mb-sm">群服互通：游戏与群之间转发消息。' +
-                'AI 播报：只接收 AI 分析结论，<b>不转发玩家消息</b>。' +
-                '空着：本插件不主动使用，留给第三方插件调用。</div>' +
-                '<div class="modal-section-title">⚙ 连接设置</div>' +
+                '' +
+                '<div class="modal-section-title"><i class=gm-ico data-ic=gear></i> 连接设置</div>' +
                 bfInput('名称', pf + '-name', card.name) +
                 conn +
-                '<div class="modal-section-title">🔁 群服互通设置</div>' +
+                '<div class="modal-section-title"><i class=gm-ico data-ic=refresh></i> 群服互通设置</div>' +
                 '<div class="modal-grid-2">' + bfSyncHtml(card, pf) + '</div>' +
                 groupsBlock +
                 '<div class="row mt">' +
-                '<button class="ok" onclick="botsEditSave(' + jsArg(card.id) + ', ' + jsArg(card.type) + ', ' + jsArg(pf) + ')">💾 保存</button>' +
+                '<button class="ok" onclick="botsEditSave(' + jsArg(card.id) + ', ' + jsArg(card.type) + ', ' + jsArg(pf) + ')"><i class=gm-ico data-ic=disk></i> 保存</button>' +
                 '<button class="text-bad" onclick="botEditClose()">取消</button>' +
                 '<span id="' + pf + '-status" class="hint"></span></div>';
 
@@ -6255,10 +6840,10 @@
                     botEditClose();
                     loadBots();
                 } else {
-                    if (st) { st.textContent = '✗ ' + ((r && r.error) || '保存失败'); st.className = 'status text-bad'; }
+                    if (st) { st.textContent = '' + ((r && r.error) || '保存失败'); st.className = 'status text-bad'; }
                 }
             } catch (e) {
-                if (st) { st.textContent = '✗ ' + e; st.className = 'status text-bad'; }
+                if (st) { st.textContent = '' + e; st.className = 'status text-bad'; }
             }
         }
 
@@ -6287,26 +6872,69 @@
             gmLoadAuth().then(function () {
                 if (!gmSelectInitialSection()) return;
                 refreshPlayers().then(loadScoreboards).catch(function (e) { console.error(e); });
-                loadGamerules();
-                loadBans();
-                loadWhitelist();
-                loadProperties();
-                loadWorlds();
-                loadScoreboardsFull();
-                loadToolsConfig();
-                loadGameTools();
-                // 模组页首次进来也**不自动扫**：等用户点刷新。
-                // 这里只把两栏置成「未扫描」提示，避免页面空白让人以为坏了。
-                renderMods();
+                // ★ 其余板块的数据**推迟到首屏空闲再拉**。
+                //   原来这里一口气发 9 个请求，每个都要 JSON 解析 + DOM 渲染，
+                //   而用户刚打开面板时其实只在看「服务器信息」。
+                //   这 9 个请求会和首屏渲染抢主线程，表现就是"打开后要卡半秒"。
+                //   放到空闲回调里之后：
+                //     · 首屏只等它真正需要的那两个请求；
+                //     · 切到别的板块时 showSection 还会再拉一次，所以
+                //       即使这次因繁忙被跳过，也不会留下空白页。
+                var _deferredLoads = function () {
+                    try {
+                        loadGamerules();
+                        loadBans();
+                        loadWhitelist();
+                        loadProperties();
+                        loadWorlds();
+                        loadScoreboardsFull();
+                        loadToolsConfig();
+                        loadGameTools();
+                        // 模组页首次进来也**不自动扫**：等用户点刷新。
+                        // 这里只把两栏置成「未扫描」提示，避免空白让人以为坏了。
+                        renderMods();
+                    } catch (e) { console.error(e); }
+                };
+                if (window.requestIdleCallback) {
+                    requestIdleCallback(_deferredLoads, { timeout: 3000 });
+                } else {
+                    setTimeout(_deferredLoads, 600);
+                }
             });
             // 轮询改为按可见板块启停：只在对应板块显示时才拉数据。
             // 「在线玩家 / 系统状态 / 玩家详情 / 聊天日志」现已合并进 sec-players，
             // 所以这些轮询统一挂在 sec-players 下，一起启停。
-            var _p5 = refreshPlayers;  _p5.gmInterval = 5000; gmRegisterPoll('sec-players', _p5);
-            var _g3 = updateGauges;    _g3.gmInterval = 3000; gmRegisterPoll('sec-players', _g3);
-            var _m2 = pollMessages;    _m2.gmInterval = 2000; gmRegisterPoll('sec-players', _m2);
-            var _c2 = pollConsole;     _c2.gmInterval = 2000; gmRegisterPoll('sec-players', _c2);
-            var _c2b = pollConsole;    _c2b.gmInterval = 2000; gmRegisterPoll('sec-console', _c2b);
+            // ★ 合并成一个定时器驱动：原来四个 setInterval 会在同一刻
+            //   连发四个请求、连续触发四次 DOM 写入（聊天 + 控制台 +
+            //   玩家 + 仪表盘）。合成一个 tick 后，请求与布局都错峰进行，
+            //   主线程每次只处理一件事，拖动页面时不会一顿一顿的。
+            // ★ 频率也各自按其"信息的自然节奏"定，不再一律 2 秒：
+            //   · 聊天 / 控制台：3 秒（再快人眼也看不出差别）
+            //   · 仪表盘：6 秒（CPU/内存的短时抖动没有观察价值）
+            //   · 在线玩家：6 秒（进出服是低频事件）
+            var _playersTick = 0;
+            var _secPlayersPoll = function () {
+                _playersTick++;
+                // 只有偶数次 tick（即每 6 秒）才刷玩家与仪表盘
+                if (_playersTick % 2 === 0) {
+                    refreshPlayers();
+                    updateGauges();
+                }
+                // 错峰 150ms / 300ms：避免同一 tick 里三个响应同时回来
+                // 抢着改 DOM。
+                setTimeout(function () {
+                    pollMessages('message-panel', 'msg-autoscroll');
+                }, 150);
+                setTimeout(function () {
+                    pollConsole('console-panel', 'console-autoscroll');
+                }, 300);
+            };
+            _secPlayersPoll.gmInterval = 3000;
+            gmRegisterPoll('sec-players', _secPlayersPoll);
+            // 单独看控制台板块时只刷控制台，不必连带把聊天也拉一遍。
+            var _c2b = pollConsole;    _c2b.gmInterval = 3000; gmRegisterPoll('sec-console', _c2b);
+            // 面板对话：先摆上空态提示，别让框里是一块空白
+            try { aiWebEmpty(); } catch (e) { console.error(e); }
             // 区块日志：回档进行中需要看进度，10s 一次足够（回档本身按批推进，
             // 太快反而多出一堆无意义的请求）。
             var _rg = regionRefresh;   _rg.gmInterval = 10000; gmRegisterPoll('sec-region', _rg);
@@ -6349,10 +6977,10 @@
         // ================================================================
         // QQ 官方扫码登录
         //
-        // 流程：获取二维码 → 用内嵌的 QRCode 库把 connect.html 打印成图
-        //       → 每 2 秒轮询一次 → created 时刷新卡片列表。
+        // 流程：获取二维码 <i class=gm-ico data-ic=arrow-r></i> 用内嵌的 QRCode 库把 connect.html 打印成图
+        //       <i class=gm-ico data-ic=arrow-r></i> 每 2 秒轮询一次 <i class=gm-ico data-ic=arrow-r></i> created 时刷新卡片列表。
         //
-        // ⚠ 后端**不会**返回 AppSecret 明文，只给长度和掩码。所以这里的
+        // <i class=gm-ico data-ic=warn></i> 后端**不会**返回 AppSecret 明文，只给长度和掩码。所以这里的
         //   任何提示都只显示掩码 —— 别想着"顺手把它显示出来方便用户复制"，
         //   那等于把凭据刻在浏览器历史和截图里。
         // ================================================================
@@ -6489,9 +7117,9 @@
                 if (r.status === 'created') {
                     qrStopPoll();
                     var imgBox = el('qr-img-box');
-                    if (imgBox) imgBox.innerHTML = '<p class="hint text-ok">✅ 授权成功</p>';
+                    if (imgBox) imgBox.innerHTML = '<p class="hint text-ok"><i class=gm-ico data-ic=check></i> 授权成功</p>';
                     // 只显示掩码与长度 —— 明文永远不出现在页面上
-                    qrSetStatus('✅ 绑定成功！AppID ' + (r.appid || '') +
+                    qrSetStatus('<i class=gm-ico data-ic=check></i> 绑定成功！AppID ' + (r.appid || '') +
                                 '，AppSecret ' + (r.secret_mask || '') +
                                 '（' + (r.secret_len || 0) + ' 位）已写入卡片。' +
                                 (r.message ? ' ' + r.message : ''), 'text-ok');
@@ -6582,9 +7210,9 @@
                     conds +
                     '  <div class="row mt-sm">' + acts + '</div>' +
                     '  <div class="row mt">' +
-                    '    <button onclick="regexToggle(' + idx + ')">' + (rule.enabled ? '⏸ 禁用' : '▶ 启用') + '</button>' +
-                    '    <button onclick="regexEdit(' + idx + ')">✏️ 编辑</button>' +
-                    '    <button class="text-bad" onclick="regexDelete(' + idx + ')">🗑 删除</button>' +
+                    '    <button onclick="regexToggle(' + idx + ')">' + (rule.enabled ? '<i class=gm-ico data-ic=pause></i> 禁用' : '<i class=gm-ico data-ic=tri-r></i> 启用') + '</button>' +
+                    '    <button onclick="regexEdit(' + idx + ')"><i class=gm-ico data-ic=edit></i> 编辑</button>' +
+                    '    <button class="text-bad" onclick="regexDelete(' + idx + ')"><i class=gm-ico data-ic=trash></i> 删除</button>' +
                     '  </div>' +
                     '  <div id="regex-edit-' + idx + '" class="hidden mt"></div>' +
                     '</div>';
@@ -6756,10 +7384,10 @@
             try {
                 var r = await apiPost('/api/qqbot/regex/test', payload);
                 if (!r) { if (out) out.textContent = '无响应'; return; }
-                if (!r.ok) { if (out) out.textContent = '❌ ' + (r.error || '测试失败'); return; }
+                if (!r.ok) { if (out) out.textContent = '' + (r.error || '测试失败'); return; }
                 if (!r.matched) { if (out) out.textContent = '未命中'; return; }
                 if (out) {
-                    out.textContent = '✅ 命中\n完整匹配: ' + (r.groups[0] || '') +
+                    out.textContent = '命中\n完整匹配: ' + (r.groups[0] || '') +
                         (r.groups.length > 1
                             ? '\n捕获组:\n' + r.groups.slice(1).map(function (g, i) {
                                 return '  $' + (i + 1) + ' = ' + g;
@@ -6767,7 +7395,7 @@
                             : '');
                 }
             } catch (e) {
-                if (out) out.textContent = '❌ ' + e;
+                if (out) out.textContent = '' + e;
             }
         }
 
